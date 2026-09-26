@@ -386,6 +386,15 @@ async def _upscale(raw: Path, cfg: dict[str, Any]) -> Path:
     return out
 
 
+def _drop_legacy_descreen() -> None:
+    """Delete files of the retired FFT notch descreen ("<key>-dsnormal*.png" etc.): they caused streaks."""
+    folder = image_cache() / "scryfall"
+    if folder.is_dir():
+        for strength in ("light", "normal", "strong"):
+            for f in folder.glob(f"*-ds{strength}*"):
+                f.unlink(missing_ok=True)
+
+
 def _descreen_file(src: Path, dst: Path, strength: str) -> None:
     from PIL import Image
 
@@ -406,7 +415,7 @@ async def _fetch(option: dict[str, Any], *, upscale: bool = False, cfg: dict[str
     if upscale:
         cfg = cfg or settings_mod.load()
         strength = cfg.get("descreen") or "off"
-        ds = "" if strength == "off" else f"-ds{strength}"
+        ds = imaging.descreen_tag(strength)
         ready = raw.with_name(f"{raw.stem}-bleed{UPSCALE_DPI}-{cfg['upscale_model']}{ds}.jpg")
         if not ready.exists():
             source = raw
@@ -498,6 +507,7 @@ async def prepare(
                 f"Real-ESRGAN-Modell '{cfg['upscale_model']}' fehlt in {exe.parent / 'models'} "
                 f"(vorhanden: {', '.join(models) or 'keine'}). Der Ordner models/ muss neben der exe liegen."
             )
+        _drop_legacy_descreen()
     stock = stock or cfg["stock"]
     foil = bool(cfg["foil"] if foil is None else foil)
     if stock not in STOCKS:

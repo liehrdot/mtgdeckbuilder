@@ -139,6 +139,14 @@ def make_pdf(images: Iterable[Path], dst: Path, *, paper: str = "A4", cut_marks:
 # rejected – its spectral holes made the upscaler invent horizontal streaks and crumbly texture.
 
 DESCREEN_SIGMA = {"light": 0.45, "normal": 0.6, "strong": 0.8}
+# Part of every cache file name derived from a descreened scan. Bump it whenever the method changes,
+# otherwise old results are reused (the notch-filter files were cached as "-dsnormal" as well).
+DESCREEN_VERSION = "g1"
+
+
+def descreen_tag(strength: str | None) -> str:
+    """Cache-name suffix for a descreen setting ("" when off), e.g. ``-dsg1-normal``."""
+    return "" if not strength or strength == "off" else f"-ds{DESCREEN_VERSION}-{strength}"
 
 
 def descreen(img: Image.Image, strength: str = "normal") -> Image.Image:

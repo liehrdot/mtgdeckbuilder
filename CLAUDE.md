@@ -89,7 +89,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `descreen()` is a slight Gaussian pre-blur (σ 0.45 / 0.6 / 0.8). It was chosen with real realesrgan-x4plus runs.
   - An FFT notch filter was tried and rejected: it caused streaks and invented texture.
   - Without it, the AI turns the ~3 px halftone into visible lines.
-  - Cache names carry `-ds<strength>`.
+  - Cache names carry `imaging.descreen_tag()` (`-ds<DESCREEN_VERSION>-<strength>`). Bump `DESCREEN_VERSION` whenever the method changes, otherwise stale results get reused. `prepare(upscale=True)` deletes the retired notch-era `-ds<strength>` files.
   - `export_pdf()` builds home-printing sheets.
   - `autofill_command()` passes `--directory --browser --site --auto-save --no-image-post-processing`. Keep exactly one XML per folder, otherwise the tool prompts.
   - The tool shows InquirerPy arrow-key menus ("How would you like to upload this order?"). They need a real console, so plain pipes crash with `NoConsoleScreenBufferError`.

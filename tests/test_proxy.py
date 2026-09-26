@@ -413,14 +413,18 @@ def test_descreen_keeps_transparent_corners():
 
 async def test_upscale_uses_descreened_input(tmp_path):
     assert settings.load()["descreen"] == "normal"  # default within the (opt-in) upscaling
+    legacy = proxy.image_cache() / "scryfall" / "0123456789abcdef-bleed600-realesrgan-x4plus-dsnormal.jpg"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_bytes(b"notch era")  # same name as before the method change -> must not be reused
     exe = _fake_esrgan(tmp_path)
     exe.write_text(exe.read_text().replace('with Image.open(args["-i"]) as im:',
                                            'open(args["-o"] + ".src", "w").write(args["-i"])\nwith Image.open(args["-i"]) as im:'))
     r = await proxy.prepare(DECK, upscale=True)
     info = proxy.load_prepared("meren-print")
     assert info["descreen"] == "normal"
-    forest_up = sorted(Path(info["faces"]["Forest"]["cache"]).parent.glob("*-dsnormal-x4-*.png.src"))
-    assert forest_up and forest_up[0].read_text().endswith("-dsnormal.png")
+    assert not legacy.exists()
+    forest_up = sorted(Path(info["faces"]["Forest"]["cache"]).parent.glob(f"*-ds{imaging.DESCREEN_VERSION}-normal-x4-*.png.src"))
+    assert forest_up and forest_up[0].read_text().endswith(f"-ds{imaging.DESCREEN_VERSION}-normal.png")
     assert "Druckraster entfernt: normal" in " ".join(r["warnings"])
 
     settings.update({"descreen": "off"})
