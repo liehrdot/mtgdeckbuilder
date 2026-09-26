@@ -621,6 +621,7 @@ def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
         **cfg,
         "autofill_found": str(found) if found else None,
         "upscaler_found": str(upscaler) if upscaler else None,
+        "upscale_models": proxy.upscale_models(upscaler) or ["realesrgan-x4plus"],
         "stocks": proxy.STOCKS,
         "platform": os.name,
     }

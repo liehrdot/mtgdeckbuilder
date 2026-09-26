@@ -117,8 +117,8 @@ lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles dav
    **Optional: KI-Hochskalierung (Opt-in, standardmäßig aus).** Mit Häkchen „KI-Hochskalierung“ im
    Druckstudio werden Scryfall-Scans mit [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
    (ncnn-vulkan, kostenlos) vierfach hochgerechnet und mit 600 statt 300 DPI aufbereitet – Text und
-   Linien werden deutlich schärfer. Einrichtung: `realesrgan-ncnn-vulkan` von den
-   [Releases](https://github.com/xinntao/Real-ESRGAN/releases) für dein System herunterladen und nach
+   Linien werden deutlich schärfer. Einrichtung: `realesrgan-ncnn-vulkan-20220424-windows.zip` (bzw. `-ubuntu`/`-macos`) aus dem
+   [Release v0.2.5.0](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) herunterladen und nach
    `tools/realesrgan/` entpacken (der Ordner `models/` muss daneben liegen) oder den Pfad in den
    Einstellungen eintragen. Benötigt eine Vulkan-fähige Grafikkarte (integrierte Grafik reicht), dauert je
    nach GPU ein bis wenige Sekunden pro Karte; Ergebnisse werden gecacht. MPC-Autofill-Scans werden nie

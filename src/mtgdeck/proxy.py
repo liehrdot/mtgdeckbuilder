@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -323,7 +324,12 @@ def _cache_file(option: dict[str, Any]) -> Path:
 # --- optional AI upscaling (Real-ESRGAN, opt-in) ------------------------------------------------
 
 UPSCALE_DPI = 600  # target resolution of upscaled Scryfall scans
-_upscale_lock = asyncio.Lock()  # one GPU job at a time
+_GPU_ERRORS = ("vkCreateInstance failed", "invalid gpu device", "vkCreateDevice failed", "no vulkan")
+
+
+class UpscaleError(RuntimeError):
+    pass
+_upscale_lock = threading.Lock()  # one GPU job at a time (works across event loops/threads)
 
 
 def find_upscaler(cfg: dict[str, Any] | None = None) -> Path | None:
@@ -339,6 +345,14 @@ def find_upscaler(cfg: dict[str, Any] | None = None) -> Path | None:
     return None
 
 
+def upscale_models(exe: Path | None) -> list[str]:
+    """4x models shipped next to the tool (the official zip has realesrgan-x4plus and -x4plus-anime)."""
+    if exe is None or not (exe.parent / "models").is_dir():
+        return []
+    names = sorted(p.stem for p in (exe.parent / "models").glob("*.param"))
+    return [n for n in names if "x4plus" in n and (exe.parent / "models" / f"{n}.bin").exists()]
+
+
 def upscale_command(exe: Path, src: Path, dst: Path, model: str) -> list[str]:
     cmd = [sys.executable, str(exe)] if exe.suffix == ".py" else [str(exe)]
     # x4plus models only support 4x; the model folder has to be named "models" (checked by the tool)
@@ -352,14 +366,22 @@ async def _upscale(raw: Path, cfg: dict[str, Any]) -> Path:
     out = raw.with_name(f"{raw.stem}-x4-{cfg['upscale_model']}.png")
     if out.exists() and out.stat().st_size > 0:
         return out
-    async with _upscale_lock:
-        proc = await asyncio.to_thread(
-            subprocess.run, upscale_command(exe, raw, out, cfg["upscale_model"]),
-            capture_output=True, text=True, timeout=600,
-        )  # fmt: skip
+    def run() -> subprocess.CompletedProcess[str]:
+        with _upscale_lock:
+            return subprocess.run(
+                upscale_command(exe, raw, out, cfg["upscale_model"]), capture_output=True, text=True, timeout=600
+            )
+
+    proc = await asyncio.to_thread(run)
     if proc.returncode != 0 or not out.exists():
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or ["unbekannter Fehler"]
-        raise RuntimeError(f"Real-ESRGAN fehlgeschlagen: {detail[0]}")
+        output = f"{proc.stderr or ''}\n{proc.stdout or ''}"
+        if any(e.lower() in output.lower() for e in _GPU_ERRORS):
+            raise UpscaleError(
+                "Real-ESRGAN findet keine Vulkan-fähige Grafikkarte (vkCreateInstance / invalid gpu device). "
+                "Grafiktreiber aktualisieren oder die KI-Hochskalierung deaktivieren."
+            )
+        detail = output.strip().splitlines()[-1:] or ["unbekannter Fehler"]
+        raise UpscaleError(f"Real-ESRGAN fehlgeschlagen: {detail[0]}")
     return out
 
 
@@ -377,7 +399,7 @@ async def _fetch(option: dict[str, Any], *, upscale: bool = False, cfg: dict[str
         cfg = cfg or settings_mod.load()
         ready = raw.with_name(f"{raw.stem}-bleed{UPSCALE_DPI}-{cfg['upscale_model']}.jpg")
         if not ready.exists():
-            big = await _upscale(raw, cfg)
+            big = await _upscale(raw, cfg)  # UpscaleError -> caller falls back to 300 DPI
             await asyncio.to_thread(imaging.add_bleed, big, ready, UPSCALE_DPI)
         return ready
     ready = raw.with_name(raw.stem + "-bleed.jpg")
@@ -446,12 +468,21 @@ async def prepare(
     """
     cfg = settings_mod.load()
     upscale = bool(cfg.get("upscale") if upscale is None else upscale)
-    if upscale and find_upscaler(cfg) is None:
-        raise ValueError(
-            "KI-Hochskalierung ist aktiviert, aber Real-ESRGAN wurde nicht gefunden. Lade "
-            "realesrgan-ncnn-vulkan (https://github.com/xinntao/Real-ESRGAN/releases) herunter, entpacke es nach "
-            "tools/realesrgan/ oder trage den Pfad in den Einstellungen ein – oder deaktiviere die Option."
-        )
+    if upscale:
+        exe = find_upscaler(cfg)
+        if exe is None:
+            raise ValueError(
+                "KI-Hochskalierung ist aktiviert, aber Real-ESRGAN wurde nicht gefunden. Lade "
+                "realesrgan-ncnn-vulkan-20220424-windows.zip (bzw. -ubuntu/-macos) von "
+                "https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0 herunter, entpacke es nach "
+                "tools/realesrgan/ oder trage den Pfad in den Einstellungen ein – oder deaktiviere die Option."
+            )
+        models = upscale_models(exe)
+        if exe.suffix != ".py" and cfg["upscale_model"] not in models:
+            raise ValueError(
+                f"Real-ESRGAN-Modell '{cfg['upscale_model']}' fehlt in {exe.parent / 'models'} "
+                f"(vorhanden: {', '.join(models) or 'keine'}). Der Ordner models/ muss neben der exe liegen."
+            )
     stock = stock or cfg["stock"]
     foil = bool(cfg["foil"] if foil is None else foil)
     if stock not in STOCKS:
@@ -464,13 +495,18 @@ async def prepare(
     total, done = len(jobs), 0
     local: dict[str, Path] = {}
     errors: list[str] = []
+    upscale_failed: dict[str, list[str]] = {}  # error message -> cards kept at 300 DPI
     sem = asyncio.Semaphore(PARALLEL_DOWNLOADS)
 
     async def work(key: str, option: dict[str, Any]) -> None:
         nonlocal done
         async with sem:
             try:
-                local[key] = await _fetch(option, upscale=upscale, cfg=cfg)
+                try:
+                    local[key] = await _fetch(option, upscale=upscale, cfg=cfg)
+                except UpscaleError as exc:  # keep the card, just without AI upscaling
+                    upscale_failed.setdefault(str(exc), []).append(option.get("name") or "?")
+                    local[key] = await _fetch(option, upscale=False, cfg=cfg)
             except Exception as exc:
                 errors.append(f"{option.get('name')}: {exc}")
             done += 1
@@ -513,7 +549,11 @@ async def prepare(
 
     origins = [img["origin"] for img in jobs.values()]
     warnings = list(p["warnings"])
-    if "scryfall" in origins and upscale:
+    for message, names in upscale_failed.items():
+        warnings.append(f"{message} – {len(names)} Karte(n) stattdessen mit 300 DPI: {', '.join(sorted(names)[:8])}"
+                        + (" …" if len(names) > 8 else ""))  # fmt: skip
+    n_failed = sum(len(v) for v in upscale_failed.values())
+    if "scryfall" in origins and upscale and n_failed < origins.count("scryfall"):
         warnings.append(
             f"Scryfall-Scans wurden mit Real-ESRGAN ({cfg['upscale_model']}) auf {UPSCALE_DPI} DPI hochskaliert "
             "und mit Beschnitt-Rand versehen. Stichprobenartig prüfen – KI kann feine Details verfälschen."
@@ -533,7 +573,7 @@ async def prepare(
         "images_mpcfill": origins.count("mpcfill"),
         "images_scryfall": origins.count("scryfall"),
         "images_custom": sum(1 for img in jobs.values() if img.get("custom")),
-        "images_upscaled": origins.count("scryfall") if upscale else 0,
+        "images_upscaled": origins.count("scryfall") - n_failed if upscale else 0,
         "upscaled": upscale,
         "double_faced": [c["name"] for c in p["cards"] if c["back"]],
         "missing": sorted(missing),

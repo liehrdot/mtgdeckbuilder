@@ -212,7 +212,7 @@ args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 assert args["-s"] == "4" and args["-n"] in ("realesrgan-x4plus", "realesrnet-x4plus"), args
 assert args["-m"].endswith("models") and args["-f"] == "png", args
 if "fail" in open(__file__).read().split("#flags:")[-1]:
-    sys.exit("vkCreateInstance failed")
+    sys.exit("vkCreateInstance failed -9\\ninvalid gpu device")
 with Image.open(args["-i"]) as im:
     im.resize((im.width * 4, im.height * 4)).save(args["-o"])
 #flags:
@@ -254,10 +254,24 @@ async def test_upscaling_to_600_dpi(tmp_path):
     assert _forest_size(await proxy.prepare(DECK, upscale=False)) == (822, 1122)
 
 
-async def test_upscaler_failure_is_reported(tmp_path):
+async def test_upscaler_failure_falls_back_to_300_dpi(tmp_path):
     _fake_esrgan(tmp_path, fail=True)
     r = await proxy.prepare(DECK, upscale=True)
-    assert any("Real-ESRGAN fehlgeschlagen: vkCreateInstance failed" in e for e in r["errors"])
+    assert r["errors"] == [] and r["images_upscaled"] == 0
+    assert _forest_size(r) == (822, 1122)  # card kept, just not upscaled
+    gpu = [w for w in r["warnings"] if "Vulkan-fähige Grafikkarte" in w]
+    assert len(gpu) == 1 and "300 DPI" in gpu[0]  # one aggregated message, not one per card
+
+
+def test_upscale_models_from_folder(tmp_path):
+    exe = tmp_path / "realesrgan-ncnn-vulkan.exe"
+    exe.write_text("x")
+    assert proxy.upscale_models(exe) == []
+    (tmp_path / "models").mkdir()
+    for name in ("realesrgan-x4plus", "realesrgan-x4plus-anime", "realesr-animevideov3-x2"):
+        (tmp_path / "models" / f"{name}.param").write_text("")
+        (tmp_path / "models" / f"{name}.bin").write_text("")
+    assert proxy.upscale_models(exe) == ["realesrgan-x4plus", "realesrgan-x4plus-anime"]
 
 
 def test_find_upscaler_in_tools(tmp_path, monkeypatch):

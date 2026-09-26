@@ -462,7 +462,8 @@ async def proxy_settings(
     cfg = settings_mod.update(changes) if changes else settings_mod.load()
     found, upscaler = proxy.find_autofill(cfg), proxy.find_upscaler(cfg)
     return {**cfg, "autofill_found": str(found) if found else None,
-            "upscaler_found": str(upscaler) if upscaler else None, "stocks": proxy.STOCKS}  # fmt: skip
+            "upscaler_found": str(upscaler) if upscaler else None,
+            "upscale_models": proxy.upscale_models(upscaler), "stocks": proxy.STOCKS}  # fmt: skip
 
 
 @mcp.tool()

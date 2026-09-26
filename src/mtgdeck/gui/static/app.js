@@ -220,6 +220,8 @@ let appSettings = {};
 async function loadSettings() {
   appSettings = await api("/api/settings");
   const f = $("#settings-form").elements;
+  const MODEL_HINTS = { "realesrgan-x4plus": " (empfohlen)", "realesrgan-x4plus-anime": " (für Zeichnungen, glättet stärker)" };
+  f.upscale_model.innerHTML = appSettings.upscale_models.map((m) => `<option value="${esc(m)}">${esc(m + (MODEL_HINTS[m] || ""))}</option>`).join("");
   for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model"]) if (f[k]) f[k].value = appSettings[k] ?? "";
   f.upscale.checked = !!appSettings.upscale;
   $("#upscaler-status").innerHTML = appSettings.upscaler_found
