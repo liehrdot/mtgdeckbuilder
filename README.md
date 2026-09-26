@@ -1,0 +1,155 @@
+# MTG Commander Deckbuilder für Claude Code
+
+Du beschreibst in Claude Code, was du willst („Baue mir ein Meren-Deck, Bracket 3, max. 150 €“).
+Claude nutzt dann den Skill **`commander-deckbuilder`** und den MCP-Server **`mtg`**: Es recherchiert
+auf Scryfall, EDHREC und Commander Spellbook, baut ein 100-Karten-Deck, prüft Legalität und Bracket-Regeln
+und speichert das Ergebnis. Alternativ geht das Ganze auch über eine **Web-GUI**.
+
+```
+Du ──► Claude Code ──► Skill: commander-deckbuilder (Workflow, Bracket-Regeln, Deck-Template)
+                  └──► MCP-Server "mtg" ──► Scryfall API + Bulk-Daten (lokale SQLite-DB)
+                                        ├─► EDHREC (Empfehlungen, nach Bracket/Budget/Thema)
+                                        ├─► Commander Spellbook (Combos, Bracket-Schätzung)
+                                        └─► Archidekt / Moxfield (Deck-Import)
+GUI (Browser) ──► FastAPI ──► Claude Agent SDK ──► gleiche Skills + MCP-Server
+```
+
+## Voraussetzungen
+
+- [Claude Code](https://code.claude.com) (eingeloggt, oder `ANTHROPIC_API_KEY` gesetzt)
+- [uv](https://docs.astral.sh/uv/) (Python-Paketmanager; installiert Python 3.10+ bei Bedarf selbst)
+
+## Einrichtung
+
+```bash
+git clone https://github.com/liehrdot/mtgdeckbuilder.git
+cd mtgdeckbuilder
+uv sync --extra gui          # Abhängigkeiten inkl. GUI installieren
+```
+
+Beim ersten Start von `claude` in diesem Ordner fragt Claude Code, ob du dem Projekt und dem
+MCP-Server `mtg` aus `.mcp.json` vertraust – bestätigen. Kontrolle: `/mcp` in Claude Code.
+
+**Optional, empfohlen:** lokale Kartendatenbank laden (siehe unten). In Claude Code einfach
+„Aktualisiere die Kartendatenbank“ sagen oder in der GUI den Button „Scryfall-Bulk-Daten laden“ drücken.
+
+## Benutzung in Claude Code
+
+```bash
+claude
+```
+
+Dann z. B.:
+
+- `/commander-deckbuilder Meren of Clan Nel Toth, Bracket 2, Budget 100 €`
+- „Baue mir ein Atraxa-Superfriends-Deck für Bracket 4.“
+- „Ich will ein Bracket-3-Deck in Grixis mit Spells-Thema – schlag mir Commander vor.“
+- „Mach mein Deck `meren-aristocrats` billiger, max. 80 €.“
+- „Welches Bracket hat dieses Deck? https://archidekt.com/decks/123456“
+- Deutsche Kartennamen („Schwerter zu Pflugscharen“, „Sol-Ring“) funktionieren mit der lokalen DB.
+
+Fertige Decks landen in `decks/<name>.json` und `decks/<name>.txt`. Die `.txt` kannst du direkt in
+Moxfield, Archidekt oder ManaBox importieren.
+
+## Brackets
+
+| Bracket | Name | Game Changer | Mass Land Denial | Extra Turns | 2-Karten-Combos |
+|---|---|---|---|---|---|
+| 1 | Exhibition | 0 | nein | nein | nein |
+| 2 | Core | 0 | nein | wenige, nicht chainen | nein |
+| 3 | Upgraded | max. 3 | nein | wenige, nicht chainen | nicht früh im Spiel |
+| 4 | Optimized | beliebig | ja | ja | ja |
+| 5 | cEDH | beliebig | ja | ja | ja |
+
+Stand: WotC-Update vom 21.10.2025 (keine Tutor-Limits mehr) und Game-Changer-Update vom 09.02.2026.
+Die Game-Changer-Liste wird **live von Scryfall** (`is:gamechanger`) gelesen, nicht hart kodiert.
+`validate_deck` fragt zusätzlich Commander Spellbook nach einer Bracket-Schätzung und nach Combos.
+
+## Web-GUI
+
+```bash
+uv run mtg-gui              # → http://127.0.0.1:8765
+```
+
+- Commander mit Autovervollständigung (Scryfall), Bracket 1–5, Budget/Währung, Thema, Wünsche, Modell
+- „Deck bauen lassen“ startet Claude Code im Hintergrund (Claude Agent SDK); der Fortschritt
+  (Tool-Aufrufe, Zwischentexte) wird live angezeigt
+- Deckansicht: Prüfung (legal, Bracket, Game Changer, Combos …), Manakurve, Rollen, Preis,
+  Kartenbilder beim Hovern, Liste kopieren, „Überarbeiten lassen“ per Freitext
+- Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
+
+## Datenquellen & Zugänge
+
+Für keine der Quellen ist ein API-Key oder Account nötig.
+
+| Quelle | Zugang | Wofür |
+|---|---|---|
+| **Scryfall API** | offizielle REST-API, kein Key (User-Agent + Rate-Limits werden eingehalten) | Kartensuche, Preise, Legalität, Game Changer, Autocomplete |
+| **Scryfall Bulk Data** | tägliche `jsonl.gz`-Exporte über `/bulk-data` | lokale DB: **All Cards** (alle Drucke, alle Sprachen) + **Oracle Tags** (Tagger) |
+| **EDHREC** | öffentliche JSON-Dateien (`json.edhrec.com`), inoffiziell | Empfehlungen, Synergie, Themen, Average Deck – auch gefiltert nach Bracket und Budget |
+| **Commander Spellbook** | offizielle Backend-API, kein Key | Combos im Deck / fast im Deck, Bracket-Schätzung |
+| **Archidekt** | öffentliche Deck-API, kein Key | Decks importieren |
+| **Moxfield** | *keine* öffentliche API (Cloudflare, User-Agent-Whitelist) | Import nur „best effort“ – sonst Text-Export einfügen |
+
+Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
+
+### Lokale Kartendatenbank (Scryfall Bulk Data)
+
+`update_card_database` (bzw. der GUI-Button) lädt die Scryfall-Bulk-Files und baut daraus
+`~/.cache/mtgdeck/cards.sqlite`:
+
+- **All Cards** (≈ 375 MB komprimiert, Standard): wird zu einer Zeile pro Oracle-ID zusammengefasst.
+  Dadurch werden **Kartennamen in allen Sprachen** erkannt und als Preis gilt der
+  **günstigste Papier-Druck** – gut für Budget-Decks. Preise sind bis zu ~24 h alt (Schätzwert).
+- **Oracle Tags** (Scryfall Tagger): Kartenrollen wie `ramp`, `draw`, `removal`, `sweeper`, `tutor`
+  inkl. Tag-Hierarchie – deutlich bessere Rollenerkennung als Textmuster.
+- Aktualisierung höchstens wöchentlich (Spieldaten ändern sich selten); `force` erzwingt es.
+- Ohne lokale DB funktioniert alles weiterhin über die Live-API (langsamer, nur englische Namen).
+
+## MCP-Tools (Server `mtg`)
+
+| Tool | Zweck |
+|---|---|
+| `search_cards` | Live-Suche mit Scryfall-Syntax (`id<=bg otag:ramp -is:gamechanger eur<3`) |
+| `local_card_search` | schnelle Offline-Suche: Farbidentität, Tagger-Tags, Text, Typ, Preis, ohne Game Changer |
+| `get_cards` | Kartendaten zu Namen (auch deutsch) |
+| `find_commanders` | Commander-Suche |
+| `edhrec_recommendations` / `edhrec_average_deck` | EDHREC-Daten (optional Bracket, Thema, Budget) |
+| `find_combos` | Commander Spellbook: Combos im Deck / fehlt eine Karte |
+| `bracket_rules` / `game_changers` | Bracket-Regeln, aktuelle Game-Changer-Liste |
+| `validate_deck` | 100 Karten, Singleton, Farbidentität, Bannliste, Rollen-Richtwerte, Bracket-Prüfung |
+| `save_deck` / `load_deck` / `list_decks` / `export_deck` | Decks speichern, laden, exportieren |
+| `import_deck` | Archidekt-/Moxfield-URL importieren |
+| `card_db_status` / `update_card_database` | lokale Kartendatenbank |
+
+Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop):
+`{"command": "uv", "args": ["run", "--directory", "/pfad/zu/mtgdeckbuilder", "mtg-mcp"]}`.
+
+## Konfiguration (Umgebungsvariablen)
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `MTG_BULK_TYPE` | `all_cards` | `oracle_cards` (≈ 25 MB, schneller, nur Englisch) oder `default_cards` |
+| `MTG_BULK_MAX_AGE_DAYS` | `7` | ab wann die lokale DB als veraltet gilt |
+| `MTG_DATA_DIR` / `MTG_CACHE_DIR` | `~/.cache/mtgdeck` | Speicherort DB / HTTP-Cache |
+| `MTG_CACHE_TTL` | `86400` | HTTP-Cache-Dauer in Sekunden |
+| `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
+| `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
+| `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |
+
+## Grenzen
+
+- EDHREC hat keine offizielle API; ändert sich das JSON-Format, liefern die EDHREC-Tools Fehler, der Rest funktioniert weiter.
+- Die Bracket-Prüfung deckt die harten Regeln ab (Game Changer, MLD, Extra Turns, 2-Karten-Combos).
+  „Wie schnell/konsistent ist das Deck?“ bleibt eine Einschätzung – Claude begründet sie in der Deckbeschreibung.
+- Die Rollen-Zählung (Ramp, Draw, Removal …) ist heuristisch (Tagger-Tags bzw. Textmuster).
+
+## Entwicklung
+
+```bash
+uv sync --all-extras
+uv run pytest          # läuft komplett offline (HTTP wird gemockt)
+```
+
+Struktur: `src/mtgdeck/` (Python-Paket), `.claude/skills/commander-deckbuilder/` (Skill),
+`.mcp.json` (MCP-Registrierung), `tests/`.

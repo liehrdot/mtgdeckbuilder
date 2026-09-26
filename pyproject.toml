@@ -1,0 +1,36 @@
+[project]
+name = "mtgdeck"
+version = "0.1.0"
+description = "Commander deckbuilder for Claude Code: MCP server (Scryfall, EDHREC, Commander Spellbook, Archidekt), skills and a local web GUI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.2,<3",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+gui = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "claude-agent-sdk>=0.2",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+mtg-mcp = "mtgdeck.mcp_server:main"
+mtg-gui = "mtgdeck.gui.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtgdeck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

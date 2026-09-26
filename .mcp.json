@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mtg": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--quiet", "mtg-mcp"],
+      "env": {}
+    }
+  }
+}

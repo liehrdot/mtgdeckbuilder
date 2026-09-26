@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Commander Deckbuilder</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%273%27 y=%271%27 width=%2710%27 height=%2714%27 rx=%272%27 fill=%27%237a4fd6%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Commander Deckbuilder</h1>
+  <span class="sub">Claude Code · Scryfall · EDHREC · Commander Spellbook</span>
+</header>
+
+<main>
+  <aside id="sidebar">
+    <section class="panel">
+      <h2>Neues Deck</h2>
+      <form id="build-form" autocomplete="off">
+        <label>Commander
+          <input id="commander" name="commander" list="ac-commander" placeholder="z. B. Atraxa, Praetors' Voice" required>
+          <datalist id="ac-commander"></datalist>
+        </label>
+        <label>Partner / Background <span class="opt">(optional)</span>
+          <input id="partner" name="partner" list="ac-partner" placeholder="">
+          <datalist id="ac-partner"></datalist>
+        </label>
+        <div id="commander-preview"></div>
+
+        <fieldset>
+          <legend>Bracket</legend>
+          <div id="bracket-options" class="brackets"></div>
+          <p id="bracket-desc" class="hint"></p>
+        </fieldset>
+
+        <div class="row">
+          <label>Budget
+            <input name="budget" type="number" min="0" step="10" placeholder="unbegrenzt">
+          </label>
+          <label>Währung
+            <select name="currency"><option value="eur">EUR</option><option value="usd">USD</option></select>
+          </label>
+        </div>
+        <label>Strategie / Thema <span class="opt">(optional)</span>
+          <input name="strategy" placeholder="z. B. +1/+1 Counter, Superfriends, Tokens">
+        </label>
+        <label>Weitere Wünsche <span class="opt">(optional)</span>
+          <textarea name="notes" rows="3" placeholder="z. B. keine Infinite-Combos, Karten aus meiner Sammlung bevorzugen …"></textarea>
+        </label>
+        <label>Modell
+          <select name="model">
+            <option value="">Standard (Claude Code Einstellung)</option>
+            <option value="opus">Opus</option>
+            <option value="sonnet">Sonnet</option>
+            <option value="haiku">Haiku</option>
+          </select>
+        </label>
+        <button type="submit" id="build-btn">Deck bauen lassen</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Gespeicherte Decks</h2>
+      <ul id="deck-list" class="deck-list"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Kartendatenbank</h2>
+      <p id="db-status" class="hint">…</p>
+      <button id="db-btn" class="secondary">Scryfall-Bulk-Daten laden</button>
+    </section>
+  </aside>
+
+  <section id="content">
+    <section id="job" class="panel hidden">
+      <div class="job-head">
+        <h2 id="job-title">Claude baut …</h2>
+        <button id="cancel-btn" class="secondary">Abbrechen</button>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+
+    <section id="deck-view" class="hidden">
+      <div class="panel deck-head">
+        <div>
+          <h2 id="deck-name"></h2>
+          <p id="deck-meta" class="hint"></p>
+          <p id="deck-desc"></p>
+        </div>
+        <div class="deck-actions">
+          <button id="copy-btn" class="secondary">Liste kopieren</button>
+          <button id="validate-btn" class="secondary">Neu prüfen</button>
+          <button id="delete-btn" class="danger">Löschen</button>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel"><h3>Prüfung</h3><div id="validation"></div></div>
+        <div class="panel"><h3>Statistik</h3><div id="stats"></div></div>
+      </div>
+
+      <div class="panel">
+        <h3>Anpassen</h3>
+        <form id="refine-form" class="refine">
+          <input name="request" placeholder="z. B. Mehr Kartenzug, Budget unter 150 €, tausche die Board-Wipes …" required>
+          <button type="submit">Überarbeiten lassen</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>Karten</h3>
+        <div id="cards" class="cards"></div>
+      </div>
+    </section>
+
+    <section id="welcome" class="panel">
+      <h2>So funktioniert's</h2>
+      <ol>
+        <li>Commander eingeben (Autovervollständigung über Scryfall) und Bracket wählen.</li>
+        <li>„Deck bauen lassen“ startet Claude Code mit dem Skill <code>commander-deckbuilder</code>.
+            Claude recherchiert über den MCP-Server auf Scryfall, EDHREC und Commander Spellbook.</li>
+        <li>Das fertige Deck wird geprüft (Legalität, Farbidentität, Bracket-Regeln) und in <code>decks/</code> gespeichert.</li>
+        <li>Mit „Überarbeiten lassen“ kannst du Änderungen in natürlicher Sprache anfordern.</li>
+      </ol>
+    </section>
+  </section>
+</main>
+
+<div id="preview" class="card-preview hidden"><img alt=""></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
