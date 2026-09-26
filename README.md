@@ -101,6 +101,33 @@ In Claude Code: „Was hat sich seit Version 2 geändert?“, „Mach die letzte
 „Kopier das Deck als Bracket-2-Variante“ (Tools `list_deck_versions`, `compare_deck_versions`,
 `restore_deck_version`, `copy_deck`).
 
+## Proxies drucken: Druckstudio mit MPC Autofill
+
+Das [MPC Autofill](https://github.com/chilli-axe/mpc-autofill)-Programm (`autofill-windows.exe`)
+lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles davor selbst:
+
+1. **Bildauswahl** – pro Karte automatisch der beste Scan: eigene Wahl › MPC-Autofill-Community-Scan
+   (wenn ein Server eingestellt ist) › Scryfall. Im **Druckstudio** der GUI siehst du alle Karten als
+   Vorschau und kannst per Klick jede Karte gegen einen anderen Scan oder einen anderen Druck tauschen.
+   Doppelseitige Karten bekommen ihre Rückseite.
+2. **Druckdateien vorbereiten** – paralleler Download mit Cache (über alle Decks), Scryfall-Scans
+   bekommen automatisch Beschnitt-Rand (Bleed) und gefüllte Ecken, dazu ein Kartenrücken (eigener,
+   vom MPC-Autofill-Server oder ein schlichter). Ergebnis: `proxies/<deck>/<deck>.xml` mit nur
+   lokalen Dateien – das Autofill-Programm muss nichts mehr herunterladen oder umrechnen.
+3. **PDF zum Selbstdrucken** – direkt im Deckbuilder (ohne exe): A4/Letter, 3 × 3 Karten à 63 × 88 mm,
+   Schnittmarken, optional mit DFC-Rückseiten.
+4. **An MakePlayingCards senden** – startet das Autofill-Programm mit passenden Optionen. Seine
+   Ausgabe erscheint live in der GUI, Rückfragen („Enter drücken“) beantwortest du dort
+   (oder Häkchen „eigenes Fenster“). Login und Upload laufen im sich öffnenden Browser.
+
+Einrichtung: `autofill-windows.exe` in den Ordner `tools/` legen (oder Pfad unter „Einstellungen“),
+optional die MPC-Autofill-Server-URL eintragen (die du auf mpcfill.com verwendest) und einen eigenen
+Kartenrücken. Die `order.xml` lässt sich auch auf mpcfill.com importieren.
+
+In Claude Code: „Druck mir das Deck als Proxies“, „Mach ein PDF zum Selbstdrucken“,
+„Schick es an MakePlayingCards“ (Tools `create_proxy_order`, `export_proxy_pdf`,
+`launch_proxy_tool`, `proxy_settings`).
+
 ## Commander finden, Proxy-Decks, Blacklist
 
 - **Commander finden:** Beschreibe frei, was du spielen willst (Farben, Kreaturtypen, Mechaniken,
@@ -178,6 +205,8 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
 | `restore_deck_version` / `copy_deck` | alte Version wiederherstellen, Deck (oder alte Version) kopieren |
+| `create_proxy_order` / `export_proxy_pdf` | Proxy-Druckdateien (MPC-Autofill-XML + Bilder), PDF zum Selbstdrucken |
+| `launch_proxy_tool` / `proxy_settings` | MPC-Autofill-Programm starten, Proxy-Einstellungen |
 | `card_db_status` / `update_card_database` | lokale Kartendatenbank |
 
 Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop):
@@ -193,6 +222,8 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_CACHE_TTL` | `86400` | HTTP-Cache-Dauer in Sekunden |
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
+| `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
+| `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
 | `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |
 

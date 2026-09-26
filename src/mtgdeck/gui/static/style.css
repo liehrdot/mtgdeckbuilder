@@ -184,3 +184,35 @@ label.check input { width: auto; margin: 0; }
 .history .badge { font-size: 11px; }
 .history .vactions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .history .vactions button { padding: 3px 9px; font-size: 12px; }
+
+/* print studio */
+.print-toolbar { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 6px; }
+.print-toolbar label { margin: 0; }
+.print-toolbar select { width: auto; }
+.print-toolbar label.check { margin-bottom: 8px; }
+.print-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; margin: 10px 0; }
+.pcard { position: relative; border: none; padding: 0; background: none; cursor: pointer; border-radius: 8px; text-align: left; color: inherit; font: inherit; }
+.pcard img { width: 100%; aspect-ratio: 63 / 88; object-fit: cover; border-radius: 6px; display: block; background: var(--bg); }
+.pcard .noimg { aspect-ratio: 63 / 88; border-radius: 6px; border: 2px dashed var(--bad); display: flex; align-items: center; justify-content: center; font-size: 12px; padding: 6px; text-align: center; }
+.pcard .cap { font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .tags { position: absolute; top: 4px; left: 4px; right: 4px; display: flex; gap: 3px; flex-wrap: wrap; pointer-events: none; }
+.pcard .tag { font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 99px; background: rgba(0,0,0,.7); color: #fff; }
+.pcard .tag.mpc { background: #1f8a4c; } .pcard .tag.own { background: #7a4fd6; }
+.pcard:hover img, .pcard:focus-visible img { outline: 3px solid var(--accent); }
+.pcard .flip { position: absolute; bottom: 24px; right: 4px; font-size: 11px; padding: 2px 6px; border-radius: 99px; background: rgba(0,0,0,.7); color: #fff; }
+.print-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.print-actions .group { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-left: 10px; border-left: 1px solid var(--border); }
+.print-actions select { width: auto; margin: 0; }
+.print-actions label.check { margin: 0; }
+.print-actions a { color: var(--accent); }
+.progressbar { position: relative; height: 18px; border-radius: 99px; background: var(--bg); border: 1px solid var(--border); margin-bottom: 8px; overflow: hidden; }
+.progressbar div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--bar); transition: width .2s; }
+.progressbar span { position: relative; font-size: 12px; padding-left: 8px; line-height: 18px; }
+.console { display: flex; gap: 6px; margin-top: 8px; }
+.console input { margin: 0; font-family: ui-monospace, monospace; }
+dialog.picker { width: min(1100px, 94vw); max-height: 88vh; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); padding: 16px; }
+dialog.picker::backdrop { background: rgba(0,0,0,.5); }
+.picker-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+.picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.picker-grid .pcard .cap { white-space: normal; }
+.pcard.selected img { outline: 3px solid var(--ok); }

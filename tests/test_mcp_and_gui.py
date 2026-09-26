@@ -54,7 +54,7 @@ async def test_gui_routes():
     decks = client.get("/api/decks").json()
     assert decks[0]["slug"] == "gui-deck" and decks[0]["valid"] is True
     d = client.get("/api/decks/gui-deck").json()
-    assert d["card_data"]["Sol Ring"]["image"].endswith("Sol Ring.jpg")
+    assert d["card_data"]["Sol Ring"]["image"].split("?")[0].endswith("Sol Ring.jpg")
     assert "18 Forest" in d["export_text"]
     assert client.post("/api/decks/gui-deck/validate").json()["legal"] is True
     assert client.get("/").status_code == 200

@@ -29,6 +29,8 @@ _MIN_INTERVAL = {
     "json.edhrec.com": 0.5,
     "backend.commanderspellbook.com": 0.75,  # "80 requests per minute should be a safe rate"
     "archidekt.com": 0.5,
+    "cards.scryfall.io": 0.05,
+    "cdn.mpcautofill.com": 0.05,  # image CDN, no documented rate limit – stay polite anyway
 }
 _DEFAULT_INTERVAL = 0.25
 
@@ -149,3 +151,20 @@ async def get_json(url: str, params: dict[str, Any] | None = None, ttl: int = DE
 
 async def post_json(url: str, body: Any, ttl: int = DEFAULT_TTL) -> Any:
     return await request_json("POST", url, json_body=body, ttl=ttl)
+
+
+async def download(url: str, dest: Path) -> Path:
+    """Download a binary file (e.g. a card image) unless it already exists."""
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    await _throttle(_bucket(url))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    async with client().stream("GET", url, headers={"Accept": "*/*"}) as resp:
+        if resp.status_code >= 400:
+            raise HttpError(resp.status_code, url, "download failed")
+        with tmp.open("wb") as fh:
+            async for chunk in resp.aiter_bytes(1 << 16):
+                fh.write(chunk)
+    tmp.replace(dest)
+    return dest

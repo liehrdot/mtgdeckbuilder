@@ -78,7 +78,7 @@ async def test_enrich_suggestions_adds_card_data():
     items = await gui._enrich_suggestions(
         {"suggestions": [{"name": "Meren of Clan Nel Toth", "archetype": "Aristocrats", "why": "Passt."}]}
     )
-    assert items[0]["image"].endswith("Meren of Clan Nel Toth.jpg")
+    assert items[0]["image"].split("?")[0].endswith("Meren of Clan Nel Toth.jpg")
     assert items[0]["color_identity"] == ["B", "G"]
     assert await gui._enrich_suggestions(None) == []
 

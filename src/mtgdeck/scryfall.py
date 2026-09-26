@@ -26,6 +26,14 @@ def _image(card: dict[str, Any], size: str = "normal") -> str | None:
     return None
 
 
+def _back_image(card: dict[str, Any], size: str = "normal") -> str | None:
+    """Image of the back face for double-faced cards (transform, MDFC, ...), else None."""
+    faces = card.get("card_faces") or []
+    if "image_uris" not in card and len(faces) > 1 and "image_uris" in faces[1]:
+        return faces[1]["image_uris"].get(size)
+    return None
+
+
 def compact(card: dict[str, Any], *, with_text: bool = True) -> dict[str, Any]:
     """Reduce a Scryfall card object to what deckbuilding needs (keeps LLM context small)."""
     prices = card.get("prices") or {}
@@ -41,6 +49,8 @@ def compact(card: dict[str, Any], *, with_text: bool = True) -> dict[str, Any]:
         "price_usd": prices.get("usd") or prices.get("usd_foil"),
         "price_eur": prices.get("eur") or prices.get("eur_foil"),
         "image": _image(card),
+        "image_back": _back_image(card),
+        "layout": card.get("layout"),
         "scryfall_uri": card.get("scryfall_uri"),
     }
     if "_query_name" in card:

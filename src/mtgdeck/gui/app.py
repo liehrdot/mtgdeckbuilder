@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import uuid
@@ -17,11 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, scryfall, storage
+from .. import blacklist, brackets, carddb, proxy, scryfall, storage
+from .. import settings as settings_mod
 from ..cards import resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
@@ -46,13 +49,40 @@ class Job:
     done: bool = False
     task: asyncio.Task | None = None
     changed: asyncio.Event = field(default_factory=asyncio.Event)
+    proc: Any = None  # subprocess.Popen for the MPC Autofill console job
+    loop: asyncio.AbstractEventLoop | None = None
 
     def emit(self, **event: Any) -> None:
         self.events.append(event)
         self.changed.set()
 
+    def emit_threadsafe(self, **event: Any) -> None:
+        assert self.loop is not None
+        self.loop.call_soon_threadsafe(lambda: self.emit(**event))
+
 
 JOBS: dict[str, Job] = {}
+
+
+def _start_runner(runner: Any) -> dict[str, str]:
+    """Run ``runner(job)`` as a background job whose events stream to the browser."""
+    job = Job(id=uuid.uuid4().hex[:12], loop=asyncio.get_running_loop())
+    JOBS[job.id] = job
+
+    async def wrapped() -> None:
+        try:
+            await runner(job)
+        except asyncio.CancelledError:
+            job.emit(type="error", text="Abgebrochen.")
+            job.emit(type="done", ok=False)
+        except Exception as exc:
+            job.emit(type="error", text=f"{type(exc).__name__}: {exc}")
+            job.emit(type="done", ok=False)
+        finally:
+            job.done = True
+
+    job.task = asyncio.create_task(wrapped())
+    return {"job": job.id}
 
 
 def _tool_summary(name: str, args: dict[str, Any]) -> str:
@@ -472,6 +502,8 @@ async def api_job_events(job_id: str, request: Request) -> StreamingResponse:
 @app.post("/api/jobs/{job_id}/cancel")
 async def api_job_cancel(job_id: str) -> dict[str, bool]:
     job = JOBS.get(job_id)
+    if job and job.proc and job.proc.poll() is None:
+        job.proc.terminate()
     if job and job.task and not job.done:
         job.task.cancel()
     return {"ok": True}
@@ -563,6 +595,197 @@ class CopyRequest(BaseModel):
 @app.post("/api/decks/{slug}/copy")
 async def api_copy(slug: str, req: CopyRequest) -> dict[str, Any]:
     return _not_found(storage.copy, slug, req.name, req.version)
+
+
+# --- proxies (MPC Autofill) & settings ---------------------------------------------------------
+
+
+class SettingsUpdate(BaseModel):
+    autofill_path: str | None = None
+    mpcfill_server: str | None = None
+    cardback_path: str | None = None
+    browser: str | None = None
+    site: str | None = None
+    stock: str | None = None
+    foil: bool | None = None
+    paper: str | None = None
+    mpcfill_cdn: str | None = None
+
+
+def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
+    found = proxy.find_autofill(cfg)
+    return {**cfg, "autofill_found": str(found) if found else None, "stocks": proxy.STOCKS, "platform": os.name}
+
+
+@app.get("/api/settings")
+async def api_settings() -> dict[str, Any]:
+    return _settings_view(settings_mod.load())
+
+
+@app.post("/api/settings")
+async def api_settings_update(req: SettingsUpdate) -> dict[str, Any]:
+    return _settings_view(settings_mod.update(req.model_dump(exclude_none=True)))
+
+
+class PrintRequest(BaseModel):
+    source: str = "auto"
+    stock: str | None = None
+    foil: bool | None = None
+    version: int | None = None
+
+
+def _print_deck(slug: str, version: int | None = None) -> dict[str, Any]:
+    deck = _not_found(storage.load_version, slug, version)
+    deck["slug"] = storage.slug(slug)
+    return deck
+
+
+@app.get("/api/decks/{slug}/print/plan")
+async def api_print_plan(slug: str, source: str = "auto", version: int | None = None) -> dict[str, Any]:
+    try:
+        return await proxy.plan(_print_deck(slug, version), source=source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/decks/{slug}/print/alternatives")
+async def api_print_alternatives(slug: str, card: str, side: str = "front") -> list[dict[str, Any]]:
+    try:
+        return await proxy.alternatives(_print_deck(slug), card, "back" if side == "back" else "front")
+    except HttpError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+class ChooseRequest(BaseModel):
+    face: str
+    option: dict[str, Any] | None = None
+
+
+@app.post("/api/decks/{slug}/print/choose")
+async def api_print_choose(slug: str, req: ChooseRequest) -> dict[str, Any]:
+    return proxy.choose(storage.slug(slug), req.face, req.option)
+
+
+@app.post("/api/decks/{slug}/print/prepare")
+async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
+    deck = _print_deck(slug, req.version)
+
+    async def runner(job: Job) -> None:
+        job.emit(type="status", text="Plane Bilder …")
+
+        def progress(done: int, total: int, name: str) -> None:
+            job.emit(type="progress", done=done, total=total, text=name)
+
+        try:
+            result = await proxy.prepare(deck, source=req.source, stock=req.stock, foil=req.foil, progress=progress)
+        except ValueError as exc:
+            job.emit(type="error", text=str(exc))
+            job.emit(type="done", ok=False)
+            return
+        for w in result["warnings"]:
+            job.emit(type="status", text=w)
+        for e in result["errors"]:
+            job.emit(type="error", text=e)
+        job.emit(type="result", text=(
+            f"{result['quantity']} Karten vorbereitet ({result['images_mpcfill']} MPC-Autofill-Scans, "
+            f"{result['images_scryfall']} Scryfall-Scans) · {result['cardback']}"
+        ))  # fmt: skip
+        job.emit(type="print", result=result)
+        job.emit(type="done", ok=not result["missing"])
+
+    return _start_runner(runner)
+
+
+@app.api_route("/api/decks/{slug}/print/files/{kind}", methods=["GET", "HEAD"])
+async def api_print_file(slug: str, kind: str) -> FileResponse:
+    s = storage.slug(slug)
+    path = proxy.order_dir(s) / f"{s}.{'pdf' if kind == 'pdf' else 'xml'}"
+    if not path.exists():
+        raise HTTPException(404, "Datei noch nicht erstellt")
+    return FileResponse(path, filename=path.name)
+
+
+class PdfRequest(BaseModel):
+    paper: str = "A4"
+    include_backs: bool = True
+    cut_marks: bool = True
+
+
+@app.post("/api/decks/{slug}/print/pdf")
+async def api_print_pdf(slug: str, req: PdfRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            proxy.export_pdf, storage.slug(slug), paper=req.paper, include_backs=req.include_backs, cut_marks=req.cut_marks
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\r")
+
+
+class AutofillRequest(BaseModel):
+    mode: str = "mpc"
+    window: bool = False  # True = own console window instead of the integrated log
+
+
+@app.post("/api/decks/{slug}/print/autofill")
+async def api_print_autofill(slug: str, req: AutofillRequest) -> dict[str, Any]:
+    folder = proxy.order_dir(storage.slug(slug))
+    mode = "pdf" if req.mode == "pdf" else "mpc"
+    try:
+        proxy._check_order(folder)
+        if req.window:
+            return proxy.launch_autofill(folder, mode=mode)
+        cmd = proxy.autofill_command(folder, mode=mode)
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    async def runner(job: Job) -> None:
+        job.emit(type="status", text="Starte MPC Autofill … (Browser-Fenster öffnet sich; Rückfragen hier beantworten)")
+        env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1", "TERM": "dumb"}
+        proc = subprocess.Popen(
+            cmd, cwd=str(folder), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            env=env, bufsize=0,
+        )  # fmt: skip
+        job.proc = proc
+        job.emit(type="console", running=True)
+
+        def pump() -> None:
+            buf = b""
+            assert proc.stdout is not None
+            while chunk := proc.stdout.read(1):
+                buf += chunk
+                if chunk == b"\n" or (buf.endswith((b": ", b"? ", b". ")) and len(buf) > 20):
+                    line = _ANSI_RE.sub("", buf.decode("utf-8", "replace")).rstrip()
+                    if line:
+                        job.emit_threadsafe(type="text", text=line)
+                    buf = b""
+            if buf.strip():
+                job.emit_threadsafe(type="text", text=_ANSI_RE.sub("", buf.decode("utf-8", "replace")).rstrip())
+
+        await asyncio.to_thread(pump)
+        code = await asyncio.to_thread(proc.wait)
+        job.emit(type="console", running=False)
+        job.emit(type="result", text=f"MPC Autofill beendet (Code {code}).")
+        job.emit(type="done", ok=code == 0)
+
+    return _start_runner(runner)
+
+
+class InputRequest(BaseModel):
+    text: str = ""
+
+
+@app.post("/api/jobs/{job_id}/input")
+async def api_job_input(job_id: str, req: InputRequest) -> dict[str, bool]:
+    job = JOBS.get(job_id)
+    if not job or not job.proc or job.proc.poll() is not None or not job.proc.stdin:
+        raise HTTPException(409, "Kein laufender Prozess für Eingaben")
+    job.proc.stdin.write((req.text + os.linesep).encode())
+    job.proc.stdin.flush()
+    job.emit(type="tool", name="Eingabe", summary=req.text or "⏎")
+    return {"ok": True}
 
 
 @app.get("/api/carddb")

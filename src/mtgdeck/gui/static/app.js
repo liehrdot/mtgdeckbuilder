@@ -215,6 +215,181 @@ $("#history").addEventListener("click", async (e) => {
   } catch (err) { alert(err.message); }
 });
 
+// ---------- settings (proxy printing) ----------
+let appSettings = {};
+async function loadSettings() {
+  appSettings = await api("/api/settings");
+  const f = $("#settings-form").elements;
+  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site"]) if (f[k]) f[k].value = appSettings[k] ?? "";
+  $("#autofill-status").innerHTML = appSettings.autofill_found
+    ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.autofill_found)}`
+    : '<span class="warn">nicht gefunden</span> – Pfad eintragen oder die exe in den Ordner <code>tools/</code> legen.';
+  const stock = $("#print-form").elements.stock;
+  stock.innerHTML = appSettings.stocks.map((s) => `<option ${s === appSettings.stock ? "selected" : ""}>${esc(s)}</option>`).join("");
+  $("#print-form").elements.foil.checked = !!appSettings.foil;
+  $("#pdf-paper").value = appSettings.paper || "A4";
+}
+$("#settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    await api("/api/settings", { method: "POST", body });
+    await loadSettings();
+    $("#settings-msg").textContent = "Gespeichert ✓";
+    setTimeout(() => ($("#settings-msg").textContent = ""), 1500);
+  } catch (err) { $("#settings-msg").textContent = err.message; }
+});
+
+// ---------- print studio ----------
+let printPlan = null;
+const printOpts = () => {
+  const f = $("#print-form").elements;
+  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked };
+};
+
+async function openPrintStudio() {
+  $("#print-panel").classList.remove("hidden");
+  $("#print-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  await loadPlan();
+}
+$("#print-btn").addEventListener("click", () => currentDeck && openPrintStudio());
+$("#print-close").addEventListener("click", () => $("#print-panel").classList.add("hidden"));
+$("#print-form").addEventListener("submit", (e) => { e.preventDefault(); loadPlan(); });
+
+async function loadPlan() {
+  $("#print-summary").textContent = "Lade Vorschau …";
+  $("#print-grid").innerHTML = "";
+  try {
+    printPlan = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/plan?source=${printOpts().source}`);
+  } catch (err) { $("#print-summary").textContent = err.message; return; }
+  renderPlan();
+  updateDownloadLinks();
+}
+
+function originTag(img) {
+  if (!img) return "";
+  if (img.custom) return '<span class="tag own">eigene Wahl</span>';
+  return img.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>';
+}
+
+function renderPlan() {
+  const p = printPlan;
+  const imgs = p.cards.flatMap((c) => [c.front?.image, c.back?.image]).filter(Boolean);
+  const mpc = imgs.filter((i) => i.origin === "mpcfill").length;
+  $("#print-summary").innerHTML = `${p.quantity} Karten · MPC-Staffel ${p.mpc_bracket} · ${mpc} MPC-Autofill-Scans, ${imgs.length - mpc} Scryfall`
+    + ` · ${p.cards.filter((c) => c.back).length} doppelseitig`
+    + (p.server ? "" : ' · <span class="warn">kein MPC-Autofill-Server eingestellt (nur Scryfall)</span>')
+    + (p.missing.length ? ` · <span class="bad">ohne Bild: ${esc(p.missing.join(", "))}</span>` : "")
+    + (p.warnings.length ? `<br><span class="warn">${esc(p.warnings.join(" "))}</span>` : "")
+    + "<br>Klick auf eine Karte, um ein anderes Bild zu wählen.";
+  $("#print-grid").innerHTML = p.cards.map((c, i) => cardTile(c, i, "front")).join("");
+}
+
+function cardTile(c, i, side) {
+  const f = c[side];
+  const img = f?.image;
+  return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
+    ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
+    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${originTag(img)}</div>
+    ${c.back ? `<span class="flip" data-flip="${i}">${side === "front" ? "↻ Rückseite" : "↺ Vorderseite"}</span>` : ""}
+    <div class="cap">${esc(f?.face || c.name)}</div>
+  </button>`;
+}
+
+$("#print-grid").addEventListener("click", (e) => {
+  const flip = e.target.closest("[data-flip]");
+  const tile = e.target.closest(".pcard");
+  if (!tile) return;
+  const i = Number(tile.dataset.i);
+  if (flip) {
+    const side = tile.dataset.side === "front" ? "back" : "front";
+    tile.outerHTML = cardTile(printPlan.cards[i], i, side);
+    return;
+  }
+  openPicker(i, tile.dataset.side);
+});
+
+let pickerCtx = null;
+async function openPicker(i, side) {
+  const c = printPlan.cards[i];
+  pickerCtx = { card: c, side, face: c[side].face };
+  $("#picker-title").textContent = `${c[side].face}${side === "back" ? " (Rückseite)" : ""}`;
+  $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und alle Scryfall-Drucke …";
+  $("#picker-grid").innerHTML = "";
+  $("#picker").showModal();
+  try {
+    const opts = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/alternatives?card=${encodeURIComponent(c.name)}&side=${side}`);
+    pickerCtx.options = opts;
+    const current = c[side].image?.id;
+    $("#picker-hint").textContent = `${opts.length} Bilder · MPC-Autofill-Scans sind druckoptimiert (mit Beschnitt-Rand)`;
+    $("#picker-grid").innerHTML = opts.map((o, k) => `<button type="button" class="pcard ${o.id === current ? "selected" : ""}" data-k="${k}">
+      <img src="${esc(o.thumb)}" alt="" loading="lazy">
+      <div class="tags">${o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
+      <div class="cap">${esc(o.label || "")}</div></button>`).join("") || '<p class="hint">Keine Alternativen gefunden.</p>';
+  } catch (err) { $("#picker-hint").textContent = err.message; }
+}
+async function pick(option) {
+  await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/choose`, { method: "POST", body: { face: pickerCtx.face, option } });
+  $("#picker").close();
+  loadPlan();
+}
+$("#picker-grid").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-k]");
+  if (t) pick(pickerCtx.options[Number(t.dataset.k)]).catch((err) => alert(err.message));
+});
+$("#picker-auto").addEventListener("click", () => pick(null).catch((err) => alert(err.message)));
+$("#picker-close").addEventListener("click", () => $("#picker").close());
+
+$("#prepare-btn").addEventListener("click", async () => {
+  try {
+    const { job } = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/prepare`, { method: "POST", body: printOpts() });
+    startJob(job, `Druckdateien für ${currentDeck.name} …`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (err) { alert(err.message); }
+});
+
+function onPrepared(result) {
+  logLine("result", `Ordner: ${result.directory}`);
+  if (result.missing.length) logLine("error", `Ohne Bild: ${result.missing.join(", ")}`);
+  updateDownloadLinks();
+}
+
+async function updateDownloadLinks() {
+  const base = `/api/decks/${encodeURIComponent(currentDeck.slug)}/print/files`;
+  for (const [id, kind] of [["#xml-link", "xml"], ["#pdf-link", "pdf"]]) {
+    const ok = (await fetch(`${base}/${kind}`, { method: "HEAD" }).catch(() => null))?.ok;
+    $(id).href = `${base}/${kind}`;
+    $(id).classList.toggle("hidden", !ok);
+  }
+}
+
+$("#pdf-btn").addEventListener("click", async () => {
+  $("#pdf-btn").disabled = true;
+  $("#pdf-btn").textContent = "Erstelle PDF …";
+  try {
+    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/pdf`, { method: "POST", body: { paper: $("#pdf-paper").value, include_backs: $("#pdf-backs").checked } });
+    await updateDownloadLinks();
+    window.open($("#pdf-link").href, "_blank");
+    $("#pdf-btn").textContent = `PDF: ${r.cards} Karten, ${r.pages} Seiten ✓`;
+  } catch (err) { alert(err.message); $("#pdf-btn").textContent = "PDF zum Selbstdrucken"; }
+  finally { $("#pdf-btn").disabled = false; }
+});
+
+$("#mpc-btn").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/autofill`, { method: "POST", body: { mode: "mpc", window: $("#mpc-window").checked } });
+    if (r.job) { startJob(r.job, `MPC Autofill: ${currentDeck.name}`); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    else alert("MPC Autofill wurde in einem eigenen Fenster gestartet.");
+  } catch (err) { alert(err.message); }
+});
+
+$("#console-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = e.target.elements.text;
+  try { await api(`/api/jobs/${currentJob}/input`, { method: "POST", body: { text: input.value } }); input.value = ""; }
+  catch (err) { logLine("error", err.message); }
+});
+
 $("#duplicate-btn").addEventListener("click", () => currentDeck && copyAsDeck(null).catch((err) => alert(err.message)));
 function showBracketDesc() {
   const n = Number(new FormData($("#build-form")).get("bracket"));
@@ -253,6 +428,8 @@ function startJob(jobId, title) {
   $("#job").classList.remove("hidden");
   $("#job-title").textContent = title;
   $("#log").innerHTML = "";
+  $("#progress").classList.add("hidden");
+  $("#console-form").classList.add("hidden");
   $("#build-btn").disabled = true;
   $("#cancel-btn").disabled = false;
   if (eventSource) eventSource.close();
@@ -278,6 +455,18 @@ function handleEvent(ev) {
     case "error": logLine("error", "Fehler: " + ev.text); break;
     case "result": logLine("result", ev.text); break;
     case "suggestions": renderSuggestions(ev.items); break;
+    case "progress": {
+      const bar = $("#progress");
+      bar.classList.remove("hidden");
+      bar.querySelector("div").style.width = `${(ev.done / Math.max(ev.total, 1)) * 100}%`;
+      bar.querySelector("span").textContent = `${ev.done} / ${ev.total} · ${ev.text || ""}`;
+      break;
+    }
+    case "print": onPrepared(ev.result); break;
+    case "console":
+      $("#console-form").classList.toggle("hidden", !ev.running);
+      if (ev.running) $("#console-form").elements.text.focus();
+      break;
     case "done":
       eventSource.close();
       $("#build-btn").disabled = false;
@@ -432,6 +621,7 @@ async function openDeck(slug) {
   $("#deck-view").classList.remove("hidden");
   $("#deck-name").textContent = d.name;
   $("#suggestions").classList.add("hidden");
+  $("#print-panel").classList.add("hidden");
   const money = d.proxy ? " · Proxy-Deck" : d.budget ? ` · Budget ${d.budget} ${(d.currency || "eur").toUpperCase()}` : "";
   const level = levelText(d.bracket ?? "?", d.power_profile?.tier);
   const style = d.power_profile?.style ? ` · Stil: ${d.power_profile.style}` : "";
@@ -571,6 +761,7 @@ wireAutocomplete($("#commander"), $("#ac-commander"), previewCommander);
 wireAutocomplete($("#partner"), $("#ac-partner"));
 wireAutocomplete($("#bl-input"), $("#ac-bl"));
 refreshBlacklist();
+loadSettings().catch((err) => console.error(err));
 initBrackets();
 refreshDeckList();
 refreshDbStatus();

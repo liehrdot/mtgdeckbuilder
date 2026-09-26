@@ -7,3 +7,7 @@ decks/*
 !decks/.gitkeep
 .env
 blacklist.txt
+proxies/
+mtgdeck.settings.json
+tools/*
+!tools/README.md

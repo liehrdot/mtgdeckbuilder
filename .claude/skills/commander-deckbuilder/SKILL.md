@@ -126,6 +126,19 @@ Every `save_deck` creates a version with a snapshot. Use:
   retune the copy so both variants exist side by side.
 - `export_deck` with `version` – decklist of an old version.
 
+## Proxies drucken (MPC Autofill)
+
+When the user wants to print/proxy a deck (always offer it for proxy decks after saving):
+1. `create_proxy_order` (slug; optional `stock`, `foil`, `version`) – downloads and prepares all
+   images (MPC Autofill community scans if a server is set in `proxy_settings`, else Scryfall
+   scans with generated bleed), double-faced backs and a cardback into `proxies/<slug>/`.
+2. Home printing: `export_proxy_pdf` (A4/Letter, 3 x 3 per page with cut marks).
+3. MakePlayingCards: `launch_proxy_tool` starts the MPC Autofill desktop tool (browser login and
+   upload happen on the user's machine) – only when asked. If the tool is missing, explain:
+   put `autofill-windows.exe` into `tools/` or set the path via `proxy_settings`.
+Mention the result: number of cards, MPC bracket, images from MPC Autofill vs. Scryfall, missing
+cards. Individual images can be swapped in the GUI's Druckstudio.
+
 ## Deck überarbeiten (refine)
 
 For "make it cheaper / stronger / bracket X / more draw / swap Y":

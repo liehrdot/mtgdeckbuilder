@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from mtgdeck import blacklist, carddb, http, storage
+from mtgdeck import blacklist, carddb, http, proxy, settings, storage
 
 
 def card(name: str, *, ci: str = "", type_line: str = "Creature — Human", text: str = "", cmc: float = 2,
@@ -28,7 +28,7 @@ def card(name: str, *, ci: str = "", type_line: str = "Creature — Human", text
         "game_changer": gc,
         "edhrec_rank": 100,
         "prices": {"eur": eur, "usd": eur},
-        "image_uris": {"normal": f"https://img.example/{name}.jpg"},
+        "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/{name}.jpg?1"},
     }
 
 
@@ -52,8 +52,38 @@ CARDS = {
         card("Swamp", type_line="Basic Land — Swamp", text="({T}: Add {B}.)", cmc=0, eur=None, mana_cost=""),
         card("Relentless Rats", ci="B", text="A deck can have any number of cards named Relentless Rats."),
         card("Hullbreacher", ci="U", legal=False),
+        {
+            **card("Delver of Secrets // Insectile Aberration", ci="U"),
+            "layout": "transform",
+            "image_uris": None,
+            "card_faces": [
+                {"name": "Delver of Secrets", "type_line": "Creature", "oracle_text": "",
+                 "image_uris": {"normal": "https://cards.scryfall.io/normal/front/delver.jpg"}},
+                {"name": "Insectile Aberration", "type_line": "Creature", "oracle_text": "Flying",
+                 "image_uris": {"normal": "https://cards.scryfall.io/normal/back/delver.jpg"}},
+            ],
+        },
     ]
 }
+for _c in CARDS.values():  # drop None image_uris (DFC) so compact() falls back to the faces
+    if _c.get("image_uris") is None:
+        _c.pop("image_uris", None)
+
+
+def _image_bytes(fmt: str = "PNG", size: tuple[int, int] = (745, 1040)) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(img).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=35, fill=(20, 20, 20, 255))
+    buf = BytesIO()
+    (img if fmt == "PNG" else img.convert("RGB")).save(buf, fmt)
+    return buf.getvalue()
+
+
+MPC_SERVER = "https://mpc.test"
+MPC_HITS = {"sol ring": ["drive-sol-1", "drive-sol-2"], "insectile aberration": ["drive-insect"]}
 
 
 def lookup_card(name: str) -> dict[str, Any] | None:
@@ -68,6 +98,23 @@ def lookup_card(name: str) -> dict[str, Any] | None:
 
 def handler(request: httpx.Request) -> httpx.Response:
     url = request.url
+    if url.host == "cards.scryfall.io":
+        return httpx.Response(200, content=_image_bytes("PNG"), headers={"Content-Type": "image/png"})
+    if url.host == "cdn.mpcautofill.com":
+        return httpx.Response(200, content=_image_bytes("JPEG", (1644, 2244)), headers={"Content-Type": "image/jpeg"})
+    if url.host == "mpc.test":
+        body = json.loads(request.content) if request.content else {}
+        if url.path == "/2/sources/":
+            return httpx.Response(200, json={"results": {"1": {"pk": 1, "name": "Chilli", "ordinal": 0}}})
+        if url.path == "/3/editorSearch/":
+            assert body["searchSettings"]["sourceSettings"]["sources"] == [[1, True]]
+            return httpx.Response(200, json={"results": {k: MPC_HITS.get(v["query"], []) for k, v in body["queries"].items()}})
+        if url.path == "/2/cards/":
+            return httpx.Response(200, json={"results": {
+                i: {"identifier": i, "name": i.replace("drive-", ""), "extension": "png", "dpi": 1200,
+                    "sourceName": "Chilli", "sourceType": "Google Drive"} for i in body["cardIdentifiers"]}})  # fmt: skip
+        if url.path == "/2/cardbacks/":
+            return httpx.Response(200, json={"cardbacks": ["drive-back"]})
     if url.host == "api.scryfall.com":
         if url.path == "/cards/collection":
             idents = json.loads(request.content)["identifiers"]
@@ -81,6 +128,14 @@ def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=c) if c else httpx.Response(404, json={"details": "not found"})
         if url.path == "/cards/search":
             q = url.params["q"]
+            if q.startswith('!"'):  # all printings of one card
+                name = q.split('"')[1]
+                base = lookup_card(name)
+                if not base:
+                    return httpx.Response(404, json={"details": "no cards"})
+                data = [{**base, "set_name": f"Set {i}", "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/p{i}.jpg"}}
+                        for i in range(3)]  # fmt: skip
+                return httpx.Response(200, json={"total_cards": 3, "has_more": False, "data": data})
             if "gamechanger" in q:
                 data = [c for c in CARDS.values() if c["game_changer"]]
                 return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})
@@ -124,6 +179,10 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(carddb, "DB_PATH", tmp_path / "data" / "cards.sqlite")
     monkeypatch.setattr(storage, "DECKS_DIR", tmp_path / "decks")
     monkeypatch.setattr(blacklist, "BLACKLIST_FILE", tmp_path / "blacklist.txt")
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(proxy, "PROXIES_DIR", tmp_path / "proxies")
+    for env in ("MTG_AUTOFILL_PATH", "MTG_MPCFILL_SERVER", "MTG_CARDBACK"):
+        monkeypatch.delenv(env, raising=False)
     http._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), headers={"User-Agent": http.USER_AGENT})
     yield
     http._client = None

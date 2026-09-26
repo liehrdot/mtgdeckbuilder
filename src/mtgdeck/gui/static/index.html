@@ -100,6 +100,32 @@
       <ul id="bl-list" class="chips"></ul>
     </details>
 
+    <details class="panel" id="settings-panel">
+      <summary><h2>Einstellungen <span class="opt">(Proxy-Druck)</span></h2></summary>
+      <form id="settings-form" autocomplete="off">
+        <label>MPC-Autofill-Programm
+          <input name="autofill_path" placeholder="C:\Tools\autofill-windows.exe (oder in tools/ ablegen)">
+        </label>
+        <p id="autofill-status" class="hint"></p>
+        <label>MPC-Autofill-Server <span class="opt">(für Community-Scans)</span>
+          <input name="mpcfill_server" placeholder="Server-URL wie auf mpcfill.com eingestellt">
+        </label>
+        <label>Eigener Kartenrücken <span class="opt">(Bilddatei)</span>
+          <input name="cardback_path" placeholder="C:\Bilder\cardback.png">
+        </label>
+        <div class="row2">
+          <label>Browser
+            <select name="browser"><option>chrome</option><option>edge</option><option>brave</option></select>
+          </label>
+          <label>Druckerei
+            <select name="site"><option>MakePlayingCards</option><option>PrinterStudio</option></select>
+          </label>
+        </div>
+        <button type="submit" class="secondary">Speichern</button>
+        <span id="settings-msg" class="hint"></span>
+      </form>
+    </details>
+
     <section class="panel">
       <h2>Kartendatenbank</h2>
       <p id="db-status" class="hint">…</p>
@@ -113,7 +139,12 @@
         <h2 id="job-title">Claude baut …</h2>
         <button id="cancel-btn" class="secondary">Abbrechen</button>
       </div>
+      <div id="progress" class="progressbar hidden"><div></div><span></span></div>
       <div id="log" class="log"></div>
+      <form id="console-form" class="console hidden" autocomplete="off">
+        <input name="text" placeholder="Antwort an MPC Autofill (leer = Enter)">
+        <button type="submit" class="secondary">Senden ⏎</button>
+      </form>
     </section>
 
     <section id="suggestions" class="panel hidden">
@@ -131,6 +162,7 @@
         <div class="deck-actions">
           <button id="copy-btn" class="secondary">Liste kopieren</button>
           <button id="duplicate-btn" class="secondary">Als neues Deck kopieren</button>
+          <button id="print-btn">Proxies drucken</button>
           <button id="validate-btn" class="secondary">Neu prüfen</button>
           <button id="delete-btn" class="danger">Löschen</button>
         </div>
@@ -139,6 +171,45 @@
       <div class="grid2">
         <div class="panel"><h3>Prüfung</h3><div id="validation"></div></div>
         <div class="panel"><h3>Statistik</h3><div id="stats"></div></div>
+      </div>
+
+      <div class="panel hidden" id="print-panel">
+        <div class="power-head">
+          <h3>Druckstudio <span class="opt">– Proxies mit MPC Autofill</span></h3>
+          <button type="button" class="secondary" id="print-close">Schließen</button>
+        </div>
+        <form id="print-form" class="print-toolbar" autocomplete="off">
+          <label>Bilder
+            <select name="source">
+              <option value="auto">Automatisch (eigene Wahl › MPC Autofill › Scryfall)</option>
+              <option value="mpcfill">MPC Autofill</option>
+              <option value="scryfall">nur Scryfall</option>
+            </select>
+          </label>
+          <label>Kartenstärke <select name="stock"></select></label>
+          <label class="check"><input type="checkbox" name="foil"> Foil</label>
+          <button type="submit" class="secondary">Vorschau laden</button>
+        </form>
+        <p id="print-summary" class="hint"></p>
+        <div id="print-grid" class="print-grid"></div>
+        <div class="print-actions">
+          <button type="button" id="prepare-btn">1. Druckdateien vorbereiten</button>
+          <span class="group">
+            <select id="pdf-paper" aria-label="Papier"><option>A4</option><option>Letter</option></select>
+            <label class="check"><input type="checkbox" id="pdf-backs" checked> DFC-Rückseiten</label>
+            <button type="button" class="secondary" id="pdf-btn">PDF zum Selbstdrucken</button>
+          </span>
+          <span class="group">
+            <button type="button" id="mpc-btn">An MakePlayingCards senden</button>
+            <label class="check"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
+          </span>
+          <span class="group downloads">
+            <a id="xml-link" class="hidden" href="#">order.xml</a>
+            <a id="pdf-link" class="hidden" href="#">PDF</a>
+          </span>
+        </div>
+        <p class="hint">Die order.xml lässt sich auch auf mpcfill.com importieren. Upload & Login bei MakePlayingCards
+          übernimmt das MPC-Autofill-Programm (Windows: <code>autofill-windows.exe</code>, siehe Einstellungen).</p>
       </div>
 
       <div class="panel" id="power-panel">
@@ -207,6 +278,18 @@
     </section>
   </section>
 </main>
+
+<dialog id="picker" class="picker">
+  <div class="picker-head">
+    <h3 id="picker-title"></h3>
+    <div class="deck-actions">
+      <button type="button" class="secondary" id="picker-auto">Automatisch wählen</button>
+      <button type="button" class="secondary" id="picker-close">Schließen</button>
+    </div>
+  </div>
+  <p id="picker-hint" class="hint"></p>
+  <div id="picker-grid" class="picker-grid"></div>
+</dialog>
 
 <template id="profile-template">
   <div class="tiers" role="radiogroup" aria-label="Feinstufe">

@@ -76,6 +76,15 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `restore()` saves the old snapshot as a *new* version.
   - `copy()` creates a new slug with its own history.
   - Legacy decks without a `version` are snapshotted as v1 on their next save.
+- **Proxy printing:** `proxy.py` and `imaging.py` (Pillow) integrate the MPC Autofill desktop tool (chilli-axe/mpc-autofill).
+  - `plan()` picks one image per face. Priority: `proxies/<slug>/selection.json` › MPC Autofill search server (`/2/sources/`, `/3/editorSearch/`, `/2/cards/`, `/2/cardbacks/`) › Scryfall scan. Full images come from the CDN (`cdn.mpcautofill.com/images/google_drive/{small|full}/<id>.jpg`).
+  - `prepare()` downloads into the shared cache `<MTG_DATA_DIR>/images`. Scryfall scans get bleed via `imaging.add_bleed`, 822×1122 px at 300 DPI.
+  - `prepare()` writes the order XML with `sourceType` `Local File` only, plus `manifest.json`. Imageless cards get no slot.
+  - `export_pdf()` builds home-printing sheets.
+  - `autofill_command()` passes `--directory --browser --site --auto-save --no-image-post-processing`. Keep exactly one XML per folder, otherwise the tool prompts.
+  - The GUI streams the tool's stdout via a Popen reader thread (`Job.emit_threadsafe`). Stdin goes through `/api/jobs/{id}/input`.
+  - `settings.py`: user paths/servers in gitignored `mtgdeck.settings.json`, with env overrides.
+  - To verify an XML against upstream, clone mpc-autofill and call `src.order.CardOrder.from_xmls_in_folder`.
 - **`mcp_server.py`**: the MCP server, built with `mcp` **2.x**.
   - Use `from mcp.server.mcpserver import MCPServer`. `FastMCP` no longer exists in 2.x.
   - Tools are thin wrappers over the modules above.
@@ -88,6 +97,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - The finished deck is detected as the deck whose `updated` timestamp is ≥ the job start.
   - The prompts in `build_prompt` / `refine_prompt` / `finder_prompt` tell the agent it runs non-interactively. `_budget_line` holds the shared budget/proxy wording.
   - Retune jobs (`/api/retune`, `retune_prompt`) re-tune a saved deck to a new bracket/profile. `profile_lines()` renders a profile into prompt lines.
+  - Generic background jobs via `_start_runner(runner)`. They emit `progress` / `print` / `console` events besides text.
+  - Print routes: `/api/decks/{slug}/print/{plan,alternatives,choose,prepare,pdf,autofill,files/{xml|pdf}}`. Settings: `/api/settings`.
   - Version routes: `/api/decks/{slug}/versions[/{v}[/restore]]`, `/diff?a=&b=` and `/copy`.
   - Commander-finder jobs pass `output_format` (JSON schema `SUGGESTION_SCHEMA`) to the SDK. They read `ResultMessage.structured_output`, enrich it with card data (`_enrich_suggestions`) and emit a `suggestions` SSE event instead of a deck.
 
@@ -104,7 +115,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - redirects the cache, DB and decks directories to `tmp_path`;
   - disables throttling.
 - Any card name starting with `Filler` is synthesized on demand. `deck_lines()` builds a legal 99-card main deck for Meren (BG).
-- Add new endpoints to the mock `handler`.
+- Add new endpoints to the mock `handler`. It also fakes `cards.scryfall.io`, the MPC Autofill server (`MPC_SERVER`) and its CDN, returning generated images.
+- `test_proxy.py` drives the streamed autofill console with a fake `autofill.py` script.
 - Async tests run with `asyncio_mode = "auto"`.
 
 ## Configuration
@@ -112,5 +124,6 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`
+- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_PROXIES_DIR`
+- `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`

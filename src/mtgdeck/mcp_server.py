@@ -8,6 +8,7 @@ Run: ``uv run mtg-mcp`` (stdio). Registered for Claude Code in .mcp.json.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Annotated, Any, Literal
 
@@ -15,7 +16,8 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, edhrec, importers, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, edhrec, importers, proxy, scryfall, spellbook, storage
+from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
 from .power import PowerProfile
@@ -40,7 +42,7 @@ Currency = Literal["eur", "usd"]
 
 def _slim(card: dict[str, Any]) -> dict[str, Any]:
     """Card data for the model: drop images/links and empty fields to save context."""
-    drop = {"image", "scryfall_uri"}
+    drop = {"image", "image_back", "scryfall_uri", "layout"}
     return {k: v for k, v in card.items() if k not in drop and v not in (None, "", [], False)}
 
 
@@ -394,6 +396,69 @@ async def export_deck(
     deck = storage.load_version(slug, version)
     entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck["cards"]]
     return (to_text if format == "moxfield" else to_sectioned_text)(deck["commanders"], entries)
+
+
+# --- proxies (MPC Autofill) ---------------------------------------------------------------------
+
+
+@mcp.tool()
+async def create_proxy_order(
+    slug: str,
+    source: Annotated[Literal["auto", "mpcfill", "scryfall"], Field(description="auto = own picks > MPC Autofill scans (if a server is set) > Scryfall")] = "auto",
+    stock: Annotated[str | None, Field(description="MPC cardstock, e.g. '(S30) Standard Smooth', '(S33) Superior Smooth', '(M31) Linen'")] = None,
+    foil: bool | None = None,
+    version: Annotated[int | None, Field(description="Print an old version of the deck")] = None,
+) -> dict[str, Any]:
+    """Prepare proxy printing: download + process all card images (bleed, double-faced backs,
+    cardback) and write the MPC Autofill order to proxies/<slug>/. Afterwards: export_proxy_pdf
+    (home printing) or launch_proxy_tool (upload to MakePlayingCards)."""
+    try:
+        deck = storage.load_version(slug, version)
+        deck["slug"] = storage.slug(slug)
+        return await proxy.prepare(deck, source=source, stock=stock, foil=foil)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def export_proxy_pdf(
+    slug: str,
+    paper: Literal["A4", "Letter"] = "A4",
+    include_backs: Annotated[bool, Field(description="Also print back faces of double-faced cards")] = True,
+) -> dict[str, Any]:
+    """PDF for home printing (3 x 3 cards per page, 63 x 88 mm, cut marks) from the prepared order."""
+    try:
+        return await asyncio.to_thread(proxy.export_pdf, storage.slug(slug), paper=paper, include_backs=include_backs)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def launch_proxy_tool(
+    slug: str,
+    mode: Annotated[Literal["mpc", "pdf"], Field(description="mpc = fill a MakePlayingCards project, pdf = the tool's PDF export")] = "mpc",
+) -> dict[str, Any]:
+    """Start the MPC Autofill desktop tool on the prepared order (opens a console + browser on the
+    user's machine for the MakePlayingCards login/upload). Only on explicit user request."""
+    try:
+        return proxy.launch_autofill(proxy.order_dir(storage.slug(slug)), mode=mode)
+    except (FileNotFoundError, RuntimeError) as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def proxy_settings(
+    autofill_path: Annotated[str | None, Field(description="Path to the MPC Autofill desktop tool")] = None,
+    mpcfill_server: Annotated[str | None, Field(description="MPC Autofill search server URL")] = None,
+    cardback_path: Annotated[str | None, Field(description="Own cardback image file")] = None,
+    browser: Literal["chrome", "edge", "brave"] | None = None,
+    stock: str | None = None,
+) -> dict[str, Any]:
+    """Show (no arguments) or change the proxy printing settings."""
+    changes = {k: v for k, v in locals().items() if v is not None}
+    cfg = settings_mod.update(changes) if changes else settings_mod.load()
+    found = proxy.find_autofill(cfg)
+    return {**cfg, "autofill_found": str(found) if found else None, "stocks": proxy.STOCKS}
 
 
 @mcp.tool()
