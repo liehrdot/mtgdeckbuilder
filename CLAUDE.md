@@ -79,7 +79,9 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 - **Proxy printing:** `proxy.py` and `imaging.py` (Pillow) integrate the MPC Autofill desktop tool (chilli-axe/mpc-autofill).
   - `plan()` picks one image per face. Priority: `proxies/<slug>/selection.json` › MPC Autofill search server (`/2/sources/`, `/3/editorSearch/`, `/2/cards/`, `/2/cardbacks/`) › Scryfall scan. Full images come from the CDN (`cdn.mpcautofill.com/images/google_drive/{small|full}/<id>.jpg`).
   - `prepare()` downloads into the shared cache `<MTG_DATA_DIR>/images`. Scryfall scans get bleed via `imaging.add_bleed`, 822×1122 px at 300 DPI.
-  - `prepare()` writes the order XML with `sourceType` `Local File` only, plus `manifest.json`. Imageless cards get no slot.
+  - `prepare()` hardlinks (or copies) every print file to `proxies/<slug>/images/<face name>.<ext>` plus `_Kartenrücken.*`, and clears stale files first.
+  - It writes the order XML against those readable files (`sourceType` `Local File` only), plus `manifest.json`. Imageless cards get no slot.
+  - It writes `prepared.json` with per-face `file` / `cache` / `original` / `origin` / `upscaled` / `dpi`. GUI routes `/print/prepared`, `/print/image?face=&kind=original|file|trim` (only paths listed there) and `/print/open-folder` drive the before/after view.
   - Opt-in AI upscaling: `prepare(upscale=)` defaults to setting `upscale` (off). It runs `realesrgan-ncnn-vulkan` (official zip v0.2.5.0 ships only `realesrgan-x4plus` and `-x4plus-anime`; `upscale_models()` lists what is installed; `-s 4`, `-m <exe dir>/models`, serialised by a `threading.Lock`) on Scryfall scans, then `add_bleed(dpi=600)`. If opted in and the tool or model is missing, it raises `ValueError`. An `UpscaleError` on a single card (e.g. no Vulkan GPU) falls back to 300 DPI with one aggregated warning. MPC scans are never upscaled.
   - `export_pdf()` builds home-printing sheets.
   - `autofill_command()` passes `--directory --browser --site --auto-save --no-image-post-processing`. Keep exactly one XML per folder, otherwise the tool prompts.

@@ -114,6 +114,12 @@ lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles dav
    bekommen automatisch Beschnitt-Rand (Bleed) und gefüllte Ecken, dazu ein Kartenrücken (eigener,
    vom MPC-Autofill-Server oder ein schlichter). Ergebnis: `proxies/<deck>/<deck>.xml` mit nur
    lokalen Dateien – das Autofill-Programm muss nichts mehr herunterladen oder umrechnen.
+   Die fertigen Druckbilder liegen lesbar benannt in `proxies/<deck>/images/` (z. B. `Sol Ring.jpg`,
+   `_Kartenrücken.jpg`; Hardlinks auf den Cache, kein doppelter Speicher). Button **„Ordner öffnen“**
+   öffnet ihn im Explorer/Finder. Die Lupe 🔍 auf jeder vorbereiteten Karte zeigt **Vorher/Nachher**:
+   Original-Scan und Druckdatei nebeneinander, mit Zoom (Einpassen – 8×) und gekoppeltem Scrollen –
+   ideal, um KI-hochskalierte Bilder zu kontrollieren. Der Bild-Cache selbst liegt unter
+   `~/.cache/mtgdeck/images/` (Windows: `C:\Users\<Name>\.cache\mtgdeck\images\`).
    **Optional: KI-Hochskalierung (Opt-in, standardmäßig aus).** Mit Häkchen „KI-Hochskalierung“ im
    Druckstudio werden Scryfall-Scans mit [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
    (ncnn-vulkan, kostenlos) vierfach hochgerechnet und mit 600 statt 300 DPI aufbereitet – Text und

@@ -308,3 +308,67 @@ def test_find_upscaler_in_tools(tmp_path, monkeypatch):
     assert proxy.find_upscaler() == exe
     cmd = proxy.upscale_command(exe, Path("a.png"), Path("b.png"), "realesrgan-x4plus")
     assert cmd[0] == str(exe) and cmd[cmd.index("-m") + 1] == str(exe.parent / "models")
+
+
+async def test_readable_print_files_and_prepared_info(tmp_path):
+    settings.update({"mpcfill_server": MPC_SERVER})
+    _fake_esrgan(tmp_path)
+    r = await proxy.prepare(DECK, upscale=True)
+    images = Path(r["images_dir"])
+    assert images == proxy.order_dir("meren-print") / "images"
+    names = sorted(p.name for p in images.iterdir())
+    assert names == ["Delver of Secrets.jpg", "Forest.jpg", "Insectile Aberration.jpg",
+                     "Meren of Clan Nel Toth.jpg", "Sol Ring.jpg", "_Kartenrücken.jpg"]  # fmt: skip
+    # the order references the readable files (so the tool's log shows card names)
+    root = ET.parse(r["xml"]).getroot()
+    ids = {c.findtext("id") for c in root.findall("fronts/card") + root.findall("backs/card")}
+    assert ids <= {str(p) for p in images.iterdir()} and root.findtext("cardback") == str(images / "_Kartenrücken.jpg")
+
+    info = proxy.load_prepared("meren-print")
+    forest, sol = info["faces"]["Forest"], info["faces"]["Sol Ring"]
+    assert forest["upscaled"] and forest["dpi"] == 600 and forest["origin"] == "scryfall"
+    assert forest["original"].endswith(".png") and Path(forest["original"]).is_file()
+    assert Path(forest["file"]).samefile(forest["cache"]) or Path(forest["file"]).stat().st_size == Path(forest["cache"]).stat().st_size
+    assert not sol["upscaled"] and sol["origin"] == "mpcfill" and sol["dpi"] == 1200
+    with Image.open(proxy.prepared_image("meren-print", "Forest", "original")) as im:
+        assert im.size == (745, 1040)
+    with Image.open(proxy.prepared_image("meren-print", "Forest", "file")) as im:
+        assert im.size == (1644, 2244)
+    with pytest.raises(FileNotFoundError):
+        proxy.prepared_image("meren-print", "Nope", "file")
+
+    # re-preparing a smaller deck removes stale files
+    small = {**DECK, "cards": [{"name": "Forest", "qty": 2}]}
+    await proxy.prepare(small)
+    assert sorted(p.name for p in images.iterdir()) == ["Forest.jpg", "Meren of Clan Nel Toth.jpg", "_Kartenrücken.jpg"]
+
+
+def test_gui_compare_and_open_folder(tmp_path, monkeypatch):
+    import asyncio
+
+    from mtgdeck import storage
+
+    storage.save({k: v for k, v in DECK.items() if k != "slug"} | {"name": "Meren Print", "bracket": 2})
+    asyncio.run(proxy.prepare(DECK))
+    opened = []
+    monkeypatch.setattr(gui, "open_in_file_manager", lambda p: opened.append(p))
+    client = TestClient(gui.app)
+    prepared = client.get("/api/decks/meren-print/print/prepared").json()
+    assert "Forest" in prepared["faces"] and prepared["images_dir"].endswith("images")
+
+    from io import BytesIO
+
+    def size(kind):
+        r = client.get("/api/decks/meren-print/print/image", params={"face": "Forest", "kind": kind})
+        assert r.status_code == 200
+        return Image.open(BytesIO(r.content)).size
+
+    assert size("original") == (745, 1040)
+    assert size("file") == (822, 1122)
+    assert size("trim") == (750, 1050)  # bleed cut off -> aligned with the original for comparison
+    assert client.get("/api/decks/meren-print/print/image", params={"face": "Nope"}).status_code == 404
+    assert client.get("/api/decks/meren-print/print/image", params={"face": "../../etc/passwd"}).status_code == 404
+
+    r = client.post("/api/decks/meren-print/print/open-folder").json()
+    assert r["opened"] and opened == [proxy.order_dir("meren-print") / "images"]
+    assert client.post("/api/decks/unknown/print/open-folder").status_code == 404

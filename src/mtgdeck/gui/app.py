@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -716,6 +717,58 @@ async def api_print_file(slug: str, kind: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(404, "Datei noch nicht erstellt")
     return FileResponse(path, filename=path.name)
+
+
+@app.get("/api/decks/{slug}/print/prepared")
+async def api_print_prepared(slug: str) -> dict[str, Any]:
+    info = proxy.load_prepared(storage.slug(slug))
+    return info or {"faces": {}, "images_dir": None}
+
+
+@app.get("/api/decks/{slug}/print/image")
+async def api_print_image(slug: str, face: str, kind: str = "file") -> Response:
+    """kind: original (as downloaded) | file (print file with bleed) | trim (print file without bleed)."""
+    try:
+        path = proxy.prepared_image(storage.slug(slug), face, kind)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if kind != "trim":
+        return FileResponse(path)
+
+    def cropped() -> bytes:
+        from io import BytesIO
+
+        from PIL import Image
+
+        from .. import imaging
+
+        with Image.open(path) as im:
+            buf = BytesIO()
+            imaging.crop_bleed(im.convert("RGB")).save(buf, "JPEG", quality=92)
+            return buf.getvalue()
+
+    return Response(await asyncio.to_thread(cropped), media_type="image/jpeg")
+
+
+def open_in_file_manager(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+@app.post("/api/decks/{slug}/print/open-folder")
+async def api_print_open_folder(slug: str) -> dict[str, Any]:
+    folder = proxy.order_dir(storage.slug(slug)) / "images"
+    if not folder.is_dir():
+        raise HTTPException(404, "Noch keine Druckdateien – zuerst „Druckdateien vorbereiten“.")
+    try:
+        open_in_file_manager(folder)
+    except OSError as exc:
+        return {"opened": False, "path": str(folder), "error": str(exc)}
+    return {"opened": True, "path": str(folder)}
 
 
 class PdfRequest(BaseModel):

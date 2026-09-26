@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -518,6 +519,38 @@ async def prepare(
     await asyncio.gather(*(work(k, o) for k, o in jobs.items()))
     cardback, cardback_note = await _cardback(cfg, _mpc_client(cfg, source))
 
+    # readable, self-contained order folder: proxies/<slug>/images/<Kartenname>.jpg (hardlinks when possible)
+    out = order_dir(deck["slug"])
+    images_dir = out / "images"
+    if images_dir.exists():
+        for old in images_dir.iterdir():
+            if old.is_file():
+                old.unlink()
+    images_dir.mkdir(parents=True, exist_ok=True)
+    failed_faces = {n for names in upscale_failed.values() for n in names}
+    faces_info: dict[str, dict[str, Any]] = {}
+    readable: dict[str, Path] = {}  # image id -> readable file
+
+    def publish(face: str, option: dict[str, Any]) -> Path | None:
+        cached = local.get(option["id"])
+        if cached is None:
+            return None
+        if option["id"] not in readable:
+            dst = images_dir / f"{safe_filename(face)}{cached.suffix}"
+            _link_or_copy(cached, dst)
+            readable[option["id"]] = dst
+            is_upscaled = upscale and option["origin"] == "scryfall" and face not in failed_faces
+            original = _cache_file(option) if option["origin"] != "local" else cached
+            faces_info[face] = {
+                "file": str(dst),
+                "cache": str(cached),
+                "original": str(original),
+                "origin": option["origin"],
+                "upscaled": is_upscaled,
+                "dpi": UPSCALE_DPI if is_upscaled else (option.get("dpi") or (300 if option["origin"] == "scryfall" else None)),
+            }
+        return readable[option["id"]]
+
     fronts: dict[Path, tuple[str, list[int]]] = {}
     backs: dict[Path, tuple[str, list[int]]] = {}
     manifest: list[dict[str, str | None]] = []
@@ -525,9 +558,9 @@ async def prepare(
     missing = list(p["missing"])
     for c in p["cards"]:
         front_img = c["front"]["image"]
-        front = local.get(front_img["id"]) if front_img else None
+        front = publish(c["front"]["face"], front_img) if front_img else None
         back_img = c["back"]["image"] if c["back"] else None
-        back = local.get(back_img["id"]) if back_img else None
+        back = publish(c["back"]["face"], back_img) if back_img else None
         if front is None:  # no image -> no (blank) slot at MPC
             if c["name"] not in missing:
                 missing.append(c["name"])
@@ -538,14 +571,21 @@ async def prepare(
                 backs.setdefault(back, (process_query(c["back"]["face"]), []))[1].append(slot)
             manifest.append({"name": c["name"], "front": str(front), "back": str(back) if back else None})
             slot += 1
+    cardback_file = images_dir / f"_Kartenrücken{cardback.suffix}"
+    _link_or_copy(cardback, cardback_file)
 
-    out = order_dir(deck["slug"])
-    out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("*.xml"):  # the desktop tool asks which file to use when there are several
         old.unlink()
     xml_path = out / f"{deck['slug']}.xml"
-    xml_path.write_text(order_xml(slot, stock, foil, fronts, backs, cardback), "utf-8")
+    xml_path.write_text(order_xml(slot, stock, foil, fronts, backs, cardback_file), "utf-8")
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), "utf-8")
+    (out / "prepared.json").write_text(json.dumps({
+        "faces": faces_info,
+        "cardback": str(cardback_file),
+        "upscaled": upscale,
+        "upscale_model": cfg["upscale_model"] if upscale else None,
+        "images_dir": str(images_dir),
+    }, indent=2, ensure_ascii=False), "utf-8")  # fmt: skip
 
     origins = [img["origin"] for img in jobs.values()]
     warnings = list(p["warnings"])
@@ -566,6 +606,7 @@ async def prepare(
     return {
         "xml": str(xml_path),
         "directory": str(out),
+        "images_dir": str(images_dir),
         "quantity": slot,
         "mpc_bracket": mpc_bracket(slot),
         "stock": stock,
@@ -581,6 +622,34 @@ async def prepare(
         "cardback": cardback_note,
         "warnings": warnings,
     }
+
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    """Hardlink (no extra disk space) or copy if linking is impossible (other drive, FAT, ...)."""
+    if dst.exists() or dst.is_symlink():
+        dst.unlink()
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def load_prepared(slug: str) -> dict[str, Any] | None:
+    try:
+        return json.loads((order_dir(slug) / "prepared.json").read_text("utf-8"))
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def prepared_image(slug: str, face: str, kind: str) -> Path:
+    """Path of a prepared image for the before/after view. Only files recorded in prepared.json."""
+    info = (load_prepared(slug) or {}).get("faces", {}).get(face)
+    if not info:
+        raise FileNotFoundError(f"Keine vorbereitete Druckdatei für „{face}“ – zuerst „Druckdateien vorbereiten“.")
+    path = Path(info["original"] if kind == "original" else info["file"])
+    if not path.is_file():
+        raise FileNotFoundError(f"Datei fehlt: {path}")
+    return path
 
 
 def export_pdf(slug: str, *, paper: str = "A4", include_backs: bool = True, cut_marks: bool = True) -> dict[str, Any]:

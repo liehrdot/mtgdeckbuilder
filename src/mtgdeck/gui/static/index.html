@@ -227,10 +227,12 @@
             <label class="check" title="Statt im Terminal hier in einem separaten Konsolenfenster starten"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
           </span>
           <span class="group downloads">
+            <button type="button" class="secondary hidden" id="open-folder-btn" title="Druckbilder im Explorer/Finder öffnen">Ordner öffnen</button>
             <a id="xml-link" class="hidden" href="#">order.xml</a>
             <a id="pdf-link" class="hidden" href="#">PDF</a>
           </span>
         </div>
+        <p id="prepared-info" class="hint hidden"></p>
         <p class="hint">Die order.xml lässt sich auch auf mpcfill.com importieren. Upload & Login bei MakePlayingCards
           übernimmt das MPC-Autofill-Programm (Windows: <code>autofill-windows.exe</code>, siehe Einstellungen).</p>
       </div>
@@ -312,6 +314,24 @@
   </div>
   <p id="picker-hint" class="hint"></p>
   <div id="picker-grid" class="picker-grid"></div>
+</dialog>
+
+<dialog id="compare" class="picker compare-dialog">
+  <div class="picker-head">
+    <h3 id="compare-title"></h3>
+    <div class="deck-actions">
+      <label class="check">Zoom
+        <select id="compare-zoom"><option value="1" selected>Einpassen</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+      </label>
+      <label class="check"><input type="checkbox" id="compare-bleed"> mit Beschnitt-Rand</label>
+      <button type="button" class="secondary" id="compare-close">Schließen</button>
+    </div>
+  </div>
+  <p class="hint">Beide Seiten scrollen gemeinsam – ideal, um Regeltext und Symbole zu vergleichen.</p>
+  <div class="compare-panes">
+    <figure><figcaption id="compare-cap-a"></figcaption><div class="pane" id="pane-a"><img id="compare-a" alt="Original"></div></figure>
+    <figure><figcaption id="compare-cap-b"></figcaption><div class="pane" id="pane-b"><img id="compare-b" alt="Druckdatei"></div></figure>
+  </div>
 </dialog>
 
 <template id="profile-template">

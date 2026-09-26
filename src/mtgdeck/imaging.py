@@ -74,14 +74,19 @@ def plain_cardback(dst: Path, rgb: tuple[int, int, int] = (38, 30, 58)) -> Path:
     return dst
 
 
+def crop_bleed(img: Image.Image) -> Image.Image:
+    """Cut the 1/8" bleed off an MPC-sized image (keeps its resolution)."""
+    w, h = img.size
+    bx = round(w * BLEED_IN / (TRIM_IN[0] + 2 * BLEED_IN))
+    by = round(h * BLEED_IN / (TRIM_IN[1] + 2 * BLEED_IN))
+    return img.crop((bx, by, w - bx, h - by))
+
+
 def trim(img: Image.Image, has_bleed: bool = True) -> Image.Image:
     """Crop the bleed (if any) and scale to the PDF card size."""
     img = img.convert("RGB")
     if has_bleed:
-        w, h = img.size
-        bx = round(w * BLEED_IN / (TRIM_IN[0] + 2 * BLEED_IN))
-        by = round(h * BLEED_IN / (TRIM_IN[1] + 2 * BLEED_IN))
-        img = img.crop((bx, by, w - bx, h - by))
+        img = crop_bleed(img)
     return img.resize(CARD_PDF_PX, Image.Resampling.LANCZOS)
 
 

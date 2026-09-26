@@ -264,14 +264,32 @@ $("#print-btn").addEventListener("click", () => currentDeck && openPrintStudio()
 $("#print-close").addEventListener("click", () => $("#print-panel").classList.add("hidden"));
 $("#print-form").addEventListener("submit", (e) => { e.preventDefault(); loadPlan(); });
 
+let prepared = { faces: {} };
+
 async function loadPlan() {
   $("#print-summary").textContent = "Lade Vorschau …";
   $("#print-grid").innerHTML = "";
   try {
-    printPlan = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/plan?source=${printOpts().source}`);
+    [printPlan, prepared] = await Promise.all([
+      api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/plan?source=${printOpts().source}`),
+      api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/prepared`),
+    ]);
   } catch (err) { $("#print-summary").textContent = err.message; return; }
   renderPlan();
+  renderPreparedInfo();
   updateDownloadLinks();
+}
+
+function renderPreparedInfo() {
+  const faces = Object.values(prepared.faces || {});
+  const has = faces.length > 0;
+  $("#open-folder-btn").classList.toggle("hidden", !has);
+  $("#prepared-info").classList.toggle("hidden", !has);
+  if (!has) return;
+  const ai = faces.filter((f) => f.upscaled).length;
+  $("#prepared-info").innerHTML = `Druckbilder: <code>${esc(prepared.images_dir)}</code> · ${faces.length} Bilder`
+    + (ai ? ` · ${ai} KI-hochskaliert (${esc(prepared.upscale_model)})` : "")
+    + " · 🔍 auf einer Karte zeigt Vorher/Nachher.";
 }
 
 function originTag(img) {
@@ -298,13 +316,16 @@ function cardTile(c, i, side) {
   const img = f?.image;
   return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
     ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
-    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${originTag(img)}</div>
-    ${c.back ? `<span class="flip" data-flip="${i}">${side === "front" ? "↻ Rückseite" : "↺ Vorderseite"}</span>` : ""}
+    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
+    ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}">${side === "front" ? "↻" : "↺"}</span>` : ""}
+    ${f && prepared.faces?.[f.face] ? `<span class="zoom" data-compare="${esc(f.face)}" title="Vorher/Nachher vergleichen">🔍 ${prepared.faces[f.face].dpi ? esc(prepared.faces[f.face].dpi) + " DPI" : ""}</span>` : ""}
     <div class="cap">${esc(f?.face || c.name)}</div>
   </button>`;
 }
 
 $("#print-grid").addEventListener("click", (e) => {
+  const cmp = e.target.closest("[data-compare]");
+  if (cmp) { openCompare(cmp.dataset.compare); return; }
   const flip = e.target.closest("[data-flip]");
   const tile = e.target.closest(".pcard");
   if (!tile) return;
@@ -356,10 +377,83 @@ $("#prepare-btn").addEventListener("click", async () => {
   } catch (err) { alert(err.message); }
 });
 
-function onPrepared(result) {
-  logLine("result", `Ordner: ${result.directory}`);
+// ---------- before/after comparison ----------
+let compareFace = null;
+function imageUrl(face, kind) {
+  return `/api/decks/${encodeURIComponent(currentDeck.slug)}/print/image?face=${encodeURIComponent(face)}&kind=${kind}&t=${Date.now()}`;
+}
+function openCompare(face) {
+  compareFace = face;
+  const info = prepared.faces[face];
+  $("#compare-title").textContent = `${face} – Vorher / Nachher`;
+  const originLabel = { scryfall: "Scryfall-Scan", mpcfill: "MPC-Autofill-Scan", local: "eigene Datei" }[info.origin] || info.origin;
+  $("#compare-cap-a").textContent = `Original: ${originLabel}`;
+  $("#compare-cap-b").textContent = `Druckdatei: ${info.dpi ? info.dpi + " DPI" : ""}${info.upscaled ? " · KI-hochskaliert" : info.origin === "scryfall" ? " · nicht hochskaliert" : ""}`;
+  loadCompareImages();
+  $("#compare").showModal();
+}
+function loadCompareImages() {
+  const bleed = $("#compare-bleed").checked;
+  const a = $("#compare-a"), b = $("#compare-b");
+  a.onload = b.onload = applyZoom;
+  a.src = imageUrl(compareFace, "original");
+  b.src = imageUrl(compareFace, bleed ? "file" : "trim");
+  b.onload = () => {
+    $("#compare-cap-b").dataset.size = `${b.naturalWidth} × ${b.naturalHeight} px`;
+    $("#compare-cap-b").title = $("#compare-cap-b").dataset.size;
+    applyZoom();
+  };
+}
+function applyZoom() {
+  const z = Number($("#compare-zoom").value);
+  const pane = $("#pane-a");
+  // keep the visible centre when zooming
+  const cx = (pane.scrollLeft + pane.clientWidth / 2) / Math.max(pane.scrollWidth, 1);
+  const cy = (pane.scrollTop + pane.clientHeight / 2) / Math.max(pane.scrollHeight, 1);
+  const img = $("#compare-b").naturalWidth ? $("#compare-b") : $("#compare-a");
+  const aspect = img.naturalWidth ? img.naturalWidth / img.naturalHeight : 63 / 88;
+  const fit = Math.min(pane.clientWidth, pane.clientHeight * aspect);  // whole card visible at "Einpassen"
+  const width = fit * z;
+  for (const img of [$("#compare-a"), $("#compare-b")]) img.style.width = `${width}px`;
+  for (const p of [$("#pane-a"), $("#pane-b")]) {
+    p.scrollLeft = cx * p.scrollWidth - p.clientWidth / 2;
+    p.scrollTop = cy * p.scrollHeight - p.clientHeight / 2;
+  }
+  const a = $("#compare-a");
+  if (a.naturalWidth) $("#compare-cap-a").title = `${a.naturalWidth} × ${a.naturalHeight} px`;
+}
+let syncLock = null;  // the pane the user is scrolling; the other one follows
+for (const [src, dst] of [["#pane-a", "#pane-b"], ["#pane-b", "#pane-a"]]) {
+  $(src).addEventListener("scroll", () => {
+    if (syncLock && syncLock !== src) return;
+    syncLock = src;
+    const s = $(src), d = $(dst);
+    d.scrollLeft = s.scrollLeft * (d.scrollWidth / Math.max(s.scrollWidth, 1));
+    d.scrollTop = s.scrollTop * (d.scrollHeight / Math.max(s.scrollHeight, 1));
+    clearTimeout(window._syncTimer);
+    window._syncTimer = setTimeout(() => { syncLock = null; }, 120);
+  });
+}
+$("#compare-zoom").addEventListener("change", applyZoom);
+$("#compare-bleed").addEventListener("change", loadCompareImages);
+$("#compare-close").addEventListener("click", () => $("#compare").close());
+
+$("#open-folder-btn").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/open-folder`, { method: "POST" });
+    if (!r.opened) alert(`Ordner: ${r.path}`);
+  } catch (err) { alert(err.message); }
+});
+
+async function onPrepared(result) {
+  logLine("result", `Druckbilder: ${result.images_dir}`);
   if (result.missing.length) logLine("error", `Ohne Bild: ${result.missing.join(", ")}`);
   updateDownloadLinks();
+  if (currentDeck && !$("#print-panel").classList.contains("hidden")) {
+    prepared = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/prepared`).catch(() => prepared);
+    renderPlan();
+    renderPreparedInfo();
+  }
 }
 
 async function updateDownloadLinks() {
