@@ -610,11 +610,20 @@ class SettingsUpdate(BaseModel):
     foil: bool | None = None
     paper: str | None = None
     mpcfill_cdn: str | None = None
+    upscale: bool | None = None
+    upscaler_path: str | None = None
+    upscale_model: str | None = None
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
-    found = proxy.find_autofill(cfg)
-    return {**cfg, "autofill_found": str(found) if found else None, "stocks": proxy.STOCKS, "platform": os.name}
+    found, upscaler = proxy.find_autofill(cfg), proxy.find_upscaler(cfg)
+    return {
+        **cfg,
+        "autofill_found": str(found) if found else None,
+        "upscaler_found": str(upscaler) if upscaler else None,
+        "stocks": proxy.STOCKS,
+        "platform": os.name,
+    }
 
 
 @app.get("/api/settings")
@@ -631,6 +640,7 @@ class PrintRequest(BaseModel):
     source: str = "auto"
     stock: str | None = None
     foil: bool | None = None
+    upscale: bool | None = None
     version: int | None = None
 
 
@@ -677,7 +687,9 @@ async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
             job.emit(type="progress", done=done, total=total, text=name)
 
         try:
-            result = await proxy.prepare(deck, source=req.source, stock=req.stock, foil=req.foil, progress=progress)
+            result = await proxy.prepare(
+                deck, source=req.source, stock=req.stock, foil=req.foil, upscale=req.upscale, progress=progress
+            )
         except ValueError as exc:
             job.emit(type="error", text=str(exc))
             job.emit(type="done", ok=False)
@@ -688,7 +700,8 @@ async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
             job.emit(type="error", text=e)
         job.emit(type="result", text=(
             f"{result['quantity']} Karten vorbereitet ({result['images_mpcfill']} MPC-Autofill-Scans, "
-            f"{result['images_scryfall']} Scryfall-Scans) · {result['cardback']}"
+            f"{result['images_scryfall']} Scryfall-Scans"
+            f"{', davon ' + str(result['images_upscaled']) + ' KI-hochskaliert' if result['upscaled'] else ''}) · {result['cardback']}"
         ))  # fmt: skip
         job.emit(type="print", result=result)
         job.emit(type="done", ok=not result["missing"])

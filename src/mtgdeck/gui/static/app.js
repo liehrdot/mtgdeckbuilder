@@ -220,7 +220,12 @@ let appSettings = {};
 async function loadSettings() {
   appSettings = await api("/api/settings");
   const f = $("#settings-form").elements;
-  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site"]) if (f[k]) f[k].value = appSettings[k] ?? "";
+  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model"]) if (f[k]) f[k].value = appSettings[k] ?? "";
+  f.upscale.checked = !!appSettings.upscale;
+  $("#upscaler-status").innerHTML = appSettings.upscaler_found
+    ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.upscaler_found)}`
+    : 'nicht installiert – nur nötig, wenn du hochskalieren willst (<a href="https://github.com/xinntao/Real-ESRGAN/releases" target="_blank" rel="noopener">Download</a>, benötigt eine Vulkan-fähige Grafikkarte).';
+  $("#print-form").elements.upscale.checked = !!appSettings.upscale;
   $("#autofill-status").innerHTML = appSettings.autofill_found
     ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.autofill_found)}`
     : '<span class="warn">nicht gefunden</span> – Pfad eintragen oder die exe in den Ordner <code>tools/</code> legen.';
@@ -232,6 +237,7 @@ async function loadSettings() {
 $("#settings-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = Object.fromEntries(new FormData(e.target));
+  body.upscale = e.target.elements.upscale.checked;
   try {
     await api("/api/settings", { method: "POST", body });
     await loadSettings();
@@ -244,7 +250,7 @@ $("#settings-form").addEventListener("submit", async (e) => {
 let printPlan = null;
 const printOpts = () => {
   const f = $("#print-form").elements;
-  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked };
+  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked, upscale: f.upscale.checked };
 };
 
 async function openPrintStudio() {

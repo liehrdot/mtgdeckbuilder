@@ -114,6 +114,15 @@ lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles dav
    bekommen automatisch Beschnitt-Rand (Bleed) und gefüllte Ecken, dazu ein Kartenrücken (eigener,
    vom MPC-Autofill-Server oder ein schlichter). Ergebnis: `proxies/<deck>/<deck>.xml` mit nur
    lokalen Dateien – das Autofill-Programm muss nichts mehr herunterladen oder umrechnen.
+   **Optional: KI-Hochskalierung (Opt-in, standardmäßig aus).** Mit Häkchen „KI-Hochskalierung“ im
+   Druckstudio werden Scryfall-Scans mit [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
+   (ncnn-vulkan, kostenlos) vierfach hochgerechnet und mit 600 statt 300 DPI aufbereitet – Text und
+   Linien werden deutlich schärfer. Einrichtung: `realesrgan-ncnn-vulkan` von den
+   [Releases](https://github.com/xinntao/Real-ESRGAN/releases) für dein System herunterladen und nach
+   `tools/realesrgan/` entpacken (der Ordner `models/` muss daneben liegen) oder den Pfad in den
+   Einstellungen eintragen. Benötigt eine Vulkan-fähige Grafikkarte (integrierte Grafik reicht), dauert je
+   nach GPU ein bis wenige Sekunden pro Karte; Ergebnisse werden gecacht. MPC-Autofill-Scans werden nie
+   hochskaliert (die haben schon 800 DPI). KI kann feine Details verfälschen – stichprobenartig prüfen.
 3. **PDF zum Selbstdrucken** – direkt im Deckbuilder (ohne exe): A4/Letter, 3 × 3 Karten à 63 × 88 mm,
    Schnittmarken, optional mit DFC-Rückseiten.
 4. **An MakePlayingCards senden** – startet das Autofill-Programm mit passenden Optionen. Seine
@@ -223,7 +232,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
-| `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
+| `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` / `MTG_UPSCALER_PATH` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
 | `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |
 

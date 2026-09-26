@@ -113,6 +113,20 @@
         <label>Eigener Kartenrücken <span class="opt">(Bilddatei)</span>
           <input name="cardback_path" placeholder="C:\Bilder\cardback.png">
         </label>
+        <fieldset>
+          <legend>KI-Hochskalierung (optional)</legend>
+          <label>Real-ESRGAN-Programm
+            <input name="upscaler_path" placeholder="realesrgan-ncnn-vulkan.exe (oder nach tools/realesrgan/ entpacken)">
+          </label>
+          <p id="upscaler-status" class="hint"></p>
+          <label>Modell
+            <select name="upscale_model">
+              <option value="realesrgan-x4plus">realesrgan-x4plus (schärfer, empfohlen)</option>
+              <option value="realesrnet-x4plus">realesrnet-x4plus (weicher, weniger Artefakte)</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" name="upscale"> standardmäßig im Druckstudio aktivieren</label>
+        </fieldset>
         <div class="row2">
           <label>Browser
             <select name="browser"><option>chrome</option><option>edge</option><option>brave</option></select>
@@ -188,6 +202,8 @@
           </label>
           <label>Kartenstärke <select name="stock"></select></label>
           <label class="check"><input type="checkbox" name="foil"> Foil</label>
+          <label class="check" title="Opt-in: Scryfall-Scans mit Real-ESRGAN auf 600 DPI hochrechnen (braucht das Zusatzprogramm, kostet Rechenzeit)">
+            <input type="checkbox" name="upscale"> KI-Hochskalierung <span class="opt">(Scryfall → 600 DPI)</span></label>
           <button type="submit" class="secondary">Vorschau laden</button>
         </form>
         <p id="print-summary" class="hint"></p>

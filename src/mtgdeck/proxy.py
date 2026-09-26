@@ -320,13 +320,66 @@ def _cache_file(option: dict[str, Any]) -> Path:
     return image_cache() / "scryfall" / f"{key}.png"
 
 
-async def _fetch(option: dict[str, Any]) -> Path:
-    """Download (cached) and make print-ready: returns a local image with bleed."""
+# --- optional AI upscaling (Real-ESRGAN, opt-in) ------------------------------------------------
+
+UPSCALE_DPI = 600  # target resolution of upscaled Scryfall scans
+_upscale_lock = asyncio.Lock()  # one GPU job at a time
+
+
+def find_upscaler(cfg: dict[str, Any] | None = None) -> Path | None:
+    """realesrgan-ncnn-vulkan from the settings, else anywhere below tools/."""
+    cfg = cfg or settings_mod.load()
+    if cfg.get("upscaler_path"):
+        p = Path(cfg["upscaler_path"]).expanduser()
+        return p if p.is_file() else None
+    for pattern in ("realesrgan-ncnn-vulkan.exe", "realesrgan-ncnn-vulkan", "realesrgan*.py"):
+        for candidate in sorted((PROJECT_ROOT / "tools").rglob(pattern)):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def upscale_command(exe: Path, src: Path, dst: Path, model: str) -> list[str]:
+    cmd = [sys.executable, str(exe)] if exe.suffix == ".py" else [str(exe)]
+    # x4plus models only support 4x; the model folder has to be named "models" (checked by the tool)
+    return cmd + ["-i", str(src), "-o", str(dst), "-n", model, "-s", "4", "-m", str(exe.parent / "models"), "-f", "png"]
+
+
+async def _upscale(raw: Path, cfg: dict[str, Any]) -> Path:
+    exe = find_upscaler(cfg)
+    if exe is None:
+        raise FileNotFoundError("Real-ESRGAN nicht gefunden")
+    out = raw.with_name(f"{raw.stem}-x4-{cfg['upscale_model']}.png")
+    if out.exists() and out.stat().st_size > 0:
+        return out
+    async with _upscale_lock:
+        proc = await asyncio.to_thread(
+            subprocess.run, upscale_command(exe, raw, out, cfg["upscale_model"]),
+            capture_output=True, text=True, timeout=600,
+        )  # fmt: skip
+    if proc.returncode != 0 or not out.exists():
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or ["unbekannter Fehler"]
+        raise RuntimeError(f"Real-ESRGAN fehlgeschlagen: {detail[0]}")
+    return out
+
+
+async def _fetch(option: dict[str, Any], *, upscale: bool = False, cfg: dict[str, Any] | None = None) -> Path:
+    """Download (cached) and make print-ready: returns a local image with bleed.
+
+    With ``upscale`` Scryfall scans are enlarged 4x by Real-ESRGAN and rendered at 600 DPI.
+    """
     if option["origin"] == "local":
         return Path(option["id"])
     raw = await download(option["full"], _cache_file(option))
     if option["origin"] == "mpcfill":
         return raw  # community scans already include the bleed edge
+    if upscale:
+        cfg = cfg or settings_mod.load()
+        ready = raw.with_name(f"{raw.stem}-bleed{UPSCALE_DPI}-{cfg['upscale_model']}.jpg")
+        if not ready.exists():
+            big = await _upscale(raw, cfg)
+            await asyncio.to_thread(imaging.add_bleed, big, ready, UPSCALE_DPI)
+        return ready
     ready = raw.with_name(raw.stem + "-bleed.jpg")
     if not ready.exists():
         await asyncio.to_thread(imaging.add_bleed, raw, ready)
@@ -384,10 +437,21 @@ async def prepare(
     source: str = "auto",
     stock: str | None = None,
     foil: bool | None = None,
+    upscale: bool | None = None,
     progress: Progress | None = None,
 ) -> dict[str, Any]:
-    """Download + process all images and write proxies/<slug>/<slug>.xml (local files only)."""
+    """Download + process all images and write proxies/<slug>/<slug>.xml (local files only).
+
+    ``upscale`` (opt-in, default from settings = off): AI-upscale Scryfall scans to 600 DPI.
+    """
     cfg = settings_mod.load()
+    upscale = bool(cfg.get("upscale") if upscale is None else upscale)
+    if upscale and find_upscaler(cfg) is None:
+        raise ValueError(
+            "KI-Hochskalierung ist aktiviert, aber Real-ESRGAN wurde nicht gefunden. Lade "
+            "realesrgan-ncnn-vulkan (https://github.com/xinntao/Real-ESRGAN/releases) herunter, entpacke es nach "
+            "tools/realesrgan/ oder trage den Pfad in den Einstellungen ein – oder deaktiviere die Option."
+        )
     stock = stock or cfg["stock"]
     foil = bool(cfg["foil"] if foil is None else foil)
     if stock not in STOCKS:
@@ -406,7 +470,7 @@ async def prepare(
         nonlocal done
         async with sem:
             try:
-                local[key] = await _fetch(option)
+                local[key] = await _fetch(option, upscale=upscale, cfg=cfg)
             except Exception as exc:
                 errors.append(f"{option.get('name')}: {exc}")
             done += 1
@@ -449,10 +513,15 @@ async def prepare(
 
     origins = [img["origin"] for img in jobs.values()]
     warnings = list(p["warnings"])
-    if "scryfall" in origins:
+    if "scryfall" in origins and upscale:
         warnings.append(
-            "Scryfall-Scans (300 DPI) wurden automatisch mit Beschnitt-Rand versehen. Für beste Druckqualität "
-            "einen MPC-Autofill-Server eintragen oder im Druckstudio einzelne Bilder austauschen."
+            f"Scryfall-Scans wurden mit Real-ESRGAN ({cfg['upscale_model']}) auf {UPSCALE_DPI} DPI hochskaliert "
+            "und mit Beschnitt-Rand versehen. Stichprobenartig prüfen – KI kann feine Details verfälschen."
+        )
+    elif "scryfall" in origins:
+        warnings.append(
+            "Scryfall-Scans (300 DPI) wurden automatisch mit Beschnitt-Rand versehen. Für mehr Schärfe: "
+            "KI-Hochskalierung aktivieren, einen MPC-Autofill-Server eintragen oder im Druckstudio Bilder austauschen."
         )
     return {
         "xml": str(xml_path),
@@ -464,6 +533,8 @@ async def prepare(
         "images_mpcfill": origins.count("mpcfill"),
         "images_scryfall": origins.count("scryfall"),
         "images_custom": sum(1 for img in jobs.values() if img.get("custom")),
+        "images_upscaled": origins.count("scryfall") if upscale else 0,
+        "upscaled": upscale,
         "double_faced": [c["name"] for c in p["cards"] if c["back"]],
         "missing": sorted(missing),
         "errors": errors,

@@ -132,6 +132,8 @@ When the user wants to print/proxy a deck (always offer it for proxy decks after
 1. `create_proxy_order` (slug; optional `stock`, `foil`, `version`) – downloads and prepares all
    images (MPC Autofill community scans if a server is set in `proxy_settings`, else Scryfall
    scans with generated bleed), double-faced backs and a cardback into `proxies/<slug>/`.
+   AI upscaling of Scryfall scans (`upscale: true`, Real-ESRGAN → 600 DPI) is opt-in: only pass it
+   when the user asks for it or has enabled it in the settings.
 2. Home printing: `export_proxy_pdf` (A4/Letter, 3 x 3 per page with cut marks).
 3. MakePlayingCards: `launch_proxy_tool` starts the MPC Autofill desktop tool (browser login and
    upload happen on the user's machine) – only when asked. If the tool is missing, explain:

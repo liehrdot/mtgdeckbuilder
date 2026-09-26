@@ -408,6 +408,7 @@ async def create_proxy_order(
     stock: Annotated[str | None, Field(description="MPC cardstock, e.g. '(S30) Standard Smooth', '(S33) Superior Smooth', '(M31) Linen'")] = None,
     foil: bool | None = None,
     version: Annotated[int | None, Field(description="Print an old version of the deck")] = None,
+    upscale: Annotated[bool | None, Field(description="Opt-in: AI-upscale Scryfall scans to 600 DPI with Real-ESRGAN (only if the user asks; default = setting, off)")] = None,
 ) -> dict[str, Any]:
     """Prepare proxy printing: download + process all card images (bleed, double-faced backs,
     cardback) and write the MPC Autofill order to proxies/<slug>/. Afterwards: export_proxy_pdf
@@ -415,7 +416,7 @@ async def create_proxy_order(
     try:
         deck = storage.load_version(slug, version)
         deck["slug"] = storage.slug(slug)
-        return await proxy.prepare(deck, source=source, stock=stock, foil=foil)
+        return await proxy.prepare(deck, source=source, stock=stock, foil=foil, upscale=upscale)
     except (FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 
@@ -453,12 +454,15 @@ async def proxy_settings(
     cardback_path: Annotated[str | None, Field(description="Own cardback image file")] = None,
     browser: Literal["chrome", "edge", "brave"] | None = None,
     stock: str | None = None,
+    upscale: Annotated[bool | None, Field(description="Default for AI upscaling (opt-in)")] = None,
+    upscaler_path: Annotated[str | None, Field(description="Path to realesrgan-ncnn-vulkan")] = None,
 ) -> dict[str, Any]:
     """Show (no arguments) or change the proxy printing settings."""
     changes = {k: v for k, v in locals().items() if v is not None}
     cfg = settings_mod.update(changes) if changes else settings_mod.load()
-    found = proxy.find_autofill(cfg)
-    return {**cfg, "autofill_found": str(found) if found else None, "stocks": proxy.STOCKS}
+    found, upscaler = proxy.find_autofill(cfg), proxy.find_upscaler(cfg)
+    return {**cfg, "autofill_found": str(found) if found else None,
+            "upscaler_found": str(upscaler) if upscaler else None, "stocks": proxy.STOCKS}  # fmt: skip
 
 
 @mcp.tool()

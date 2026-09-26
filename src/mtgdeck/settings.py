@@ -28,8 +28,17 @@ DEFAULTS: dict[str, Any] = {
     "stock": "(S30) Standard Smooth",
     "foil": False,
     "paper": "A4",  # PDF export: A4 | Letter
+    # Opt-in AI upscaling of Scryfall scans (300 -> 600 DPI) with Real-ESRGAN (ncnn-vulkan build)
+    "upscale": False,
+    "upscaler_path": "",  # realesrgan-ncnn-vulkan(.exe); empty = search in tools/
+    "upscale_model": "realesrgan-x4plus",
 }
-_ENV = {"autofill_path": "MTG_AUTOFILL_PATH", "mpcfill_server": "MTG_MPCFILL_SERVER", "cardback_path": "MTG_CARDBACK"}
+_ENV = {
+    "autofill_path": "MTG_AUTOFILL_PATH",
+    "mpcfill_server": "MTG_MPCFILL_SERVER",
+    "cardback_path": "MTG_CARDBACK",
+    "upscaler_path": "MTG_UPSCALER_PATH",
+}
 
 
 def load() -> dict[str, Any]:

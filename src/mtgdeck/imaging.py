@@ -33,24 +33,32 @@ def _border_colour(img: Image.Image) -> tuple[int, int, int]:
     return tuple(int(v) for v in ImageStat.Stat(ring).median)  # type: ignore[return-value]
 
 
-def add_bleed(src: Path, dst: Path) -> Path:
-    """Scryfall scan -> MPC-ready image: fill rounded corners, scale to trim size, extend edges."""
+def sizes(dpi: int = DPI) -> tuple[tuple[int, int], int, tuple[int, int]]:
+    """(trim px, bleed px, full px) for a resolution; 300 DPI -> (750x1050, 36, 822x1122)."""
+    trim_px = (round(TRIM_IN[0] * dpi), round(TRIM_IN[1] * dpi))
+    bleed_px = round(BLEED_IN * dpi)
+    return trim_px, bleed_px, (trim_px[0] + 2 * bleed_px, trim_px[1] + 2 * bleed_px)
+
+
+def add_bleed(src: Path, dst: Path, dpi: int = DPI) -> Path:
+    """Card scan -> MPC-ready image at ``dpi``: fill rounded corners, scale to trim size, extend edges."""
+    trim_px, bleed_px, full_px = sizes(dpi)
     img = Image.open(src)
     img = img.convert("RGBA")
     base = Image.new("RGBA", img.size, _border_colour(img) + (255,))
     base.alpha_composite(img)
-    card = base.convert("RGB").resize(TRIM_PX, Image.Resampling.LANCZOS)
+    card = base.convert("RGB").resize(trim_px, Image.Resampling.LANCZOS)
 
-    out = Image.new("RGB", FULL_PX)
-    out.paste(card, (BLEED_PX, BLEED_PX))
-    w, h, b = TRIM_PX[0], TRIM_PX[1], BLEED_PX
+    out = Image.new("RGB", full_px)
+    out.paste(card, (bleed_px, bleed_px))
+    w, h, b = trim_px[0], trim_px[1], bleed_px
     # replicate the outermost pixel rows/columns into the bleed area
     out.paste(card.crop((0, 0, w, 1)).resize((w, b)), (b, 0))
     out.paste(card.crop((0, h - 1, w, h)).resize((w, b)), (b, h + b))
     out.paste(out.crop((b, 0, b + 1, h + 2 * b)).resize((b, h + 2 * b)), (0, 0))
     out.paste(out.crop((w + b - 1, 0, w + b, h + 2 * b)).resize((b, h + 2 * b)), (w + b, 0))
     dst.parent.mkdir(parents=True, exist_ok=True)
-    out.save(dst, "JPEG", quality=95, dpi=(DPI, DPI))
+    out.save(dst, "JPEG", quality=95, dpi=(dpi, dpi))
     return dst
 
 

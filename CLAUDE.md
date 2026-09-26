@@ -80,6 +80,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `plan()` picks one image per face. Priority: `proxies/<slug>/selection.json` › MPC Autofill search server (`/2/sources/`, `/3/editorSearch/`, `/2/cards/`, `/2/cardbacks/`) › Scryfall scan. Full images come from the CDN (`cdn.mpcautofill.com/images/google_drive/{small|full}/<id>.jpg`).
   - `prepare()` downloads into the shared cache `<MTG_DATA_DIR>/images`. Scryfall scans get bleed via `imaging.add_bleed`, 822×1122 px at 300 DPI.
   - `prepare()` writes the order XML with `sourceType` `Local File` only, plus `manifest.json`. Imageless cards get no slot.
+  - Opt-in AI upscaling: `prepare(upscale=)` defaults to setting `upscale` (off). It runs `realesrgan-ncnn-vulkan` (`find_upscaler`: settings or `tools/**`; `-s 4`, `-m <exe dir>/models`, serialised by a lock) on Scryfall scans, then `add_bleed(dpi=600)`. If opted in and the tool is missing, it raises `ValueError`. MPC scans are never upscaled.
   - `export_pdf()` builds home-printing sheets.
   - `autofill_command()` passes `--directory --browser --site --auto-save --no-image-post-processing`. Keep exactly one XML per folder, otherwise the tool prompts.
   - The GUI streams the tool's stdout via a Popen reader thread (`Job.emit_threadsafe`). Stdin goes through `/api/jobs/{id}/input`.
@@ -125,5 +126,5 @@ Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
 - `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_PROXIES_DIR`
-- `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`
+- `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`, `MTG_UPSCALER_PATH`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`

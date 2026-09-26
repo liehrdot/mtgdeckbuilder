@@ -203,3 +203,69 @@ def test_settings_creates_parent_dir(tmp_path, monkeypatch):
     assert settings.update({"browser": "edge", "unknown": 1})["browser"] == "edge"
     monkeypatch.setenv("MTG_MPCFILL_SERVER", "https://env.example")
     assert settings.load()["mpcfill_server"] == "https://env.example"
+
+
+FAKE_ESRGAN = """
+import sys
+from PIL import Image
+args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
+assert args["-s"] == "4" and args["-n"] in ("realesrgan-x4plus", "realesrnet-x4plus"), args
+assert args["-m"].endswith("models") and args["-f"] == "png", args
+if "fail" in open(__file__).read().split("#flags:")[-1]:
+    sys.exit("vkCreateInstance failed")
+with Image.open(args["-i"]) as im:
+    im.resize((im.width * 4, im.height * 4)).save(args["-o"])
+#flags:
+"""
+
+
+def _fake_esrgan(tmp_path, fail=False):
+    exe = tmp_path / "realesrgan" / "realesrgan.py"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text(FAKE_ESRGAN + ("fail" if fail else ""))
+    settings.update({"upscaler_path": str(exe)})
+    return exe
+
+
+def _forest_size(result):
+    root = ET.parse(result["xml"]).getroot()
+    forest = next(c for c in root.findall("fronts/card") if c.findtext("query") == "forest")
+    with Image.open(forest.findtext("id")) as im:
+        return im.size
+
+
+async def test_upscaling_is_opt_in(tmp_path):
+    assert settings.load()["upscale"] is False
+    r = await proxy.prepare(DECK)  # default: no upscaling, no upscaler needed
+    assert not r["upscaled"] and _forest_size(r) == (822, 1122)
+    with pytest.raises(ValueError, match="Real-ESRGAN"):
+        await proxy.prepare(DECK, upscale=True)  # opted in, but tool missing -> clear error
+
+
+async def test_upscaling_to_600_dpi(tmp_path):
+    _fake_esrgan(tmp_path)
+    r = await proxy.prepare(DECK, upscale=True)
+    assert r["upscaled"] and r["images_upscaled"] == r["images_scryfall"] > 0
+    assert _forest_size(r) == imaging.sizes(600)[2] == (1644, 2244)
+    assert any("hochskaliert" in w for w in r["warnings"])
+    # setting as default, then explicit opt-out per run
+    settings.update({"upscale": True})
+    assert (await proxy.prepare(DECK))["upscaled"]
+    assert _forest_size(await proxy.prepare(DECK, upscale=False)) == (822, 1122)
+
+
+async def test_upscaler_failure_is_reported(tmp_path):
+    _fake_esrgan(tmp_path, fail=True)
+    r = await proxy.prepare(DECK, upscale=True)
+    assert any("Real-ESRGAN fehlgeschlagen: vkCreateInstance failed" in e for e in r["errors"])
+
+
+def test_find_upscaler_in_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(proxy, "PROJECT_ROOT", tmp_path)
+    assert proxy.find_upscaler() is None
+    exe = tmp_path / "tools" / "realesrgan-ncnn-vulkan-20220424-windows" / "realesrgan-ncnn-vulkan.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("x")
+    assert proxy.find_upscaler() == exe
+    cmd = proxy.upscale_command(exe, Path("a.png"), Path("b.png"), "realesrgan-x4plus")
+    assert cmd[0] == str(exe) and cmd[cmd.index("-m") + 1] == str(exe.parent / "models")
