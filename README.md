@@ -43,7 +43,11 @@ Dann z. B.:
 
 - `/commander-deckbuilder Meren of Clan Nel Toth, Bracket 2, Budget 100 €`
 - „Baue mir ein Atraxa-Superfriends-Deck für Bracket 4.“
-- „Ich will ein Bracket-3-Deck in Grixis mit Spells-Thema – schlag mir Commander vor.“
+- „Mir fällt kein Commander ein: ich mag Drachen und große Zauber, Bracket 3.“ → Skill
+  `commander-finder` schlägt 3–5 passende Commander mit Begründung vor, danach wird gebaut
+  (auch direkt: `/commander-finder Vampire mit Lifedrain, budgetfreundlich`).
+- „Baue ein Proxy-Deck mit Atraxa für Bracket 4“ – bei Proxy-Decks spielen Preise keine Rolle.
+- „Setz Cyclonic Rift und Smothering Tithe auf meine Blacklist.“
 - „Mach mein Deck `meren-aristocrats` billiger, max. 80 €.“
 - „Welches Bracket hat dieses Deck? https://archidekt.com/decks/123456“
 - Deutsche Kartennamen („Schwerter zu Pflugscharen“, „Sol-Ring“) funktionieren mit der lokalen DB.
@@ -65,13 +69,32 @@ Stand: WotC-Update vom 21.10.2025 (keine Tutor-Limits mehr) und Game-Changer-Upd
 Die Game-Changer-Liste wird **live von Scryfall** (`is:gamechanger`) gelesen, nicht hart kodiert.
 `validate_deck` fragt zusätzlich Commander Spellbook nach einer Bracket-Schätzung und nach Combos.
 
+## Commander finden, Proxy-Decks, Blacklist
+
+- **Commander finden:** Beschreibe frei, was du spielen willst (Farben, Kreaturtypen, Mechaniken,
+  Spielstil). Der Skill `commander-finder` sucht Kandidaten (Scryfall, lokale DB, EDHREC), prüft
+  Oracle-Text, Bracket-Tauglichkeit und Budget und liefert 3–5 Vorschläge mit Begründung.
+- **Proxy-Deck:** Wird das Deck geproxt, ignoriert Claude jedes Budget und wählt die besten
+  Karten für Bracket und Strategie (Bracket-Regeln gelten weiterhin). Das Deck wird als
+  Proxy-Deck markiert, der echte Kartenwert nur informativ angezeigt.
+- **Budget:** `validate_deck`/`save_deck` warnen, wenn das Deck das Budget überschreitet.
+- **Blacklist:** Karten, die nie in ein Deck dürfen. Gepflegt in der GUI, per Claude
+  („setz X auf die Blacklist“, Tool `update_blacklist`) oder direkt in `blacklist.txt`
+  (eine Karte pro Zeile, `#` = Kommentar; Datei ist gitignored). Deutsche Namen werden in
+  Oracle-Namen übersetzt. Suchergebnisse blenden Blacklist-Karten aus, die Validierung meldet
+  sie als Fehler.
+
 ## Web-GUI
 
 ```bash
 uv run mtg-gui              # → http://127.0.0.1:8765
 ```
 
-- Commander mit Autovervollständigung (Scryfall), Bracket 1–5, Budget/Währung, Thema, Wünsche, Modell
+- „Keine Idee? Commander finden“: Wunsch eingeben → Vorschlagskarten mit Bild und Begründung →
+  „Übernehmen“ (füllt das Formular) oder direkt „Deck bauen“
+- Commander mit Autovervollständigung (Scryfall), Bracket 1–5, Budget/Währung oder Proxy-Schalter,
+  Thema, Wünsche, Modell
+- Blacklist-Panel: Karten hinzufügen (mit Autovervollständigung) oder entfernen
 - „Deck bauen lassen“ startet Claude Code im Hintergrund (Claude Agent SDK); der Fortschritt
   (Tool-Aufrufe, Zwischentexte) wird live angezeigt
 - Deckansicht: Prüfung (legal, Bracket, Game Changer, Combos …), Manakurve, Rollen, Preis,
@@ -120,6 +143,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `validate_deck` | 100 Karten, Singleton, Farbidentität, Bannliste, Rollen-Richtwerte, Bracket-Prüfung |
 | `save_deck` / `load_deck` / `list_decks` / `export_deck` | Decks speichern, laden, exportieren |
 | `import_deck` | Archidekt-/Moxfield-URL importieren |
+| `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
 | `card_db_status` / `update_card_database` | lokale Kartendatenbank |
 
 Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop):
@@ -134,6 +158,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_DATA_DIR` / `MTG_CACHE_DIR` | `~/.cache/mtgdeck` | Speicherort DB / HTTP-Cache |
 | `MTG_CACHE_TTL` | `86400` | HTTP-Cache-Dauer in Sekunden |
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
+| `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
 | `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |
 
@@ -151,5 +176,5 @@ uv sync --all-extras
 uv run pytest          # läuft komplett offline (HTTP wird gemockt)
 ```
 
-Struktur: `src/mtgdeck/` (Python-Paket), `.claude/skills/commander-deckbuilder/` (Skill),
+Struktur: `src/mtgdeck/` (Python-Paket), `.claude/skills/` (Skills `commander-deckbuilder`, `commander-finder`),
 `.mcp.json` (MCP-Registrierung), `tests/`.

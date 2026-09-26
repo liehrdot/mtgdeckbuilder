@@ -15,6 +15,20 @@
 
 <main>
   <aside id="sidebar">
+    <details class="panel" id="finder-panel">
+      <summary><h2>Keine Idee? Commander finden</h2></summary>
+      <form id="finder-form" autocomplete="off">
+        <label>Was willst du spielen?
+          <textarea name="prompt" rows="4" required placeholder="z. B. Ich mag Drachen und große Zauber, gerne Rot-Grün, nicht zu kompetitiv. Oder: Vampire mit Lebensentzug, Budget-freundlich."></textarea>
+        </label>
+        <label>Anzahl Vorschläge
+          <select name="count"><option>3</option><option selected>5</option><option>8</option></select>
+        </label>
+        <p class="hint">Bracket, Budget/Proxy und Modell werden aus „Neues Deck“ übernommen.</p>
+        <button type="submit" id="finder-btn">Commander vorschlagen</button>
+      </form>
+    </details>
+
     <section class="panel">
       <h2>Neues Deck</h2>
       <form id="build-form" autocomplete="off">
@@ -34,14 +48,19 @@
           <p id="bracket-desc" class="hint"></p>
         </fieldset>
 
-        <div class="row">
+        <div class="row budget-row">
           <label>Budget
-            <input name="budget" type="number" min="0" step="10" placeholder="unbegrenzt">
+            <input id="budget" name="budget" type="number" min="0" step="10" placeholder="unbegrenzt">
           </label>
           <label>Währung
             <select name="currency"><option value="eur">EUR</option><option value="usd">USD</option></select>
           </label>
         </div>
+        <label class="switch" title="Das Deck wird geproxt: Preise spielen keine Rolle, das Budget wird ignoriert.">
+          <input type="checkbox" id="proxy" name="proxy">
+          <span class="slider" aria-hidden="true"></span>
+          <span>Proxy-Deck <span class="opt">– Preise egal, beste Karten fürs Bracket</span></span>
+        </label>
         <label>Strategie / Thema <span class="opt">(optional)</span>
           <input name="strategy" placeholder="z. B. +1/+1 Counter, Superfriends, Tokens">
         </label>
@@ -65,6 +84,18 @@
       <ul id="deck-list" class="deck-list"></ul>
     </section>
 
+    <details class="panel" id="blacklist-panel">
+      <summary><h2>Blacklist <span id="bl-count" class="opt"></span></h2></summary>
+      <p class="hint">Diese Karten kommen nie in ein Deck (auch deutsche Namen möglich).</p>
+      <form id="bl-form" class="bl-form" autocomplete="off">
+        <input id="bl-input" list="ac-bl" placeholder="Karte hinzufügen …">
+        <datalist id="ac-bl"></datalist>
+        <button type="submit" class="secondary">+</button>
+      </form>
+      <p id="bl-msg" class="hint"></p>
+      <ul id="bl-list" class="chips"></ul>
+    </details>
+
     <section class="panel">
       <h2>Kartendatenbank</h2>
       <p id="db-status" class="hint">…</p>
@@ -79,6 +110,11 @@
         <button id="cancel-btn" class="secondary">Abbrechen</button>
       </div>
       <div id="log" class="log"></div>
+    </section>
+
+    <section id="suggestions" class="panel hidden">
+      <h2>Commander-Vorschläge</h2>
+      <div id="suggestion-list" class="suggestions"></div>
     </section>
 
     <section id="deck-view" class="hidden">
@@ -117,10 +153,13 @@
     <section id="welcome" class="panel">
       <h2>So funktioniert's</h2>
       <ol>
-        <li>Commander eingeben (Autovervollständigung über Scryfall) und Bracket wählen.</li>
+        <li>Commander eingeben (Autovervollständigung über Scryfall) – oder unter „Keine Idee? Commander finden“
+            beschreiben, was du spielen willst, und dir Vorschläge machen lassen.</li>
+        <li>Bracket wählen, Budget setzen oder „Proxy-Deck“ aktivieren, wenn du das Deck proxen willst.</li>
         <li>„Deck bauen lassen“ startet Claude Code mit dem Skill <code>commander-deckbuilder</code>.
             Claude recherchiert über den MCP-Server auf Scryfall, EDHREC und Commander Spellbook.</li>
-        <li>Das fertige Deck wird geprüft (Legalität, Farbidentität, Bracket-Regeln) und in <code>decks/</code> gespeichert.</li>
+        <li>Das fertige Deck wird geprüft (Legalität, Farbidentität, Bracket-Regeln, Budget, deine Blacklist)
+            und in <code>decks/</code> gespeichert.</li>
         <li>Mit „Überarbeiten lassen“ kannst du Änderungen in natürlicher Sprache anfordern.</li>
       </ol>
     </section>

@@ -92,9 +92,11 @@ function handleEvent(ev) {
     case "status": logLine("tool", ev.text); break;
     case "error": logLine("error", "Fehler: " + ev.text); break;
     case "result": logLine("result", ev.text); break;
+    case "suggestions": renderSuggestions(ev.items); break;
     case "done":
       eventSource.close();
       $("#build-btn").disabled = false;
+      $("#finder-btn").disabled = false;
       $("#cancel-btn").disabled = true;
       $("#job-title").textContent = ev.ok ? "Fertig" : "Beendet";
       refreshDeckList().then(() => { if (ev.deck) openDeck(ev.deck); });
@@ -102,18 +104,108 @@ function handleEvent(ev) {
   }
 }
 
+function buildSettings() {
+  const f = Object.fromEntries(new FormData($("#build-form")));
+  const proxy = $("#proxy").checked;
+  return {
+    bracket: Number(f.bracket), currency: f.currency, proxy,
+    budget: !proxy && f.budget ? Number(f.budget) : null, model: f.model || null,
+  };
+}
+
+$("#proxy").addEventListener("change", () => {
+  const on = $("#proxy").checked;
+  $("#budget").disabled = on;
+  $("#budget").placeholder = on ? "egal (Proxy)" : "unbegrenzt";
+});
+
 $("#build-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target));
   const body = {
-    commander: f.commander, partner: f.partner || null, bracket: Number(f.bracket),
-    budget: f.budget ? Number(f.budget) : null, currency: f.currency,
-    strategy: f.strategy || null, notes: f.notes || null, model: f.model || null,
+    ...buildSettings(), commander: f.commander, partner: f.partner || null,
+    strategy: f.strategy || null, notes: f.notes || null,
   };
   try {
     const { job } = await api("/api/build", { method: "POST", body });
     startJob(job, `Claude baut ${body.commander} (Bracket ${body.bracket}) …`);
   } catch (err) { alert(err.message); }
+});
+
+// ---------- commander finder ----------
+$("#finder-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const body = { ...buildSettings(), prompt: f.prompt, count: Number(f.count) };
+  try {
+    const { job } = await api("/api/find-commander", { method: "POST", body });
+    $("#finder-btn").disabled = true;
+    $("#suggestions").classList.add("hidden");
+    startJob(job, "Claude sucht passende Commander …");
+  } catch (err) { alert(err.message); }
+});
+
+const COLOR_NAMES = { W: "Weiß", U: "Blau", B: "Schwarz", R: "Rot", G: "Grün" };
+let suggestions = [];
+
+function renderSuggestions(items) {
+  suggestions = items || [];
+  $("#welcome").classList.add("hidden");
+  $("#deck-view").classList.add("hidden");
+  $("#suggestions").classList.remove("hidden");
+  const priceKey = new FormData($("#build-form")).get("currency") === "usd" ? "price_usd" : "price_eur";
+  $("#suggestion-list").innerHTML = suggestions.map((s, i) => {
+    const colors = (s.color_identity || []).map((c) => COLOR_NAMES[c] || c).join(", ") || "Farblos";
+    return `<div class="suggestion">
+      ${s.image ? `<img src="${esc(s.image)}" alt="${esc(s.name)}" loading="lazy">` : ""}
+      <h4>${esc(s.name)}${s.partner ? " + " + esc(s.partner) : ""}</h4>
+      <p class="hint">${esc(s.archetype || "")} · ${esc(colors)}${s[priceKey] ? " · " + esc(s[priceKey]) : ""}</p>
+      <p>${esc(s.why || "")}</p>
+      ${s.bracket_fit ? `<p class="hint">${esc(s.bracket_fit)}</p>` : ""}
+      <div class="actions">
+        <button class="secondary" data-use="${i}">Übernehmen</button>
+        <button data-build="${i}">Deck bauen</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+$("#suggestion-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-use], button[data-build]");
+  if (!btn) return;
+  const s = suggestions[Number(btn.dataset.use ?? btn.dataset.build)];
+  $("#commander").value = s.name;
+  $("#partner").value = s.partner || "";
+  const strategy = $("#build-form").elements.strategy;
+  if (s.strategy && !strategy.value) strategy.value = s.strategy;
+  previewCommander(s.name);
+  if (btn.dataset.build !== undefined) $("#build-form").requestSubmit();
+  else $("#commander").scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// ---------- blacklist ----------
+async function refreshBlacklist() {
+  const names = await api("/api/blacklist");
+  $("#bl-count").textContent = names.length ? `(${names.length})` : "";
+  $("#bl-list").innerHTML = names.map((n) => `<li>${esc(n)}<button title="Entfernen" data-name="${esc(n)}">×</button></li>`).join("");
+}
+$("#bl-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const raw = $("#bl-input").value.trim();
+  if (!raw) return;
+  const add = raw.split(/[;\n]/).map((x) => x.trim()).filter(Boolean);
+  try {
+    const r = await api("/api/blacklist", { method: "POST", body: { add } });
+    $("#bl-input").value = "";
+    $("#bl-msg").textContent = r.not_found.length ? `Nicht gefunden: ${r.not_found.join(", ")}` : "";
+    refreshBlacklist();
+  } catch (err) { $("#bl-msg").textContent = err.message; }
+});
+$("#bl-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-name]");
+  if (!btn) return;
+  await api("/api/blacklist", { method: "POST", body: { remove: [btn.dataset.name] } });
+  refreshBlacklist();
 });
 
 $("#refine-form").addEventListener("submit", async (e) => {
@@ -153,10 +245,12 @@ async function openDeck(slug) {
   $("#welcome").classList.add("hidden");
   $("#deck-view").classList.remove("hidden");
   $("#deck-name").textContent = d.name;
-  $("#deck-meta").textContent = `${d.commanders.join(" + ")} · Bracket ${d.bracket ?? "?"} · aktualisiert ${d.updated ?? ""}`;
+  $("#suggestions").classList.add("hidden");
+  const money = d.proxy ? " · Proxy-Deck" : d.budget ? ` · Budget ${d.budget} ${(d.currency || "eur").toUpperCase()}` : "";
+  $("#deck-meta").textContent = `${d.commanders.join(" + ")} · Bracket ${d.bracket ?? "?"}${money} · aktualisiert ${d.updated ?? ""}`;
   $("#deck-desc").textContent = d.description || "";
   renderValidation(d.validation);
-  renderStats(d.validation?.stats);
+  renderStats(d.validation?.stats, d.validation);
   renderCards(d);
   refreshDeckList();
 }
@@ -181,7 +275,7 @@ function renderValidation(v) {
     </dl>`;
 }
 
-function renderStats(s) {
+function renderStats(s, v = {}) {
   const box = $("#stats");
   if (!s) { box.innerHTML = ""; return; }
   const curve = s.mana_curve || {};
@@ -196,7 +290,7 @@ function renderStats(s) {
       <dt>Ø Manawert</dt><dd>${s.avg_cmc_nonland}</dd>
       <dt>Typen</dt><dd>${esc(Object.entries(s.types || {}).map(([k, v]) => `${k} ${v}`).join(" · "))}</dd>
       <dt>Rollen</dt><dd>${esc(Object.entries(s.role_counts || {}).map(([k, v]) => `${ROLE_LABELS[k] || k} ${v}`).join(" · "))}</dd>
-      <dt>Preis</dt><dd>${priceKey ? `${s[priceKey]} ${cur}` : "–"}</dd>
+      <dt>Preis</dt><dd>${priceKey ? `${v.price_total ?? s[priceKey]} ${cur}` : "–"}${v.proxy ? ' <span class="badge proxy">Proxy</span>' : v.budget ? ` <span class="hint">/ Budget ${v.budget}</span>` : ""}</dd>
     </dl>`;
 }
 
@@ -281,6 +375,8 @@ $("#db-btn").addEventListener("click", async () => {
 
 wireAutocomplete($("#commander"), $("#ac-commander"), previewCommander);
 wireAutocomplete($("#partner"), $("#ac-partner"));
+wireAutocomplete($("#bl-input"), $("#ac-bl"));
+refreshBlacklist();
 initBrackets();
 refreshDeckList();
 refreshDbStatus();

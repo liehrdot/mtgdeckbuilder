@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from mtgdeck import carddb, http, storage
+from mtgdeck import blacklist, carddb, http, storage
 
 
 def card(name: str, *, ci: str = "", type_line: str = "Creature — Human", text: str = "", cmc: float = 2,
@@ -57,8 +57,10 @@ CARDS = {
 
 
 def lookup_card(name: str) -> dict[str, Any] | None:
-    if name in CARDS:
-        return CARDS[name]
+    """Case-insensitive like the real Scryfall API."""
+    exact = next((c for n, c in CARDS.items() if n.lower() == name.lower()), None)
+    if exact:
+        return exact
     if name.lower().startswith("filler"):
         return card(name.title(), ci="G", text="Draw a card." if "draw" in name.lower() else "")
     return None
@@ -121,6 +123,7 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(carddb, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(carddb, "DB_PATH", tmp_path / "data" / "cards.sqlite")
     monkeypatch.setattr(storage, "DECKS_DIR", tmp_path / "decks")
+    monkeypatch.setattr(blacklist, "BLACKLIST_FILE", tmp_path / "blacklist.txt")
     http._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), headers={"User-Agent": http.USER_AGENT})
     yield
     http._client = None

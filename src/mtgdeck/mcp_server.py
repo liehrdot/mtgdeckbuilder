@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import brackets, carddb, edhrec, importers, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, edhrec, importers, scryfall, spellbook, storage
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
 from .validate import validate_deck as _validate
@@ -27,8 +27,9 @@ mcp = MCPServer(
     instructions=(
         "Tools for building Magic: The Gathering Commander (EDH) decks. Use the "
         "'commander-deckbuilder' skill for the workflow. Card names are English Oracle names; "
-        "the local card DB also resolves names in other languages. Always finish a build with "
-        "validate_deck and save_deck."
+        "the local card DB also resolves names in other languages. Cards on the user's blacklist "
+        "(get_blacklist) must never be used; search results already omit them. Always finish a "
+        "build with validate_deck and save_deck."
     ),
 )
 
@@ -58,7 +59,8 @@ async def search_cards(
     t:<type>, o:"<oracle text>", mv<=N, is:commander.
     """
     result = await scryfall.search(query, order=order, max_results=max_results)
-    return {"total": result["total"], "cards": [_slim(scryfall.compact(c)) for c in result["cards"]]}
+    cards = blacklist.filter_cards([scryfall.compact(c) for c in result["cards"]])
+    return {"total": result["total"], "cards": [_slim(c) for c in cards]}
 
 
 @mcp.tool()
@@ -85,6 +87,7 @@ async def local_card_search(
         max_price=max_price, currency=currency, commanders_only=commanders_only,
         exclude_game_changers=exclude_game_changers, limit=limit,
     )  # fmt: skip
+    cards = blacklist.filter_cards(cards)
     return {"count": len(cards), "cards": [_slim(c) for c in cards]}
 
 
@@ -102,9 +105,14 @@ async def find_commanders(
     query: Annotated[str, Field(description="Scryfall syntax, e.g. 'id=bg o:sacrifice' or 'id=wubrg'")] = "",
     max_results: Annotated[int, Field(ge=1, le=50)] = 15,
 ) -> dict[str, Any]:
-    """Find legal commanders (legendary creatures etc.), most popular first."""
+    """Find legal commanders (legendary creatures etc.), most popular (EDHREC rank) first.
+
+    For open-ended ideas ("I like dragons", "lots of tokens in Selesnya") combine several searches,
+    e.g. 'id=wg o:token', 't:dragon', 'id<=br o:sacrifice'. See the commander-finder skill.
+    """
     result = await scryfall.search(f"is:commander f:commander {query}".strip(), max_results=max_results)
-    return {"total": result["total"], "commanders": [_slim(scryfall.compact(c)) for c in result["cards"]]}
+    cards = blacklist.filter_cards([scryfall.compact(c) for c in result["cards"]])
+    return {"total": result["total"], "commanders": [_slim(c) for c in cards]}
 
 
 @mcp.tool()
@@ -145,11 +153,14 @@ async def edhrec_recommendations(
     If a bracket/theme/budget combination has no page, retry without that filter.
     """
     try:
-        return await edhrec.commander_page(
+        page = await edhrec.commander_page(
             [commander, partner or ""], theme=theme, budget=budget, bracket=bracket, per_category=per_category
         )
     except LookupError as exc:
         return {"error": str(exc)}
+    for cat in page["categories"]:
+        cat["cards"] = blacklist.filter_cards(cat["cards"])
+    return page
 
 
 @mcp.tool()
@@ -197,10 +208,13 @@ async def validate_deck(
     cards: Annotated[list[str], Field(description="Main deck lines without commanders: '1 Sol Ring', '12 Forest'")],
     bracket: Bracket,
     currency: Currency = "eur",
+    budget: Annotated[float | None, Field(description="Max. total deck price; exceeding it is a warning")] = None,
+    proxy: Annotated[bool, Field(description="Deck will be printed as proxies: prices don't matter")] = False,
 ) -> dict[str, Any]:
-    """Check a deck: 100 cards, singleton, color identity, banned cards, land/ramp/draw/removal counts,
-    bracket rules (Game Changers, mass land denial, extra turns, 2-card combos via Commander Spellbook)."""
-    result = await _validate(commanders, cards, bracket, currency=currency)
+    """Check a deck: 100 cards, singleton, color identity, banned cards, user blacklist, budget,
+    land/ramp/draw/removal counts, bracket rules (Game Changers, mass land denial, extra turns,
+    2-card combos via Commander Spellbook)."""
+    result = await _validate(commanders, cards, bracket, currency=currency, budget=budget, proxy=proxy)
     result.pop("_card_data", None)
     result.pop("cards", None)
     result["stats"].pop("roles", None)  # role -> card lists are long; counts suffice here
@@ -226,12 +240,13 @@ async def save_deck(
     strategy: str = "",
     budget: float | None = None,
     currency: Currency = "eur",
+    proxy: Annotated[bool, Field(description="Deck will be printed as proxies (budget ignored)")] = False,
     notes: Annotated[str, Field(description="Notes for the player: mulligan tips, combos, upgrade ideas")] = "",
     slug: Annotated[str | None, Field(description="Existing deck slug to overwrite (when refining a deck)")] = None,
 ) -> dict[str, Any]:
     """Validate and save a deck to decks/<slug>.json (+ .txt export for Moxfield/Archidekt). Shown in the GUI."""
     lines = [f"{c.qty} {c.name}" for c in cards]
-    result = await _validate(commanders, lines, bracket, currency=currency)
+    result = await _validate(commanders, lines, bracket, currency=currency, budget=budget, proxy=proxy)
     card_data = result.pop("_card_data")
     categories = {c.name: c.category for c in cards}
     renamed = result["renamed"]
@@ -245,7 +260,8 @@ async def save_deck(
         "bracket": bracket,
         "description": description,
         "strategy": strategy,
-        "budget": budget,
+        "budget": None if proxy else budget,
+        "proxy": proxy,
         "currency": currency,
         "notes": notes,
         "cards": [{**c, "category": categories.get(c["name"], "")} for c in result.pop("cards")],
@@ -261,11 +277,31 @@ async def save_deck(
         "errors": result["errors"],
         "warnings": result["warnings"],
         "bracket": {k: result["bracket"][k] for k in ("target", "compliant", "violations", "warnings", "estimated", "game_changers")},
-        "price_total": result["stats"].get(f"total_price_{currency}"),
+        "price_total": result["price_total"],
+        "proxy": proxy,
         "card_count": result["stats"]["card_count"] + len(result["commanders"]),
         "unresolved_cards": [n for n in categories if n not in card_data],
         "hint": "Fix errors/violations and call save_deck again with the same slug." if not result["legal"] or not result["bracket"]["compliant"] else "",
     }
+
+
+# --- blacklist --------------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_blacklist() -> dict[str, Any]:
+    """The user's blacklist: cards that must never be put into a deck."""
+    names = blacklist.load()
+    return {"count": len(names), "blacklist": names}
+
+
+@mcp.tool()
+async def update_blacklist(
+    add: Annotated[list[str] | None, Field(description="Card names to blacklist (any language)")] = None,
+    remove: Annotated[list[str] | None, Field(description="Card names to take off the blacklist")] = None,
+) -> dict[str, Any]:
+    """Add or remove cards on the user's blacklist. Only on explicit user request."""
+    return await blacklist.update(add, remove)
 
 
 @mcp.tool()

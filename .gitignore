@@ -6,3 +6,4 @@ __pycache__/
 decks/*
 !decks/.gitkeep
 .env
+blacklist.txt

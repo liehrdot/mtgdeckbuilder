@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import brackets, carddb, scryfall, storage
+from .. import blacklist, brackets, carddb, scryfall, storage
 from ..cards import resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
@@ -64,7 +64,7 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
     return ""
 
 
-async def _run_claude(job: Job, prompt: str, model: str | None) -> None:
+async def _run_claude(job: Job, prompt: str, model: str | None, output_format: dict[str, Any] | None = None) -> None:
     try:
         from claude_agent_sdk import (
             AssistantMessage,
@@ -89,8 +89,10 @@ async def _run_claude(job: Job, prompt: str, model: str | None) -> None:
         permission_mode="dontAsk",
         model=model or None,
         max_turns=int(os.environ.get("MTG_MAX_TURNS", 120)),
+        output_format=output_format,
     )
     ok = False
+    structured: Any = None
     job.emit(type="status", text="Starte Claude Code …")
     try:
         async for msg in query(prompt=prompt, options=options):
@@ -98,17 +100,30 @@ async def _run_claude(job: Job, prompt: str, model: str | None) -> None:
                 for block in msg.content:
                     if isinstance(block, TextBlock) and block.text.strip():
                         job.emit(type="text", text=block.text.strip())
+                    elif isinstance(block, ToolUseBlock) and block.name == "StructuredOutput":
+                        job.emit(type="status", text="Übergebe Ergebnis …")
                     elif isinstance(block, ToolUseBlock):
                         name = block.name.removeprefix("mcp__mtg__")
                         job.emit(type="tool", name=name, summary=_tool_summary(name, block.input or {}))
             elif isinstance(msg, ResultMessage):
                 ok = not msg.is_error
+                structured = msg.structured_output
                 cost = f" · Kosten ${msg.total_cost_usd:.2f}" if getattr(msg, "total_cost_usd", None) else ""
                 job.emit(type="result", text=f"{'Fertig' if ok else 'Abgebrochen'} nach {msg.num_turns} Schritten{cost}")
     except asyncio.CancelledError:
         job.emit(type="error", text="Abgebrochen.")
     except Exception as exc:  # surface everything in the UI
         job.emit(type="error", text=f"{type(exc).__name__}: {exc}")
+
+    if output_format is not None:  # commander finder: structured suggestions instead of a deck
+        suggestions = await _enrich_suggestions(structured) if ok else []
+        if suggestions:
+            job.emit(type="suggestions", items=suggestions)
+        elif ok:
+            job.emit(type="error", text="Keine verwertbaren Vorschläge erhalten.")
+        job.emit(type="done", ok=bool(suggestions), deck=None)
+        job.done = True
+        return
 
     deck = next((d for d in storage.list_decks() if (d.get("updated") or "") >= _iso(job.started)), None)
     job.emit(type="done", ok=ok and deck is not None, deck=deck["slug"] if deck else None)
@@ -119,10 +134,10 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(ts - 1))
 
 
-def _start(prompt: str, model: str | None) -> dict[str, str]:
+def _start(prompt: str, model: str | None, output_format: dict[str, Any] | None = None) -> dict[str, str]:
     job = Job(id=uuid.uuid4().hex[:12])
     JOBS[job.id] = job
-    job.task = asyncio.create_task(_run_claude(job, prompt, model))
+    job.task = asyncio.create_task(_run_claude(job, prompt, model, output_format))
     return {"job": job.id}
 
 
@@ -131,10 +146,24 @@ class BuildRequest(BaseModel):
     partner: str | None = None
     bracket: int = Field(3, ge=1, le=5)
     budget: float | None = None
+    proxy: bool = False
     currency: str = "eur"
     strategy: str | None = None
     notes: str | None = None
     model: str | None = None
+
+
+def _budget_line(budget: float | None, proxy: bool, currency: str) -> str:
+    cur = currency.upper()
+    if proxy:
+        return (
+            "- Proxy: Ja – das Deck wird geproxt. Kartenpreise spielen keine Rolle, ignoriere jedes Budget "
+            f"und wähle die besten Karten für Bracket und Strategie (Preise nur informativ in {cur}). "
+            "Übergib `proxy=true` an `validate_deck` und `save_deck`."
+        )
+    if budget:
+        return f"- Budget: max. {budget:g} {cur} für das ganze Deck (übergib `budget` an `validate_deck`/`save_deck`)"
+    return f"- Budget: keins (Preise in {cur})"
 
 
 def build_prompt(req: BuildRequest) -> str:
@@ -147,8 +176,7 @@ def build_prompt(req: BuildRequest) -> str:
     if req.partner:
         lines.append(f"- Partner/Background: {req.partner}")
     lines.append(f"- Bracket: {req.bracket} ({b['name']})")
-    cur = req.currency.upper()
-    lines.append(f"- Budget: max. {req.budget:g} {cur} für das ganze Deck" if req.budget else f"- Budget: keins (Preise in {cur})")
+    lines.append(_budget_line(req.budget, req.proxy, req.currency))
     lines.append(f"- Währung für Preise: {req.currency}")
     if req.strategy:
         lines.append(f"- Strategie/Thema: {req.strategy}")
@@ -157,10 +185,92 @@ def build_prompt(req: BuildRequest) -> str:
     lines += [
         "",
         "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
+        "Karten auf der Blacklist (`get_blacklist`) sind tabu.",
         "Speichere das fertige Deck mit `save_deck` und behebe alle Fehler und Bracket-Verstöße, bevor du fertig bist.",
         "Antworte auf Deutsch.",
     ]
     return "\n".join(lines)
+
+
+# --- commander finder --------------------------------------------------------------------------
+
+SUGGESTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact English card name of the commander"},
+                    "partner": {"type": "string", "description": "Partner/background if the suggestion is a pair, else empty"},
+                    "archetype": {"type": "string", "description": "Short strategy label, e.g. 'Aristocrats', 'Voltron'"},
+                    "why": {"type": "string", "description": "2-3 sentences in German why it fits the wish"},
+                    "strategy": {"type": "string", "description": "Suggested strategy text for the deck build form"},
+                    "bracket_fit": {"type": "string", "description": "How it plays in the requested bracket"},
+                },
+                "required": ["name", "archetype", "why"],
+            },
+        }
+    },
+    "required": ["suggestions"],
+}
+
+
+class FinderRequest(BaseModel):
+    prompt: str
+    bracket: int | None = Field(None, ge=1, le=5)
+    budget: float | None = None
+    proxy: bool = False
+    currency: str = "eur"
+    count: int = Field(5, ge=1, le=10)
+    model: str | None = None
+
+
+def finder_prompt(req: FinderRequest) -> str:
+    lines = [
+        "Finde passende Commander. Nutze dafür den Skill `commander-finder`.",
+        "",
+        f"- Wunsch des Spielers: {req.prompt}",
+        f"- Anzahl Vorschläge: {req.count}",
+    ]
+    if req.bracket:
+        lines.append(f"- Ziel-Bracket: {req.bracket} ({brackets.BY_NUMBER[req.bracket]['name']})")
+    lines.append(_budget_line(req.budget, req.proxy, req.currency).replace("`validate_deck`/`save_deck`", "die Deck-Planung"))
+    lines += [
+        "",
+        "Du läufst im GUI-Modus: keine Rückfragen. Baue KEIN Deck und speichere nichts.",
+        "Gib die Vorschläge als strukturierte Ausgabe zurück (exakte englische Kartennamen), Begründungen auf Deutsch.",
+    ]
+    return "\n".join(lines)
+
+
+async def _enrich_suggestions(structured: Any) -> list[dict[str, Any]]:
+    items = (structured or {}).get("suggestions") if isinstance(structured, dict) else None
+    if not items:
+        return []
+    names = [i["name"] for i in items if i.get("name")] + [i["partner"] for i in items if i.get("partner")]
+    try:
+        cards, renames, _ = await resolve(names)
+    except Exception:
+        cards, renames = {}, {}
+    out = []
+    for item in items:
+        name = renames.get(item.get("name", ""), item.get("name", ""))
+        c = cards.get(name, {})
+        out.append(
+            {
+                **item,
+                "name": name,
+                "partner": renames.get(item.get("partner") or "", item.get("partner") or ""),
+                "image": c.get("image"),
+                "color_identity": c.get("color_identity"),
+                "type_line": c.get("type_line"),
+                "price_eur": c.get("price_eur"),
+                "price_usd": c.get("price_usd"),
+            }
+        )
+    return out
 
 
 class RefineRequest(BaseModel):
@@ -169,10 +279,14 @@ class RefineRequest(BaseModel):
     model: str | None = None
 
 
-def refine_prompt(req: RefineRequest) -> str:
+def refine_prompt(req: RefineRequest, deck: dict[str, Any] | None = None) -> str:
+    deck = deck or {}
+    budget = _budget_line(deck.get("budget"), bool(deck.get("proxy")), deck.get("currency", "eur"))
     return "\n".join(
         [
             f"Überarbeite das gespeicherte Commander-Deck `{req.slug}` (lade es mit `load_deck`).",
+            f"Bisherige Vorgaben: {budget.lstrip('- ')}",
+            "Karten auf der Blacklist (`get_blacklist`) sind tabu.",
             "Nutze den Skill `commander-deckbuilder` (Abschnitt „Deck überarbeiten“).",
             f"Änderungswunsch: {req.request}",
             "",
@@ -222,10 +336,31 @@ async def api_build(req: BuildRequest) -> dict[str, str]:
 @app.post("/api/refine")
 async def api_refine(req: RefineRequest) -> dict[str, str]:
     try:
-        storage.load(req.slug)
+        deck = storage.load(req.slug)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    return _start(refine_prompt(req), req.model)
+    return _start(refine_prompt(req, deck), req.model)
+
+
+@app.post("/api/find-commander")
+async def api_find_commander(req: FinderRequest) -> dict[str, str]:
+    output_format = {"type": "json_schema", "schema": SUGGESTION_SCHEMA}
+    return _start(finder_prompt(req), req.model, output_format)
+
+
+class BlacklistUpdate(BaseModel):
+    add: list[str] = []
+    remove: list[str] = []
+
+
+@app.get("/api/blacklist")
+async def api_blacklist() -> list[str]:
+    return blacklist.load()
+
+
+@app.post("/api/blacklist")
+async def api_blacklist_update(req: BlacklistUpdate) -> dict[str, Any]:
+    return await blacklist.update(req.add, req.remove)
 
 
 @app.get("/api/jobs/{job_id}/events")
@@ -291,7 +426,10 @@ async def api_validate(slug: str) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     lines = [f"{c.get('qty', 1)} {c['name']}" for c in deck.get("cards", [])]
-    result = await validate_deck(deck["commanders"], lines, int(deck.get("bracket") or 3), currency=deck.get("currency", "eur"))
+    result = await validate_deck(
+        deck["commanders"], lines, int(deck.get("bracket") or 3), currency=deck.get("currency", "eur"),
+        budget=deck.get("budget"), proxy=bool(deck.get("proxy")),
+    )  # fmt: skip
     result.pop("_card_data", None)
     result.pop("cards", None)
     deck["validation"] = result

@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from . import brackets, spellbook
+from . import blacklist, brackets, spellbook
 from .cards import resolve
 from .deck import BASIC_LANDS, DeckEntry, deck_stats, parse_decklist
 from .http import HttpError
@@ -34,8 +34,14 @@ async def validate_deck(
     *,
     currency: str = "eur",
     use_spellbook: bool = True,
+    budget: float | None = None,
+    proxy: bool = False,
 ) -> dict[str, Any]:
-    """Validate a deck. ``cards`` are decklist lines ('1 Sol Ring' or 'Sol Ring'), without commanders."""
+    """Validate a deck. ``cards`` are decklist lines ('1 Sol Ring' or 'Sol Ring'), without commanders.
+
+    ``budget`` is the max. total price (warning when exceeded); ``proxy=True`` means the deck will
+    be printed as proxies, so prices are informational only. Blacklisted cards are errors.
+    """
     parsed = parse_decklist(cards)
     commanders = [c for c in commanders if c] + parsed.commanders
     entries = parsed.entries
@@ -93,6 +99,11 @@ async def validate_deck(
         if e.qty > 1 and e.name not in BASIC_LANDS and not _ANY_NUMBER_RE.search(c.get("oracle_text") or ""):
             errors.append(f"{e.name} ist {e.qty}× enthalten (Singleton!)")
 
+    banned_by_user = blacklist.names_lower()
+    hits = [n for n in [*commanders, *merged] if n.lower() in banned_by_user]
+    if hits:
+        errors.append(f"Karten auf deiner Blacklist: {', '.join(hits)} – bitte ersetzen")
+
     # --- composition
     main_cards = [card_data[e.name] for e in entries if e.name in card_data]
     qty = {e.name: e.qty for e in entries}
@@ -100,6 +111,11 @@ async def validate_deck(
     lands = stats["types"].get("Land", 0)
     if not LAND_RANGE[0] <= lands <= LAND_RANGE[1]:
         warnings.append(f"{lands} Länder – üblich sind {LAND_RANGE[0]}–{LAND_RANGE[1]} (abhängig von Kurve und Ramp)")
+    price = stats[f"total_price_{currency}"] + sum(
+        float(card_data[c].get(f"price_{currency}") or 0) for c in commanders if c in card_data
+    )
+    if budget and not proxy and price > budget:
+        warnings.append(f"Budget überschritten: {price:.2f} {currency.upper()} > {budget:g} {currency.upper()}")
     for role, minimum in ROLE_MINIMUMS.items():
         have = stats["role_counts"].get(role, 0)
         if have < minimum:
@@ -132,6 +148,9 @@ async def validate_deck(
         },
         "stats": stats,
         "color_identity": "".join(c for c in "WUBRG" if c in identity),
+        "price_total": round(price, 2),
+        "budget": None if proxy else budget,
+        "proxy": proxy,
         "renamed": renames,
         "commanders": commanders,
         "cards": [{"name": e.name, "qty": e.qty} for e in entries],

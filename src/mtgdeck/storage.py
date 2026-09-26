@@ -63,6 +63,7 @@ def list_decks() -> list[dict[str, Any]]:
                 "name": d.get("name", path.stem),
                 "commanders": d.get("commanders", []),
                 "bracket": d.get("bracket"),
+                "proxy": bool(d.get("proxy")),
                 "updated": d.get("updated"),
                 "valid": (d.get("validation") or {}).get("legal"),
             }

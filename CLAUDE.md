@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Magic: The Gathering Commander (EDH) deckbuilder driven by Claude Code. The user asks for a deck and Claude uses the `commander-deckbuilder` skill (`.claude/skills/commander-deckbuilder/`) plus the `mcp__mtg__*` tools. The tools come from the `mtg` MCP server in this repo, registered in `.mcp.json`. There is also a web GUI that runs the same skill and MCP server headlessly through the Claude Agent SDK.
+A Magic: The Gathering Commander (EDH) deckbuilder driven by Claude Code. The user asks for a deck and Claude uses the `commander-deckbuilder` skill (`.claude/skills/commander-deckbuilder/`) plus the `mcp__mtg__*` tools. Without a commander idea, the `commander-finder` skill suggests commanders first. The tools come from the `mtg` MCP server in this repo, registered in `.mcp.json`. There is also a web GUI that runs the same skill and MCP server headlessly through the Claude Agent SDK.
 
-When the user asks for a Commander deck, use the `commander-deckbuilder` skill and the `mcp__mtg__*` tools. Answer in German unless the user writes in another language.
+When the user asks for a Commander deck, use the `commander-deckbuilder` skill and the `mcp__mtg__*` tools. When they have no commander yet, use `commander-finder`. Answer in German unless the user writes in another language.
 
 ## Commands
 
@@ -59,6 +59,11 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `validate_deck()` orchestrates everything above: 100 cards, singleton, color identity, banned cards, role minimums and the bracket check.
   - It returns a private `_card_data` key that callers must pop before serializing or returning it.
   - A Spellbook outage degrades to a warning and does not fail validation.
+- **`blacklist.py`**: the user's card blacklist in `blacklist.txt` (plain text, gitignored, `MTG_BLACKLIST_FILE`).
+  - Names are resolved to Oracle names on add.
+  - `validate_deck` treats blacklisted cards as errors.
+  - The MCP search tools (`search_cards`, `local_card_search`, `find_commanders`, `edhrec_recommendations`) filter them out.
+- **Budget / proxy:** `validate_deck(budget=, proxy=)` warns on budget overruns unless `proxy=True`. `price_total` includes the commanders. Decks store `proxy`, and a proxy deck has `budget: None`.
 - **`storage.py`**: saves decks to `decks/<slug>.json` plus a `.txt` export (Moxfield format). The `decks/` contents are gitignored.
 - **`mcp_server.py`**: the MCP server, built with `mcp` **2.x**.
   - Use `from mcp.server.mcpserver import MCPServer`. `FastMCP` no longer exists in 2.x.
@@ -70,7 +75,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - It starts the MCP server via `sys.executable -m mtgdeck.mcp_server`, with `permission_mode="dontAsk"`.
   - Events stream to the browser over SSE, with `Last-Event-ID` resume.
   - The finished deck is detected as the deck whose `updated` timestamp is ≥ the job start.
-  - The prompts in `build_prompt` / `refine_prompt` tell the agent it runs non-interactively.
+  - The prompts in `build_prompt` / `refine_prompt` / `finder_prompt` tell the agent it runs non-interactively. `_budget_line` holds the shared budget/proxy wording.
+  - Commander-finder jobs pass `output_format` (JSON schema `SUGGESTION_SCHEMA`) to the SDK. They read `ResultMessage.structured_output`, enrich it with card data (`_enrich_suggestions`) and emit a `suggestions` SSE event instead of a deck.
 
 **Skill ↔ tools contract:**
 - `SKILL.md` requires every build to end with `validate_deck` → fix → `save_deck`.
@@ -93,5 +99,5 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`
+- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`
