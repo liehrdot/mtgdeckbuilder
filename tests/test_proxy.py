@@ -412,6 +412,7 @@ def test_descreen_removes_halftone_keeps_edges():
 
 
 async def test_upscale_uses_descreened_input(tmp_path):
+    settings.update({"descreen": "normal"})
     exe = _fake_esrgan(tmp_path)
     exe.write_text(exe.read_text().replace('with Image.open(args["-i"]) as im:',
                                            'open(args["-o"] + ".src", "w").write(args["-i"])\nwith Image.open(args["-i"]) as im:'))
