@@ -8,7 +8,6 @@ dependencies = [
     "mcp>=2.2,<3",
     "httpx>=0.27",
     "pillow>=10",
-    "numpy>=1.24",  # descreening (FFT notch filter) of scanned cards
 ]
 
 [project.optional-dependencies]
@@ -24,6 +23,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "inquirerpy>=0.3",  # tests drive the same interactive menu the MPC Autofill tool shows
+    "numpy>=1.24",  # synthetic halftone test images
 ]
 
 [project.scripts]

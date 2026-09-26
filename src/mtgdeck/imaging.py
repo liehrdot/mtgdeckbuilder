@@ -129,65 +129,26 @@ def make_pdf(images: Iterable[Path], dst: Path, *, paper: str = "A4", cut_marks:
 
 
 # --- descreening --------------------------------------------------------------------------------
-# Scryfall scans are photos of *printed* cards: the halftone screen of the print (rosettes with a
-# period of ~2-3 px at scan resolution) is part of the image. AI upscalers read it as texture and
-# sharpen it into visible lines. Descreening removes the screen before upscaling.
+# Scryfall scans are photos of *printed* cards: the halftone screen of the print (period ~1.5-3 px
+# at scan resolution) is part of the image. Real-ESRGAN reads it as texture and sharpens it into
+# visible hatching (flat areas, text box). A slight Gaussian pre-blur removes the screen before
+# upscaling; the upscaler restores edge sharpness afterwards.
+#
+# Chosen by real Real-ESRGAN (realesrgan-x4plus) runs on a Tiamat scan: sigma 0.6 px removed the
+# hatching completely while text and art stayed sharp. An FFT notch filter was tried first and
+# rejected – its spectral holes made the upscaler invent horizontal streaks and crumbly texture.
 
-
-def _box_blur(a, r: int):
-    """Separable box blur via cumulative sums (numpy only, edges replicated)."""
-    import numpy as np
-
-    k = 2 * r + 1
-    p = np.pad(a, r, mode="edge")
-    c = np.cumsum(np.cumsum(p, axis=0), axis=1)
-    c = np.pad(c, ((1, 0), (1, 0)))
-    return (c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / (k * k)
+DESCREEN_SIGMA = {"light": 0.45, "normal": 0.6, "strong": 0.8}
 
 
 def descreen(img: Image.Image, strength: str = "normal") -> Image.Image:
-    """Remove a print halftone screen with an FFT notch filter.
+    """Suppress a print halftone screen before AI upscaling (``light`` | ``normal`` | ``strong``)."""
+    from PIL import ImageFilter
 
-    Periodic screens show up as sharp peaks in the frequency spectrum, far above the smooth
-    falloff of real image content. Peaks above ``min_freq`` are detected per image (log spectrum
-    vs. its local background) and damped to the background level; text and edges, whose energy is
-    spread over many frequencies, stay sharp. ``strength``: "light" | "normal" | "strong".
-    """
-    import numpy as np
-
-    # (detection threshold in log-magnitude above background, notch widening in bins, damping factor)
-    presets = {"light": (2.2, 1, 1.0), "normal": (1.6, 2, 1.6), "strong": (1.1, 3, 2.2)}
-    thr, widen, damp = presets.get(strength, presets["normal"])
-    rgba = img.convert("RGBA")
-    alpha = rgba.getchannel("A")
-    rgb = np.asarray(rgba.convert("RGB"), dtype=np.float32)
-    h, w, _ = rgb.shape
-
-    # mirror-pad to avoid edge discontinuities (they would create spectral streaks)
-    ph, pw = h // 8, w // 8
-    padded = np.pad(rgb, ((ph, ph), (pw, pw), (0, 0)), mode="reflect")
-    H, W = padded.shape[:2]
-    spec = np.fft.fft2(padded, axes=(0, 1))
-
-    # detection on the mean log magnitude of all channels
-    logmag = np.log1p(np.abs(spec)).mean(axis=2)
-    logmag_s = np.fft.fftshift(logmag)
-    background = _box_blur(logmag_s, max(3, min(H, W) // 60))
-    excess = logmag_s - background
-    fy = (np.arange(H) - H // 2)[:, None] / H
-    fx = (np.arange(W) - W // 2)[None, :] / W
-    radius = np.hypot(fy, fx)
-    min_freq = 0.12  # cycles/px: keep everything coarser than ~8 px (art, text strokes' main energy)
-    peaks = (excess > thr) & (radius > min_freq)
-    if not peaks.any():
-        return img
-    # widen the notches slightly and turn them into a soft attenuation mask
-    notch = _box_blur(peaks.astype(np.float32), widen) > 0.02
-    atten = np.where(notch, np.exp(-damp * np.clip(excess, 0.3, None)), 1.0)
-    atten = np.fft.ifftshift(_box_blur(atten.astype(np.float32), 1)).astype(np.float32)
-
-    out = np.fft.ifft2(spec * atten[:, :, None], axes=(0, 1)).real[ph : ph + h, pw : pw + w]
-    result = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGB")
-    if img.mode == "RGBA":
-        result.putalpha(alpha)
-    return result
+    sigma = DESCREEN_SIGMA.get(strength, DESCREEN_SIGMA["normal"])
+    if img.mode == "RGBA":  # keep the transparent card corners untouched
+        rgb, alpha = img.convert("RGB"), img.getchannel("A")
+        out = rgb.filter(ImageFilter.GaussianBlur(sigma))
+        out.putalpha(alpha)
+        return out
+    return img.convert("RGB").filter(ImageFilter.GaussianBlur(sigma))

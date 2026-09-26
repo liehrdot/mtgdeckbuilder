@@ -480,15 +480,15 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "mcp" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pillow" },
 ]
 
 [package.optional-dependencies]
 dev = [
     { name = "inquirerpy" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -507,7 +507,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "inquirerpy", marker = "extra == 'dev'", specifier = ">=0.3" },
     { name = "mcp", specifier = ">=2.2,<3" },
-    { name = "numpy", specifier = ">=1.24" },
+    { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.24" },
     { name = "pillow", specifier = ">=10" },
     { name = "ptyprocess", marker = "sys_platform != 'win32' and extra == 'gui'", specifier = ">=0.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },

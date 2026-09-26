@@ -86,7 +86,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - It writes `prepared.json` with per-face `file` / `cache` / `original` / `origin` / `upscaled` / `dpi`. GUI routes `/print/prepared`, `/print/image?face=&kind=original|file|trim` (only paths listed there) and `/print/open-folder` drive the before/after view.
   - Opt-in AI upscaling: `prepare(upscale=)` defaults to setting `upscale` (off). It runs `realesrgan-ncnn-vulkan` (official zip v0.2.5.0 ships only `realesrgan-x4plus` and `-x4plus-anime`; `upscale_models()` lists what is installed; `-s 4`, `-m <exe dir>/models`, serialised by a `threading.Lock`) on Scryfall scans, then `add_bleed(dpi=600)`. If opted in and the tool or model is missing, it raises `ValueError`. An `UpscaleError` on a single card (e.g. no Vulkan GPU) falls back to 300 DPI with one aggregated warning. MPC scans are never upscaled.
   - Before upscaling, `imaging.descreen()` removes the print halftone of Scryfall scans. Setting `descreen`: off / light / normal (default) / strong.
-  - `descreen()` is an FFT notch filter: it finds peaks in the log spectrum above a local background, above 0.12 cycles/px, and damps them. It uses numpy only.
+  - `descreen()` is a slight Gaussian pre-blur (σ 0.45 / 0.6 / 0.8). It was chosen with real realesrgan-x4plus runs.
+  - An FFT notch filter was tried and rejected: it caused streaks and invented texture.
   - Without it, the AI turns the ~3 px halftone into visible lines.
   - Cache names carry `-ds<strength>`.
   - `export_pdf()` builds home-printing sheets.
