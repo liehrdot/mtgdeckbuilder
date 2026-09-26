@@ -386,6 +386,13 @@ async def _upscale(raw: Path, cfg: dict[str, Any]) -> Path:
     return out
 
 
+def _descreen_file(src: Path, dst: Path, strength: str) -> None:
+    from PIL import Image
+
+    with Image.open(src) as im:
+        imaging.descreen(im, strength).save(dst)
+
+
 async def _fetch(option: dict[str, Any], *, upscale: bool = False, cfg: dict[str, Any] | None = None) -> Path:
     """Download (cached) and make print-ready: returns a local image with bleed.
 
@@ -398,9 +405,16 @@ async def _fetch(option: dict[str, Any], *, upscale: bool = False, cfg: dict[str
         return raw  # community scans already include the bleed edge
     if upscale:
         cfg = cfg or settings_mod.load()
-        ready = raw.with_name(f"{raw.stem}-bleed{UPSCALE_DPI}-{cfg['upscale_model']}.jpg")
+        strength = cfg.get("descreen") or "off"
+        ds = "" if strength == "off" else f"-ds{strength}"
+        ready = raw.with_name(f"{raw.stem}-bleed{UPSCALE_DPI}-{cfg['upscale_model']}{ds}.jpg")
         if not ready.exists():
-            big = await _upscale(raw, cfg)  # UpscaleError -> caller falls back to 300 DPI
+            source = raw
+            if ds:  # remove the print halftone first, otherwise the AI sharpens it into lines
+                source = raw.with_name(f"{raw.stem}{ds}.png")
+                if not source.exists():
+                    await asyncio.to_thread(_descreen_file, raw, source, strength)
+            big = await _upscale(source, cfg)  # UpscaleError -> caller falls back to 300 DPI
             await asyncio.to_thread(imaging.add_bleed, big, ready, UPSCALE_DPI)
         return ready
     ready = raw.with_name(raw.stem + "-bleed.jpg")
@@ -584,6 +598,7 @@ async def prepare(
         "cardback": str(cardback_file),
         "upscaled": upscale,
         "upscale_model": cfg["upscale_model"] if upscale else None,
+        "descreen": cfg.get("descreen") if upscale else None,
         "images_dir": str(images_dir),
     }, indent=2, ensure_ascii=False), "utf-8")  # fmt: skip
 
@@ -596,7 +611,8 @@ async def prepare(
     if "scryfall" in origins and upscale and n_failed < origins.count("scryfall"):
         warnings.append(
             f"Scryfall-Scans wurden mit Real-ESRGAN ({cfg['upscale_model']}) auf {UPSCALE_DPI} DPI hochskaliert "
-            "und mit Beschnitt-Rand versehen. Stichprobenartig prüfen – KI kann feine Details verfälschen."
+            + ("" if cfg.get("descreen", "off") == "off" else f"(vorher Druckraster entfernt: {cfg['descreen']}) ")
+            + "und mit Beschnitt-Rand versehen. Stichprobenartig prüfen (🔍) – KI kann feine Details verfälschen."
         )
     elif "scryfall" in origins:
         warnings.append(

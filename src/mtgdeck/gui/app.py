@@ -614,6 +614,7 @@ class SettingsUpdate(BaseModel):
     upscale: bool | None = None
     upscaler_path: str | None = None
     upscale_model: str | None = None
+    descreen: str | None = None
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:

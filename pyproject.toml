@@ -8,6 +8,7 @@ dependencies = [
     "mcp>=2.2,<3",
     "httpx>=0.27",
     "pillow>=10",
+    "numpy>=1.24",  # descreening (FFT notch filter) of scanned cards
 ]
 
 [project.optional-dependencies]

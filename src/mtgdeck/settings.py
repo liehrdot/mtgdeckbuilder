@@ -32,6 +32,8 @@ DEFAULTS: dict[str, Any] = {
     "upscale": False,
     "upscaler_path": "",  # realesrgan-ncnn-vulkan(.exe); empty = search in tools/
     "upscale_model": "realesrgan-x4plus",
+    # remove the print halftone of scanned cards before upscaling: off | light | normal | strong
+    "descreen": "normal",
 }
 _ENV = {
     "autofill_path": "MTG_AUTOFILL_PATH",

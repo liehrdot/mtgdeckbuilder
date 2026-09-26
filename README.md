@@ -129,6 +129,10 @@ lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles dav
    Einstellungen eintragen. Benötigt eine Vulkan-fähige Grafikkarte (integrierte Grafik reicht), dauert je
    nach GPU ein bis wenige Sekunden pro Karte; Ergebnisse werden gecacht. MPC-Autofill-Scans werden nie
    hochskaliert (die haben schon 800 DPI). KI kann feine Details verfälschen – stichprobenartig prüfen.
+   **Druckraster entfernen (Descreening):** Scryfall-Bilder sind Scans *gedruckter* Karten; das
+   Druckraster (Rasterpunkte, Periode ~3 px) würde die KI zu sichtbaren Linien schärfen. Vor dem
+   Hochskalieren entfernt ein FFT-Notch-Filter die regelmäßigen Rasterfrequenzen gezielt (Text und
+   Kanten bleiben scharf). Einstellbar unter „KI-Hochskalierung“: aus / leicht / **normal** (Standard) / stark.
 3. **PDF zum Selbstdrucken** – direkt im Deckbuilder (ohne exe): A4/Letter, 3 × 3 Karten à 63 × 88 mm,
    Schnittmarken, optional mit DFC-Rückseiten.
 4. **An MakePlayingCards senden** – startet das Autofill-Programm mit passenden Optionen in einem

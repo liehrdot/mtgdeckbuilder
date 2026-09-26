@@ -222,7 +222,7 @@ async function loadSettings() {
   const f = $("#settings-form").elements;
   const MODEL_HINTS = { "realesrgan-x4plus": " (empfohlen)", "realesrgan-x4plus-anime": " (für Zeichnungen, glättet stärker)" };
   f.upscale_model.innerHTML = appSettings.upscale_models.map((m) => `<option value="${esc(m)}">${esc(m + (MODEL_HINTS[m] || ""))}</option>`).join("");
-  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model"]) if (f[k]) f[k].value = appSettings[k] ?? "";
+  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model", "descreen"]) if (f[k]) f[k].value = appSettings[k] ?? "";
   f.upscale.checked = !!appSettings.upscale;
   $("#upscaler-status").innerHTML = appSettings.upscaler_found
     ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.upscaler_found)}`
@@ -288,7 +288,7 @@ function renderPreparedInfo() {
   if (!has) return;
   const ai = faces.filter((f) => f.upscaled).length;
   $("#prepared-info").innerHTML = `Druckbilder: <code>${esc(prepared.images_dir)}</code> · ${faces.length} Bilder`
-    + (ai ? ` · ${ai} KI-hochskaliert (${esc(prepared.upscale_model)})` : "")
+    + (ai ? ` · ${ai} KI-hochskaliert (${esc(prepared.upscale_model)}${prepared.descreen && prepared.descreen !== "off" ? ", Druckraster entfernt: " + esc(prepared.descreen) : ""})` : "")
     + " · 🔍 auf einer Karte zeigt Vorher/Nachher.";
 }
 

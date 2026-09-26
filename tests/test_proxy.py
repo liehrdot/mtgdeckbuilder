@@ -372,3 +372,56 @@ def test_gui_compare_and_open_folder(tmp_path, monkeypatch):
     r = client.post("/api/decks/meren-print/print/open-folder").json()
     assert r["opened"] and opened == [proxy.order_dir("meren-print") / "images"]
     assert client.post("/api/decks/unknown/print/open-folder").status_code == 404
+
+
+def _halftone_card(size=(420, 600)):
+    import numpy as np
+
+    w, h = size
+    yy, xx = np.mgrid[:h, :w].astype(np.float32)
+    base = 90 + 80 * xx / w  # smooth gradient ("sky")
+    base[:, w // 2:] = np.where(yy[:, w // 2:] % 60 < 30, 20, 235)  # hard edges ("text")
+    screen = 30 * np.cos(2 * np.pi * (0.17 * xx + 0.297 * yy)) + 25 * np.cos(2 * np.pi * (0.297 * xx - 0.173 * yy))
+    img = np.clip(base + screen * (xx < w // 2), 0, 255).astype("uint8")
+    return Image.fromarray(np.stack([img] * 3, axis=2), "RGB"), base
+
+
+def test_descreen_removes_halftone_keeps_edges():
+    import numpy as np
+
+    img, base = _halftone_card()
+    out = np.asarray(imaging.descreen(img, "normal").convert("L"), dtype=np.float32)
+    src = np.asarray(img.convert("L"), dtype=np.float32)
+    w = img.width
+    inner = (slice(20, -20), slice(20, w // 2 - 20))  # away from the abrupt synthetic border
+    noise_before = np.abs(src[inner] - base[inner]).mean()
+    noise_after = np.abs(out[inner] - base[inner]).mean()
+    assert noise_after < noise_before / 4  # screen pattern largely gone
+    edges = out[:, w // 2 + 20 : -20]
+    dark, light = edges[(np.arange(600) % 60 < 25)[:, None].repeat(edges.shape[1], 1)], edges[(np.arange(600) % 60 >= 35)[:, None].repeat(edges.shape[1], 1)]
+    assert light.mean() - dark.mean() > 0.9 * (235 - 20)  # hard edges keep their contrast
+    # an unscreened image with irregular hard edges (like art + text) passes through (almost) unchanged
+    rng = np.random.default_rng(1)
+    clean = np.full((600, 420), 128, np.float32) + np.linspace(0, 60, 420)[None, :]
+    for _ in range(40):
+        x, y = rng.integers(0, 380), rng.integers(0, 560)
+        clean[y : y + rng.integers(3, 40), x : x + rng.integers(2, 40)] = rng.integers(0, 255)
+    clean_img = Image.fromarray(np.stack([clean.astype("uint8")] * 3, axis=2), "RGB")
+    diff = np.abs(np.asarray(imaging.descreen(clean_img), dtype=np.float32) - np.asarray(clean_img, dtype=np.float32))
+    assert diff.mean() < 1.0
+
+
+async def test_upscale_uses_descreened_input(tmp_path):
+    exe = _fake_esrgan(tmp_path)
+    exe.write_text(exe.read_text().replace('with Image.open(args["-i"]) as im:',
+                                           'open(args["-o"] + ".src", "w").write(args["-i"])\nwith Image.open(args["-i"]) as im:'))
+    r = await proxy.prepare(DECK, upscale=True)
+    info = proxy.load_prepared("meren-print")
+    assert info["descreen"] == "normal"
+    forest_up = sorted(Path(info["faces"]["Forest"]["cache"]).parent.glob("*-dsnormal-x4-*.png.src"))
+    assert forest_up and forest_up[0].read_text().endswith("-dsnormal.png")
+    assert "Druckraster entfernt: normal" in " ".join(r["warnings"])
+
+    settings.update({"descreen": "off"})
+    await proxy.prepare(DECK, upscale=True)
+    assert proxy.load_prepared("meren-print")["faces"]["Forest"]["file"]  # works without descreening too

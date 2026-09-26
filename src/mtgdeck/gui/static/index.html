@@ -123,6 +123,15 @@
           <label>Modell
             <select name="upscale_model"></select>
           </label>
+          <label>Druckraster entfernen <span class="opt">(vor dem Hochskalieren)</span>
+            <select name="descreen">
+              <option value="off">aus</option>
+              <option value="light">leicht</option>
+              <option value="normal">normal (empfohlen)</option>
+              <option value="strong">stark</option>
+            </select>
+          </label>
+          <p class="hint">Scryfall-Bilder sind Scans gedruckter Karten – ohne diesen Filter macht die KI das Druckraster als Linien sichtbar.</p>
           <label class="check"><input type="checkbox" name="upscale"> standardmäßig im Druckstudio aktivieren</label>
         </fieldset>
         <div class="row2">
