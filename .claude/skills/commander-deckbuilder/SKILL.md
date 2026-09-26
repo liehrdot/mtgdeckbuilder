@@ -1,6 +1,6 @@
 ---
 name: commander-deckbuilder
-description: Build or refine a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5), optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built, a decklist generated, or an existing deck tuned, upgraded, made cheaper or moved to another bracket.
+description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built, a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier.
 argument-hint: "<Commander> [bracket 1-5] [budget] [theme]"
 ---
 
@@ -30,7 +30,10 @@ Gather: commander (+ partner/background), **bracket (1-5)**, budget (total, EUR 
   mention them in the deck description. Default bracket 3 if absent.
 
 Read [references/brackets.md](references/brackets.md) for the bracket rules before choosing
-cards. Call `bracket_rules` / `game_changers` if you need the live lists.
+cards. If the user wants a **sub-tier** ("unteres/oberes Bracket 3", "lower 4"), **house rules**
+("Bracket 4 ohne Game Changer", "Bracket 3 mit max. 2 Game Changern", "keine Combos") or a
+**style** ("Bracket 2, aber witzig"), put it into a `power_profile` and read
+[references/power-tuning.md](references/power-tuning.md). Call `bracket_rules` / `game_changers` if you need the live lists.
 
 ## 1. Research
 
@@ -79,18 +82,20 @@ Rules while picking:
 ## 3. Validate and fix (mandatory)
 
 1. Call `validate_deck` with commanders, the 99 (or 98) lines incl. basics (`"12 Forest"`), bracket,
-   currency and `budget` / `proxy`.
+   currency, `budget` / `proxy` and `power_profile` (if any).
 2. Fix **every error** (card count, color identity, singleton, banned, blacklist, not found) and
-   **every bracket violation**. Fix a budget overrun warning unless it is marginal. Check warnings (land count, low ramp/draw/removal) and the estimated
-   bracket; if the estimate is above the target, cut the strongest pieces (Game Changers,
-   fast combos, tutors).
+   **every bracket violation** (incl. the house rules of the power profile). If the power score
+   (`bracket.power`) is far from the target tier, tune with the levers in power-tuning.md.
+   Fix a budget overrun warning unless it is marginal. Check warnings (land count, low
+   ramp/draw/removal) and the estimated bracket; if the estimate is above the target, cut the
+   strongest pieces (Game Changers, fast combos, tutors).
 3. Check `combos.included`: in bracket 1–2 there must be no 2-card infinite combos; in 3 only
    late-game ones. Mention intended combos to the user.
 4. Repeat until legal and compliant.
 
 ## 4. Save and present
 
-Call `save_deck` with a good deck name, all cards with a `category` (Ramp, Draw, Removal,
+Call `save_deck` (with `power_profile` if one was given) with a good deck name, all cards with a `category` (Ramp, Draw, Removal,
 Board Wipe, Synergy, Win Condition, Protection, Utility, Land), a short `description` (game plan,
 key synergies, assumptions) and `notes` (mulligan/play tips, combos, upgrade options for later).
 If `save_deck` reports errors, fix and save again with the same `slug`.
@@ -104,13 +109,31 @@ Then present to the user:
 - Where it is saved (`decks/<slug>.txt` imports into Moxfield/Archidekt) and that it can be
   viewed in the GUI (`uv run mtg-gui`).
 
+## Bracket rauf/runter & Feinabstimmung (retune)
+
+For "make it upper 3 / lower 4 / bracket 4 without Game Changers / bracket 2 but funny" on an
+existing deck: follow the workflow in [references/power-tuning.md](references/power-tuning.md)
+and always save with the same `slug` and a `change_note` (it goes into the deck's history).
+Report old → new level, power score before/after and the swaps with reasons.
+
+## Versionen (Verlauf, Diff, Rückgängig, Kopie)
+
+Every `save_deck` creates a version with a snapshot. Use:
+- `list_deck_versions` – history with notes, cards in/out, level, price, power per version.
+- `compare_deck_versions` – "what changed since version 2?", "compare before/after the retune".
+- `restore_deck_version` – "undo", "go back to the bracket 3 version" (saved as a new version).
+- `copy_deck` – "make a copy as bracket 2 variant", optionally from an old `version`; then
+  retune the copy so both variants exist side by side.
+- `export_deck` with `version` – decklist of an old version.
+
 ## Deck überarbeiten (refine)
 
 For "make it cheaper / stronger / bracket X / more draw / swap Y":
 1. `load_deck` the deck (or `import_deck` an Archidekt/Moxfield URL, or parse a pasted list).
 2. `validate_deck` to see the current state.
 3. Make targeted swaps (keep the count at 100, keep what works), research replacements as above.
-4. `save_deck` with the **same slug**, then list the changes as `+ in` / `- out` with reasons.
+4. `save_deck` with the **same slug** and a short `change_note`, then list the changes as
+   `+ in` / `- out` with reasons.
 
 ## Analyse only
 

@@ -25,6 +25,7 @@ from .. import blacklist, brackets, carddb, scryfall, storage
 from ..cards import resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
+from ..power import TIER_LABELS, PowerProfile, target_value
 from ..validate import validate_deck
 
 STATIC = Path(__file__).parent / "static"
@@ -150,7 +151,42 @@ class BuildRequest(BaseModel):
     currency: str = "eur"
     strategy: str | None = None
     notes: str | None = None
+    profile: PowerProfile | None = None
     model: str | None = None
+
+
+def profile_lines(bracket: int, profile: PowerProfile | None) -> list[str]:
+    """Prompt lines for sub-tier, house rules and style; empty when nothing was chosen."""
+    if not profile or profile.is_empty():
+        return []
+    lines = []
+    if profile.tier:
+        lines.append(
+            f"- Feinstufe: {TIER_LABELS[profile.tier]} Bracket {bracket} (Power-Ziel ≈ {target_value(bracket, profile.tier):.1f})"
+        )
+    rules = []
+    if profile.max_game_changers is not None:
+        rules.append("keine Game Changer" if profile.max_game_changers == 0 else f"max. {profile.max_game_changers} Game Changer")
+    if profile.max_tutors is not None:
+        rules.append("keine Tutoren" if profile.max_tutors == 0 else f"max. {profile.max_tutors} Tutoren")
+    for flag, text in (
+        (profile.allow_two_card_combos, "2-Karten-Combos"),
+        (profile.allow_extra_turns, "Extra Turns"),
+        (profile.allow_mass_land_denial, "Mass Land Denial"),
+    ):
+        if flag is False:
+            rules.append(f"keine {text}")
+    if rules:
+        lines.append("- Hausregeln (strenger als das Bracket): " + "; ".join(rules))
+    if profile.style:
+        lines.append(f"- Stil/Vibe: {profile.style}")
+    if profile.notes:
+        lines.append(f"- Notizen zur Spielstärke: {profile.notes}")
+    lines.append(
+        "- Übergib dieses `power_profile` an `validate_deck` und `save_deck` und lies references/power-tuning.md: "
+        + profile.model_dump_json(exclude_defaults=True)
+    )
+    return lines
 
 
 def _budget_line(budget: float | None, proxy: bool, currency: str) -> str:
@@ -178,6 +214,7 @@ def build_prompt(req: BuildRequest) -> str:
     lines.append(f"- Bracket: {req.bracket} ({b['name']})")
     lines.append(_budget_line(req.budget, req.proxy, req.currency))
     lines.append(f"- Währung für Preise: {req.currency}")
+    lines += profile_lines(req.bracket, req.profile)
     if req.strategy:
         lines.append(f"- Strategie/Thema: {req.strategy}")
     if req.notes:
@@ -273,6 +310,42 @@ async def _enrich_suggestions(structured: Any) -> list[dict[str, Any]]:
     return out
 
 
+class RetuneRequest(BaseModel):
+    slug: str
+    bracket: int = Field(ge=1, le=5)
+    profile: PowerProfile = PowerProfile()
+    request: str | None = None
+    model: str | None = None
+
+
+def retune_prompt(req: RetuneRequest, deck: dict[str, Any]) -> str:
+    old_profile = deck.get("power_profile") or {}
+    old_tier = old_profile.get("tier")
+    old = f"{TIER_LABELS[old_tier]} Bracket {deck.get('bracket')}" if old_tier else f"Bracket {deck.get('bracket')}"
+    power = ((deck.get("validation") or {}).get("bracket") or {}).get("power") or {}
+    new = f"{TIER_LABELS[req.profile.tier]} Bracket {req.bracket}" if req.profile.tier else f"Bracket {req.bracket}"
+    lines = [
+        f"Stimme das gespeicherte Commander-Deck `{req.slug}` neu ab (lade es mit `load_deck`).",
+        "Nutze den Skill `commander-deckbuilder`, Abschnitt „Bracket rauf/runter & Feinabstimmung“, und references/power-tuning.md.",
+        "",
+        f"- Bisher: {old}" + (f" (Power-Score {power.get('value')}, {power.get('text')})" if power else ""),
+        f"- Ziel: {new}",
+        f"- Bracket: {req.bracket} ({brackets.BY_NUMBER[req.bracket]['name']})",
+        *profile_lines(req.bracket, req.profile),
+        "- " + _budget_line(deck.get("budget"), bool(deck.get("proxy")), deck.get("currency", "eur")).lstrip("- "),
+    ]
+    if req.request:
+        lines.append(f"- Zusätzlicher Wunsch: {req.request}")
+    lines += [
+        "",
+        "Du läufst im GUI-Modus: keine Rückfragen. Commander bleibt gleich. Karten auf der Blacklist (`get_blacklist`) sind tabu.",
+        f"Speichere mit `save_deck` (slug=`{req.slug}`, neues `bracket`, `power_profile`) und einer `change_note`, "
+        "die alte → neue Stufe, Power-Score vorher/nachher und die wichtigsten Tausche mit Grund nennt.",
+        "Fasse die Änderungen (+ rein / - raus) kurz zusammen. Antworte auf Deutsch.",
+    ]
+    return "\n".join(lines)
+
+
 class RefineRequest(BaseModel):
     slug: str
     request: str
@@ -340,6 +413,15 @@ async def api_refine(req: RefineRequest) -> dict[str, str]:
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     return _start(refine_prompt(req, deck), req.model)
+
+
+@app.post("/api/retune")
+async def api_retune(req: RetuneRequest) -> dict[str, str]:
+    try:
+        deck = storage.load(req.slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return _start(retune_prompt(req, deck), req.model)
 
 
 @app.post("/api/find-commander")
@@ -429,6 +511,7 @@ async def api_validate(slug: str) -> dict[str, Any]:
     result = await validate_deck(
         deck["commanders"], lines, int(deck.get("bracket") or 3), currency=deck.get("currency", "eur"),
         budget=deck.get("budget"), proxy=bool(deck.get("proxy")),
+        profile=PowerProfile(**deck["power_profile"]) if deck.get("power_profile") else None,
     )  # fmt: skip
     result.pop("_card_data", None)
     result.pop("cards", None)
@@ -439,11 +522,47 @@ async def api_validate(slug: str) -> dict[str, Any]:
 
 @app.delete("/api/decks/{slug}")
 async def api_delete(slug: str) -> dict[str, bool]:
-    for ext in ("json", "txt"):
-        path = storage.DECKS_DIR / f"{storage.slug(slug)}.{ext}"
-        if path.exists():
-            path.unlink()
+    storage.delete(slug)
     return {"ok": True}
+
+
+def _not_found(fn, *args):
+    try:
+        return fn(*args)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/decks/{slug}/versions")
+async def api_versions(slug: str) -> list[dict[str, Any]]:
+    return _not_found(storage.versions, slug)
+
+
+@app.get("/api/decks/{slug}/versions/{version}")
+async def api_version(slug: str, version: int) -> dict[str, Any]:
+    deck = _not_found(storage.load_version, slug, version)
+    entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
+    return {**deck, "export_text": to_text(deck.get("commanders", []), entries)}
+
+
+@app.get("/api/decks/{slug}/diff")
+async def api_diff(slug: str, a: int, b: int | None = None) -> dict[str, Any]:
+    return _not_found(storage.compare, slug, a, b)
+
+
+@app.post("/api/decks/{slug}/versions/{version}/restore")
+async def api_restore(slug: str, version: int) -> dict[str, Any]:
+    return _not_found(storage.restore, slug, version)
+
+
+class CopyRequest(BaseModel):
+    name: str | None = None
+    version: int | None = None
+
+
+@app.post("/api/decks/{slug}/copy")
+async def api_copy(slug: str, req: CopyRequest) -> dict[str, Any]:
+    return _not_found(storage.copy, slug, req.name, req.version)
 
 
 @app.get("/api/carddb")

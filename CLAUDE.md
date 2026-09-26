@@ -63,8 +63,19 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Names are resolved to Oracle names on add.
   - `validate_deck` treats blacklisted cards as errors.
   - The MCP search tools (`search_cards`, `local_card_search`, `find_commanders`, `edhrec_recommendations`) filter them out.
+- **`power.py`**: sub-tiers inside a bracket.
+  - `PowerProfile` (pydantic) holds: tier low/mid/high, stricter house rules (`max_game_changers`, `max_tutors`, `allow_*`), `style` and `notes`.
+  - `score()` is a transparent heuristic on the 1.0–5.99 bracket scale (3.8 = upper bracket 3). Hard rules set a floor.
+  - `check_profile()` turns house rules into violations. It only warns when a rule is looser than the bracket or the score misses the tier.
+  - `brackets.evaluate(profile=)` adds `power`, `profile` and `target_text` to the bracket result.
+  - Stored as `deck["power_profile"]`.
 - **Budget / proxy:** `validate_deck(budget=, proxy=)` warns on budget overruns unless `proxy=True`. `price_total` includes the commanders. Decks store `proxy`, and a proxy deck has `budget: None`.
 - **`storage.py`**: saves decks to `decks/<slug>.json` plus a `.txt` export (Moxfield format). The `decks/` contents are gitignored.
+  - **Versioning:** a new version is created when content changes (`_CONTENT_KEYS`) or a `change_note` is given. Re-validation alone does not create one.
+  - Each version gets a full snapshot in `decks/.versions/<slug>/vNNNN.json` and a `history` entry: diff, from/to level, price, power.
+  - `restore()` saves the old snapshot as a *new* version.
+  - `copy()` creates a new slug with its own history.
+  - Legacy decks without a `version` are snapshotted as v1 on their next save.
 - **`mcp_server.py`**: the MCP server, built with `mcp` **2.x**.
   - Use `from mcp.server.mcpserver import MCPServer`. `FastMCP` no longer exists in 2.x.
   - Tools are thin wrappers over the modules above.
@@ -76,6 +87,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Events stream to the browser over SSE, with `Last-Event-ID` resume.
   - The finished deck is detected as the deck whose `updated` timestamp is ≥ the job start.
   - The prompts in `build_prompt` / `refine_prompt` / `finder_prompt` tell the agent it runs non-interactively. `_budget_line` holds the shared budget/proxy wording.
+  - Retune jobs (`/api/retune`, `retune_prompt`) re-tune a saved deck to a new bracket/profile. `profile_lines()` renders a profile into prompt lines.
+  - Version routes: `/api/decks/{slug}/versions[/{v}[/restore]]`, `/diff?a=&b=` and `/copy`.
   - Commander-finder jobs pass `output_format` (JSON schema `SUGGESTION_SCHEMA`) to the SDK. They read `ResultMessage.structured_output`, enrich it with card data (`_enrich_suggestions`) and emit a `suggestions` SSE event instead of a deck.
 
 **Skill ↔ tools contract:**

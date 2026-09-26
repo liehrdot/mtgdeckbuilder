@@ -18,6 +18,7 @@ from mcp.server.mcpserver import MCPServer
 from . import blacklist, brackets, carddb, edhrec, importers, scryfall, spellbook, storage
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
+from .power import PowerProfile
 from .validate import validate_deck as _validate
 
 log = logging.getLogger(__name__)
@@ -198,6 +199,9 @@ async def bracket_rules() -> dict[str, Any]:
             "Since Oct 2025 there are no tutor limits; efficient tutors are Game Changers.",
             "Game Changer list: call game_changers (live from Scryfall).",
             "Brackets are about expectations: also consider speed, consistency and how the deck wins.",
+            "Inside a bracket, a power_profile sets a sub-tier (low/mid/high, e.g. 'upper 3', 'lower 4') and "
+            "stricter house rules (max_game_changers, max_tutors, no combos/extra turns/MLD) plus a style. "
+            "validate_deck reports a heuristic power score (e.g. 3.8 = upper bracket 3).",
         ],
     }
 
@@ -210,11 +214,14 @@ async def validate_deck(
     currency: Currency = "eur",
     budget: Annotated[float | None, Field(description="Max. total deck price; exceeding it is a warning")] = None,
     proxy: Annotated[bool, Field(description="Deck will be printed as proxies: prices don't matter")] = False,
+    power_profile: Annotated[PowerProfile | None, Field(description="Sub-tier, house rules and style inside the bracket")] = None,
 ) -> dict[str, Any]:
     """Check a deck: 100 cards, singleton, color identity, banned cards, user blacklist, budget,
     land/ramp/draw/removal counts, bracket rules (Game Changers, mass land denial, extra turns,
-    2-card combos via Commander Spellbook)."""
-    result = await _validate(commanders, cards, bracket, currency=currency, budget=budget, proxy=proxy)
+    2-card combos via Commander Spellbook), power profile house rules and a heuristic power score."""
+    result = await _validate(
+        commanders, cards, bracket, currency=currency, budget=budget, proxy=proxy, profile=power_profile
+    )
     result.pop("_card_data", None)
     result.pop("cards", None)
     result["stats"].pop("roles", None)  # role -> card lists are long; counts suffice here
@@ -241,12 +248,16 @@ async def save_deck(
     budget: float | None = None,
     currency: Currency = "eur",
     proxy: Annotated[bool, Field(description="Deck will be printed as proxies (budget ignored)")] = False,
+    power_profile: Annotated[PowerProfile | None, Field(description="Sub-tier, house rules and style inside the bracket")] = None,
+    change_note: Annotated[str, Field(description="When updating a deck: what was changed and why (stored in the deck history)")] = "",
     notes: Annotated[str, Field(description="Notes for the player: mulligan tips, combos, upgrade ideas")] = "",
     slug: Annotated[str | None, Field(description="Existing deck slug to overwrite (when refining a deck)")] = None,
 ) -> dict[str, Any]:
     """Validate and save a deck to decks/<slug>.json (+ .txt export for Moxfield/Archidekt). Shown in the GUI."""
     lines = [f"{c.qty} {c.name}" for c in cards]
-    result = await _validate(commanders, lines, bracket, currency=currency, budget=budget, proxy=proxy)
+    result = await _validate(
+        commanders, lines, bracket, currency=currency, budget=budget, proxy=proxy, profile=power_profile
+    )
     card_data = result.pop("_card_data")
     categories = {c.name: c.category for c in cards}
     renamed = result["renamed"]
@@ -262,8 +273,10 @@ async def save_deck(
         "strategy": strategy,
         "budget": None if proxy else budget,
         "proxy": proxy,
+        "power_profile": power_profile.model_dump(exclude_defaults=True) if power_profile else None,
         "currency": currency,
         "notes": notes,
+        "change_note": change_note,
         "cards": [{**c, "category": categories.get(c["name"], "")} for c in result.pop("cards")],
         "validation": result,
     }
@@ -276,7 +289,8 @@ async def save_deck(
         "legal": result["legal"],
         "errors": result["errors"],
         "warnings": result["warnings"],
-        "bracket": {k: result["bracket"][k] for k in ("target", "compliant", "violations", "warnings", "estimated", "game_changers")},
+        "bracket": {k: result["bracket"][k] for k in ("target", "target_text", "compliant", "violations", "warnings", "estimated", "game_changers")},
+        "power": {k: result["bracket"]["power"][k] for k in ("value", "text", "components")},
         "price_total": result["price_total"],
         "proxy": proxy,
         "card_count": result["stats"]["card_count"] + len(result["commanders"]),
@@ -315,14 +329,69 @@ async def load_deck(slug: str) -> dict[str, Any]:
     """Load a saved deck (cards with categories, description, last validation summary)."""
     deck = storage.load(slug)
     v = deck.get("validation") or {}
-    deck["validation"] = {k: v.get(k) for k in ("legal", "errors", "warnings", "bracket")}
+    deck["validation"] = {k: v.get(k) for k in ("legal", "errors", "warnings", "bracket", "price_total")}
+    deck["history"] = (deck.get("history") or [])[-5:]  # latest changes are enough for context
     return deck
 
 
+# --- versions ---------------------------------------------------------------------------------
+
+
 @mcp.tool()
-async def export_deck(slug: str, format: Literal["moxfield", "sectioned"] = "moxfield") -> str:
-    """Deck as text for import in Moxfield/Archidekt/ManaBox ('moxfield': commander marked *CMDR*)."""
-    deck = storage.load(slug)
+async def list_deck_versions(slug: str) -> dict[str, Any]:
+    """Version history of a saved deck: per version the note, cards added/removed, level
+    (e.g. 'oberes Bracket 3'), price and power score. Every save_deck creates a version."""
+    try:
+        return {"slug": slug, "versions": storage.versions(slug)}
+    except FileNotFoundError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def compare_deck_versions(
+    slug: str,
+    from_version: int,
+    to_version: Annotated[int | None, Field(description="Default: current version")] = None,
+) -> dict[str, Any]:
+    """Diff between two versions of a deck: cards in/out, level, price and power changes."""
+    try:
+        return storage.compare(slug, from_version, to_version)
+    except FileNotFoundError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def restore_deck_version(slug: str, version: int, note: str = "") -> dict[str, Any]:
+    """Make an old version current again (saved as a new version, nothing is lost).
+    Use for 'undo', 'go back to the version before ...'. Only on user request."""
+    try:
+        saved = storage.restore(slug, version, note)
+    except FileNotFoundError as exc:
+        return {"error": str(exc)}
+    return {"restored": version, **saved, "diff_to_before": storage.compare(slug, saved["version"] - 1)}
+
+
+@mcp.tool()
+async def copy_deck(
+    slug: str,
+    new_name: Annotated[str | None, Field(description="Name of the copy; default '<name> (Kopie)'")] = None,
+    version: Annotated[int | None, Field(description="Copy this old version instead of the current one")] = None,
+) -> dict[str, Any]:
+    """Duplicate a deck as a new, independent deck – e.g. to build a bracket 2 and a bracket 4
+    variant of the same commander. Only on user request."""
+    try:
+        return storage.copy(slug, new_name, version)
+    except FileNotFoundError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def export_deck(
+    slug: str, format: Literal["moxfield", "sectioned"] = "moxfield", version: int | None = None
+) -> str:
+    """Deck (or an old version of it) as text for import in Moxfield/Archidekt/ManaBox
+    ('moxfield': commander marked *CMDR*)."""
+    deck = storage.load_version(slug, version)
     entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck["cards"]]
     return (to_text if format == "moxfield" else to_sectioned_text)(deck["commanders"], entries)
 

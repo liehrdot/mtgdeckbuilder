@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from . import power as power_mod
+from .power import PowerProfile
+
 BRACKETS: list[dict[str, Any]] = [
     {
         "number": 1,
@@ -94,8 +97,10 @@ def evaluate(
     *,
     spellbook_estimate: dict[str, Any] | None = None,
     two_card_combos: list[dict[str, Any]] | None = None,
+    profile: PowerProfile | None = None,
 ) -> dict[str, Any]:
-    """Check compact cards (incl. commanders) against the rules of the target bracket."""
+    """Check compact cards (incl. commanders) against the target bracket and the player's
+    power profile (sub-tier + house rules), and estimate the power level inside the brackets."""
     rules = BY_NUMBER[target]
     names = {c["name"] for c in cards}
     sb = spellbook_estimate if spellbook_estimate and not spellbook_estimate.get("error") else None
@@ -139,6 +144,19 @@ def evaluate(
     if estimated is None:
         estimated = _heuristic_estimate(len(game_changers), bool(mld), len(extra_turns), bool(combos))
 
+    hard_floor = 4 if len(game_changers) > 3 or mld else 3 if game_changers or combos else 1
+    facts = {
+        "game_changers": game_changers,
+        "tutors": tutors,
+        "two_card_combos": combos,
+        "extra_turns": sorted(extra_turns),
+        "mass_land_denial": sorted(mld),
+    }
+    power = power_mod.score(cards, **facts, min_bracket=hard_floor)
+    pv, pw = power_mod.check_profile(profile, rules, **facts, power=power)
+    violations += pv
+    warnings += pw
+
     return {
         "target": target,
         "target_name": rules["name"],
@@ -155,6 +173,11 @@ def evaluate(
         "estimated": estimated,
         "estimate_source": "Commander Spellbook" if sb and sb.get("estimated_bracket") else "Heuristik",
         "spellbook_tag": (sb or {}).get("bracket_tag_name"),
+        "power": power,
+        "profile": profile.model_dump(exclude_defaults=True) if profile else None,
+        "target_text": (
+            f"{power_mod.TIER_LABELS[profile.tier]} Bracket {target}" if profile and profile.tier else f"Bracket {target}"
+        ),
     }
 
 

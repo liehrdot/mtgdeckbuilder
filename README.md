@@ -69,6 +69,38 @@ Stand: WotC-Update vom 21.10.2025 (keine Tutor-Limits mehr) und Game-Changer-Upd
 Die Game-Changer-Liste wird **live von Scryfall** (`is:gamechanger`) gelesen, nicht hart kodiert.
 `validate_deck` fragt zusätzlich Commander Spellbook nach einer Bracket-Schätzung und nach Combos.
 
+## Power-Feinabstimmung: Bracket rauf/runter
+
+Ein Bracket ist breit – deshalb gibt es pro Deck ein **Power-Profil**:
+
+- **Feinstufe:** unteres / mittleres / oberes Bracket („Lower 4“, „Upper 3“).
+- **Hausregeln** (nur strenger als das Bracket): max. Game Changer (z. B. Bracket 4 ohne Game
+  Changer, Bracket 3 mit max. 2), max. Tutoren, keine 2-Karten-Combos / Extra Turns / Mass Land Denial.
+- **Stil/Vibe:** z. B. „witzig“, „chaotisch“, „politisch“, „thematisch“ („Bracket 2, aber witzig“).
+- **Power-Score:** `validate_deck` schätzt die Stärke auf der Bracket-Skala (z. B. 3.8 = oberes
+  Bracket 3) aus Game Changern, Tutoren, Fast Mana, Free Spells, Combos, Kurve und Interaktion –
+  transparent mit Einzelposten. Weicht das Deck deutlich von der Ziel-Stufe ab, gibt es eine Warnung.
+
+In Claude Code: „Mach mein Meren-Deck zu einem unteren Bracket 4“, „Bracket 3 mit max. 2 Game
+Changern“, „eine Stufe schwächer und witziger“. In der GUI: Panel „Power & Bracket“ mit Skala
+(aktuell vs. Ziel), ▲/▼ „Eine Stufe stärker/schwächer“, Hausregeln, Stil und „Deck umbauen“.
+Beim Neubau gibt es dieselben Optionen unter „Feinabstimmung“.
+
+## Versionen: Verlauf, Diff, Wiederherstellen, Kopieren
+
+Jede Speicherung eines Decks ist eine **Version** mit vollständigem Snapshot
+(`decks/.versions/<deck>/`). Der Verlauf zeigt pro Version Notiz, Karten rein/raus,
+Stufe (z. B. „oberes Bracket 3 → unteres Bracket 4“), Preis und Power-Score.
+
+- **Vergleichen:** zwei beliebige Versionen (Karten, Stufe, Power, Preis)
+- **Wiederherstellen:** alte Version wird wieder aktuell – als neue Version, nichts geht verloren
+- **Als neues Deck kopieren:** z. B. eine Bracket-2- und eine Bracket-4-Variante desselben Commanders
+- **Liste kopieren:** Decklist jeder Version für Moxfield/Archidekt
+
+In Claude Code: „Was hat sich seit Version 2 geändert?“, „Mach die letzte Änderung rückgängig“,
+„Kopier das Deck als Bracket-2-Variante“ (Tools `list_deck_versions`, `compare_deck_versions`,
+`restore_deck_version`, `copy_deck`).
+
 ## Commander finden, Proxy-Decks, Blacklist
 
 - **Commander finden:** Beschreibe frei, was du spielen willst (Farben, Kreaturtypen, Mechaniken,
@@ -140,10 +172,12 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `edhrec_recommendations` / `edhrec_average_deck` | EDHREC-Daten (optional Bracket, Thema, Budget) |
 | `find_combos` | Commander Spellbook: Combos im Deck / fehlt eine Karte |
 | `bracket_rules` / `game_changers` | Bracket-Regeln, aktuelle Game-Changer-Liste |
-| `validate_deck` | 100 Karten, Singleton, Farbidentität, Bannliste, Rollen-Richtwerte, Bracket-Prüfung |
+| `validate_deck` | 100 Karten, Singleton, Farbidentität, Bannliste, Blacklist, Budget, Rollen-Richtwerte, Bracket-Prüfung, Power-Profil & Power-Score |
 | `save_deck` / `load_deck` / `list_decks` / `export_deck` | Decks speichern, laden, exportieren |
 | `import_deck` | Archidekt-/Moxfield-URL importieren |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
+| `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
+| `restore_deck_version` / `copy_deck` | alte Version wiederherstellen, Deck (oder alte Version) kopieren |
 | `card_db_status` / `update_card_database` | lokale Kartendatenbank |
 
 Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop):

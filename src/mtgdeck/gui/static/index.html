@@ -61,6 +61,10 @@
           <span class="slider" aria-hidden="true"></span>
           <span>Proxy-Deck <span class="opt">– Preise egal, beste Karten fürs Bracket</span></span>
         </label>
+        <details class="sub" id="build-profile">
+          <summary>Feinabstimmung <span class="opt">(Stufe, Hausregeln, Stil)</span></summary>
+          <div class="profile-fields"></div>
+        </details>
         <label>Strategie / Thema <span class="opt">(optional)</span>
           <input name="strategy" placeholder="z. B. +1/+1 Counter, Superfriends, Tokens">
         </label>
@@ -126,6 +130,7 @@
         </div>
         <div class="deck-actions">
           <button id="copy-btn" class="secondary">Liste kopieren</button>
+          <button id="duplicate-btn" class="secondary">Als neues Deck kopieren</button>
           <button id="validate-btn" class="secondary">Neu prüfen</button>
           <button id="delete-btn" class="danger">Löschen</button>
         </div>
@@ -136,12 +141,49 @@
         <div class="panel"><h3>Statistik</h3><div id="stats"></div></div>
       </div>
 
+      <div class="panel" id="power-panel">
+        <div class="power-head">
+          <h3>Power &amp; Bracket</h3>
+          <div class="deck-actions">
+            <button type="button" class="secondary" id="step-down">▼ Eine Stufe schwächer</button>
+            <button type="button" class="secondary" id="step-up">▲ Eine Stufe stärker</button>
+          </div>
+        </div>
+        <div id="power-scale" class="scale"></div>
+        <p id="power-text" class="hint"></p>
+        <form id="retune-form" autocomplete="off">
+          <fieldset>
+            <legend>Ziel-Bracket</legend>
+            <div id="retune-brackets" class="brackets"></div>
+          </fieldset>
+          <div class="profile-fields"></div>
+          <label>Wunsch / Notiz <span class="opt">(optional)</span>
+            <input name="request" placeholder="z. B. mehr Interaktion statt Combos, Lieblingskarten behalten …">
+          </label>
+          <button type="submit" id="retune-btn">Deck umbauen</button>
+        </form>
+      </div>
+
       <div class="panel">
         <h3>Anpassen</h3>
         <form id="refine-form" class="refine">
           <input name="request" placeholder="z. B. Mehr Kartenzug, Budget unter 150 €, tausche die Board-Wipes …" required>
           <button type="submit">Überarbeiten lassen</button>
         </form>
+      </div>
+
+      <div class="panel hidden" id="history-panel">
+        <div class="power-head">
+          <h3>Verlauf &amp; Versionen</h3>
+          <form id="compare-form" class="compare">
+            <select name="a" aria-label="Version A"></select>
+            <span>→</span>
+            <select name="b" aria-label="Version B"></select>
+            <button type="submit" class="secondary">Vergleichen</button>
+          </form>
+        </div>
+        <div id="compare-result" class="compare-result hidden"></div>
+        <ol id="history" class="history" reversed></ol>
       </div>
 
       <div class="panel">
@@ -165,6 +207,33 @@
     </section>
   </section>
 </main>
+
+<template id="profile-template">
+  <div class="tiers" role="radiogroup" aria-label="Feinstufe">
+    <label><input type="radio" name="tier" value="" checked><span>Egal</span></label>
+    <label><input type="radio" name="tier" value="low"><span>unteres</span></label>
+    <label><input type="radio" name="tier" value="mid"><span>mittleres</span></label>
+    <label><input type="radio" name="tier" value="high"><span>oberes</span></label>
+  </div>
+  <div class="row2">
+    <label>Max. Game Changer
+      <input name="max_game_changers" type="number" min="0" max="20" placeholder="lt. Bracket">
+    </label>
+    <label>Max. Tutoren
+      <input name="max_tutors" type="number" min="0" max="20" placeholder="egal">
+    </label>
+  </div>
+  <label class="check"><input type="checkbox" name="no_combos"> keine 2-Karten-Combos</label>
+  <label class="check"><input type="checkbox" name="no_extra_turns"> keine Extra Turns</label>
+  <label class="check"><input type="checkbox" name="no_mld"> kein Mass Land Denial</label>
+  <label>Stil / Vibe
+    <input name="style" list="style-options" placeholder="z. B. witzig, politisch, thematisch">
+  </label>
+</template>
+<datalist id="style-options">
+  <option value="witzig"><option value="chaotisch"><option value="politisch"><option value="thematisch / Flavor">
+  <option value="Casual / Kitchen Table"><option value="kompetitiv angehaucht"><option value="Group Hug">
+</datalist>
 
 <div id="preview" class="card-preview hidden"><img alt=""></div>
 <script src="/static/app.js"></script>

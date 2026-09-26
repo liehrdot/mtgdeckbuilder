@@ -11,6 +11,7 @@ from . import blacklist, brackets, spellbook
 from .cards import resolve
 from .deck import BASIC_LANDS, DeckEntry, deck_stats, parse_decklist
 from .http import HttpError
+from .power import PowerProfile
 
 _ANY_NUMBER_RE = re.compile(r"a deck can have (any number of|up to \w+) cards? named", re.I)
 _PARTNER_RE = re.compile(
@@ -36,6 +37,7 @@ async def validate_deck(
     use_spellbook: bool = True,
     budget: float | None = None,
     proxy: bool = False,
+    profile: PowerProfile | None = None,
 ) -> dict[str, Any]:
     """Validate a deck. ``cards`` are decklist lines ('1 Sol Ring' or 'Sol Ring'), without commanders.
 
@@ -135,7 +137,9 @@ async def validate_deck(
             warnings.append(f"Commander Spellbook nicht erreichbar: {exc}")
     two_card = [c for c in (combos_found or {}).get("included", []) if len(c.get("cards") or []) == 2]
     all_cards = [card_data[n] for n in commanders if n in card_data] + main_cards
-    bracket_result = brackets.evaluate(bracket, all_cards, spellbook_estimate=sb_estimate, two_card_combos=two_card)
+    bracket_result = brackets.evaluate(
+        bracket, all_cards, spellbook_estimate=sb_estimate, two_card_combos=two_card, profile=profile
+    )
 
     return {
         "legal": not errors,
