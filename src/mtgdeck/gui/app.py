@@ -9,8 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
-import subprocess
 import sys
 import time
 import uuid
@@ -29,6 +27,7 @@ from ..cards import resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
+from . import terminal
 from ..validate import validate_deck
 
 STATIC = Path(__file__).parent / "static"
@@ -49,7 +48,7 @@ class Job:
     done: bool = False
     task: asyncio.Task | None = None
     changed: asyncio.Event = field(default_factory=asyncio.Event)
-    proc: Any = None  # subprocess.Popen for the MPC Autofill console job
+    proc: Any = None  # terminal.Terminal of the MPC Autofill job
     loop: asyncio.AbstractEventLoop | None = None
 
     def emit(self, **event: Any) -> None:
@@ -502,7 +501,7 @@ async def api_job_events(job_id: str, request: Request) -> StreamingResponse:
 @app.post("/api/jobs/{job_id}/cancel")
 async def api_job_cancel(job_id: str) -> dict[str, bool]:
     job = JOBS.get(job_id)
-    if job and job.proc and job.proc.poll() is None:
+    if job and isinstance(job.proc, terminal.Terminal):
         job.proc.terminate()
     if job and job.task and not job.done:
         job.task.cancel()
@@ -735,12 +734,11 @@ async def api_print_pdf(slug: str, req: PdfRequest) -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
 
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\r")
-
-
 class AutofillRequest(BaseModel):
     mode: str = "mpc"
-    window: bool = False  # True = own console window instead of the integrated log
+    window: bool = False  # True = own console window instead of the terminal in the GUI
+    rows: int = 32
+    cols: int = 110
 
 
 @app.post("/api/decks/{slug}/print/autofill")
@@ -749,56 +747,56 @@ async def api_print_autofill(slug: str, req: AutofillRequest) -> dict[str, Any]:
     mode = "pdf" if req.mode == "pdf" else "mpc"
     try:
         proxy._check_order(folder)
-        if req.window:
-            return proxy.launch_autofill(folder, mode=mode)
+        if req.window or not terminal.available():
+            started = proxy.launch_autofill(folder, mode=mode)
+            return {**started, "window": True}
         cmd = proxy.autofill_command(folder, mode=mode)
     except (FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
     async def runner(job: Job) -> None:
-        job.emit(type="status", text="Starte MPC Autofill … (Browser-Fenster öffnet sich; Rückfragen hier beantworten)")
-        env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1", "TERM": "dumb"}
-        proc = subprocess.Popen(
-            cmd, cwd=str(folder), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            env=env, bufsize=0,
-        )  # fmt: skip
-        job.proc = proc
+        job.emit(type="status", text="Starte MPC Autofill … Bedienung direkt im Terminal unten (Pfeiltasten + Enter).")
+        term = terminal.Terminal(cmd, cwd=str(folder), rows=req.rows, cols=req.cols)
+        job.proc = term
         job.emit(type="console", running=True)
 
         def pump() -> None:
-            buf = b""
-            assert proc.stdout is not None
-            while chunk := proc.stdout.read(1):
-                buf += chunk
-                if chunk == b"\n" or (buf.endswith((b": ", b"? ", b". ")) and len(buf) > 20):
-                    line = _ANSI_RE.sub("", buf.decode("utf-8", "replace")).rstrip()
-                    if line:
-                        job.emit_threadsafe(type="text", text=line)
-                    buf = b""
-            if buf.strip():
-                job.emit_threadsafe(type="text", text=_ANSI_RE.sub("", buf.decode("utf-8", "replace")).rstrip())
+            while data := term.read():
+                job.emit_threadsafe(type="term", data=data)
 
         await asyncio.to_thread(pump)
-        code = await asyncio.to_thread(proc.wait)
+        code = await asyncio.to_thread(term.exit_code)
         job.emit(type="console", running=False)
         job.emit(type="result", text=f"MPC Autofill beendet (Code {code}).")
         job.emit(type="done", ok=code == 0)
 
-    return _start_runner(runner)
+    return {**_start_runner(runner), "window": False}
 
 
 class InputRequest(BaseModel):
     text: str = ""
+    raw: bool = False  # True: keystrokes from the terminal as-is; False: a line + Enter
 
 
 @app.post("/api/jobs/{job_id}/input")
 async def api_job_input(job_id: str, req: InputRequest) -> dict[str, bool]:
     job = JOBS.get(job_id)
-    if not job or not job.proc or job.proc.poll() is not None or not job.proc.stdin:
+    if not job or not isinstance(job.proc, terminal.Terminal) or not job.proc.alive():
         raise HTTPException(409, "Kein laufender Prozess für Eingaben")
-    job.proc.stdin.write((req.text + os.linesep).encode())
-    job.proc.stdin.flush()
-    job.emit(type="tool", name="Eingabe", summary=req.text or "⏎")
+    await asyncio.to_thread(job.proc.write, req.text if req.raw else req.text + "\r")
+    return {"ok": True}
+
+
+class ResizeRequest(BaseModel):
+    rows: int = Field(ge=5, le=300)
+    cols: int = Field(ge=20, le=500)
+
+
+@app.post("/api/jobs/{job_id}/resize")
+async def api_job_resize(job_id: str, req: ResizeRequest) -> dict[str, bool]:
+    job = JOBS.get(job_id)
+    if job and isinstance(job.proc, terminal.Terminal) and job.proc.alive():
+        job.proc.resize(req.rows, req.cols)
     return {"ok": True}
 
 

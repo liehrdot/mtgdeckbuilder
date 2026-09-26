@@ -216,3 +216,10 @@ dialog.picker::backdrop { background: rgba(0,0,0,.5); }
 .picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .picker-grid .pcard .cap { white-space: normal; }
 .pcard.selected img { outline: 3px solid var(--ok); }
+
+/* terminal for the MPC Autofill tool */
+.terminal-wrap { margin-top: 8px; }
+.terminal { background: #111; border-radius: 8px; padding: 6px; overflow-x: auto; }
+.terminal:focus-within { outline: 2px solid var(--accent); }
+.term-keys { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.term-keys button { padding: 4px 12px; }

@@ -125,9 +125,11 @@ lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles dav
    hochskaliert (die haben schon 800 DPI). KI kann feine Details verfälschen – stichprobenartig prüfen.
 3. **PDF zum Selbstdrucken** – direkt im Deckbuilder (ohne exe): A4/Letter, 3 × 3 Karten à 63 × 88 mm,
    Schnittmarken, optional mit DFC-Rückseiten.
-4. **An MakePlayingCards senden** – startet das Autofill-Programm mit passenden Optionen. Seine
-   Ausgabe erscheint live in der GUI, Rückfragen („Enter drücken“) beantwortest du dort
-   (oder Häkchen „eigenes Fenster“). Login und Upload laufen im sich öffnenden Browser.
+4. **An MakePlayingCards senden** – startet das Autofill-Programm mit passenden Optionen in einem
+   **Terminal direkt in der GUI** (echtes Pseudo-Terminal: ConPTY unter Windows 10/11, pty unter
+   macOS/Linux). Seine Menüs – z. B. „How would you like to upload this order?“ – bedienst du dort mit
+   Pfeiltasten und Enter (oder den Buttons ↑ ↓ Enter darunter). Login und Upload laufen im sich
+   öffnenden Browser. Alternativ Häkchen „eigenes Fenster“ für ein separates Konsolenfenster.
 
 Einrichtung: `autofill-windows.exe` in den Ordner `tools/` legen (oder Pfad unter „Einstellungen“),
 optional die MPC-Autofill-Server-URL eintragen (die du auf mpcfill.com verwendest) und einen eigenen

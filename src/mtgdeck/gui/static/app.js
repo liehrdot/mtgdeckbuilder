@@ -385,17 +385,55 @@ $("#pdf-btn").addEventListener("click", async () => {
 
 $("#mpc-btn").addEventListener("click", async () => {
   try {
-    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/autofill`, { method: "POST", body: { mode: "mpc", window: $("#mpc-window").checked } });
+    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/autofill`, { method: "POST", body: { mode: "mpc", window: $("#mpc-window").checked, ...TERM_SIZE } });
     if (r.job) { startJob(r.job, `MPC Autofill: ${currentDeck.name}`); window.scrollTo({ top: 0, behavior: "smooth" }); }
-    else alert("MPC Autofill wurde in einem eigenen Fenster gestartet.");
+    else alert("MPC Autofill wurde in einem eigenen Konsolenfenster gestartet – dort weiter bedienen.");
   } catch (err) { alert(err.message); }
+});
+
+// ---------- terminal (MPC Autofill runs in a pseudo-terminal; its menus need arrow keys) ----------
+const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\r/g;
+const TERM_SIZE = { rows: 32, cols: 110 };
+const KEYS = { up: "\x1b[A", down: "\x1b[B", enter: "\r" };
+let term = null;
+let keyQueue = Promise.resolve();
+
+function sendKeys(data, raw = true) {
+  const job = currentJob;
+  keyQueue = keyQueue.then(() => api(`/api/jobs/${job}/input`, { method: "POST", body: { text: data, raw } })
+    .catch((err) => logLine("error", err.message)));
+}
+
+function resetTerminal() {
+  if (term) { term.dispose(); term = null; }
+  $("#terminal").innerHTML = "";
+  $("#terminal-wrap").classList.add("hidden");
+}
+
+function openTerminal() {
+  if (term) return;
+  if (!window.Terminal) {  // xterm.js missing -> simple line input as fallback
+    $("#console-form").classList.remove("hidden");
+    return;
+  }
+  $("#terminal-wrap").classList.remove("hidden");
+  term = new window.Terminal({ ...TERM_SIZE, fontSize: 13, cursorBlink: true, convertEol: false,
+    theme: { background: "#111111" }, fontFamily: "ui-monospace, Consolas, monospace" });
+  term.open($("#terminal"));
+  term.onData((d) => sendKeys(d));
+  term.focus();
+}
+
+document.querySelector(".term-keys").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-key]");
+  if (b && currentJob) { sendKeys(KEYS[b.dataset.key]); term?.focus(); }
 });
 
 $("#console-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = e.target.elements.text;
-  try { await api(`/api/jobs/${currentJob}/input`, { method: "POST", body: { text: input.value } }); input.value = ""; }
-  catch (err) { logLine("error", err.message); }
+  sendKeys(input.value, false);
+  input.value = "";
 });
 
 $("#duplicate-btn").addEventListener("click", () => currentDeck && copyAsDeck(null).catch((err) => alert(err.message)));
@@ -438,6 +476,7 @@ function startJob(jobId, title) {
   $("#log").innerHTML = "";
   $("#progress").classList.add("hidden");
   $("#console-form").classList.add("hidden");
+  resetTerminal();
   $("#build-btn").disabled = true;
   $("#cancel-btn").disabled = false;
   if (eventSource) eventSource.close();
@@ -472,8 +511,12 @@ function handleEvent(ev) {
     }
     case "print": onPrepared(ev.result); break;
     case "console":
-      $("#console-form").classList.toggle("hidden", !ev.running);
-      if (ev.running) $("#console-form").elements.text.focus();
+      if (ev.running) openTerminal();
+      else if (term) term.options.disableStdin = true;
+      break;
+    case "term":
+      if (term) term.write(ev.data);
+      else logLine("text", ev.data.replace(ANSI_RE, "").trimEnd());
       break;
     case "done":
       eventSource.close();

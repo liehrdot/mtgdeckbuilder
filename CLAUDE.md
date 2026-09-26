@@ -83,7 +83,11 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Opt-in AI upscaling: `prepare(upscale=)` defaults to setting `upscale` (off). It runs `realesrgan-ncnn-vulkan` (official zip v0.2.5.0 ships only `realesrgan-x4plus` and `-x4plus-anime`; `upscale_models()` lists what is installed; `-s 4`, `-m <exe dir>/models`, serialised by a `threading.Lock`) on Scryfall scans, then `add_bleed(dpi=600)`. If opted in and the tool or model is missing, it raises `ValueError`. An `UpscaleError` on a single card (e.g. no Vulkan GPU) falls back to 300 DPI with one aggregated warning. MPC scans are never upscaled.
   - `export_pdf()` builds home-printing sheets.
   - `autofill_command()` passes `--directory --browser --site --auto-save --no-image-post-processing`. Keep exactly one XML per folder, otherwise the tool prompts.
-  - The GUI streams the tool's stdout via a Popen reader thread (`Job.emit_threadsafe`). Stdin goes through `/api/jobs/{id}/input`.
+  - The tool shows InquirerPy arrow-key menus ("How would you like to upload this order?"). They need a real console, so plain pipes crash with `NoConsoleScreenBufferError`.
+  - The GUI therefore runs it in a pseudo-terminal (`gui/terminal.py`: pywinpty/ConPTY on Windows, ptyprocess elsewhere; both are gui extras).
+  - Raw output goes out as `term` SSE events and is rendered by the vendored xterm.js in `static/vendor/xterm`.
+  - Keystrokes go through `/api/jobs/{id}/input` (`raw: true`). `/resize` also exists.
+  - Fallback: `launch_autofill()` in its own console window (`CREATE_NEW_CONSOLE`), which the MCP tool uses too.
   - `settings.py`: user paths/servers in gitignored `mtgdeck.settings.json`, with env overrides.
   - To verify an XML against upstream, clone mpc-autofill and call `src.order.CardOrder.from_xmls_in_folder`.
 - **`mcp_server.py`**: the MCP server, built with `mcp` **2.x**.
@@ -117,7 +121,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - disables throttling.
 - Any card name starting with `Filler` is synthesized on demand. `deck_lines()` builds a legal 99-card main deck for Meren (BG).
 - Add new endpoints to the mock `handler`. It also fakes `cards.scryfall.io`, the MPC Autofill server (`MPC_SERVER`) and its CDN, returning generated images.
-- `test_proxy.py` drives the streamed autofill console with a fake `autofill.py` script.
+- `test_proxy.py` drives the terminal with a fake `autofill.py` that shows the same InquirerPy menu (inquirerpy is a dev dependency). The test answers it with raw arrow-key input.
 - Async tests run with `asyncio_mode = "auto"`.
 
 ## Configuration

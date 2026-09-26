@@ -15,10 +15,14 @@ gui = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "claude-agent-sdk>=0.2",
+    # real terminal for the MPC Autofill tool (its menus need a console): ConPTY on Windows, pty elsewhere
+    "pywinpty>=2; sys_platform == 'win32'",
+    "ptyprocess>=0.7; sys_platform != 'win32'",
 ]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "inquirerpy>=0.3",  # tests drive the same interactive menu the MPC Autofill tool shows
 ]
 
 [project.scripts]

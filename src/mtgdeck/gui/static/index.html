@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Commander Deckbuilder</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%273%27 y=%271%27 width=%2710%27 height=%2714%27 rx=%272%27 fill=%27%237a4fd6%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -152,6 +153,15 @@
       </div>
       <div id="progress" class="progressbar hidden"><div></div><span></span></div>
       <div id="log" class="log"></div>
+      <div id="terminal-wrap" class="terminal-wrap hidden">
+        <div id="terminal" class="terminal" tabindex="0" aria-label="MPC-Autofill-Terminal"></div>
+        <div class="term-keys">
+          <span class="hint">Ins Terminal klicken und mit Tastatur bedienen – oder:</span>
+          <button type="button" class="secondary" data-key="up">↑</button>
+          <button type="button" class="secondary" data-key="down">↓</button>
+          <button type="button" class="secondary" data-key="enter">Enter ⏎</button>
+        </div>
+      </div>
       <form id="console-form" class="console hidden" autocomplete="off">
         <input name="text" placeholder="Antwort an MPC Autofill (leer = Enter)">
         <button type="submit" class="secondary">Senden ⏎</button>
@@ -214,7 +224,7 @@
           </span>
           <span class="group">
             <button type="button" id="mpc-btn">An MakePlayingCards senden</button>
-            <label class="check"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
+            <label class="check" title="Statt im Terminal hier in einem separaten Konsolenfenster starten"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
           </span>
           <span class="group downloads">
             <a id="xml-link" class="hidden" href="#">order.xml</a>
@@ -332,6 +342,7 @@
 </datalist>
 
 <div id="preview" class="card-preview hidden"><img alt=""></div>
+<script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -141,11 +141,26 @@ def test_autofill_command(tmp_path, monkeypatch):
 
 FAKE_AUTOFILL = """
 import sys
+from InquirerPy import inquirer
 print("MPC Autofill desktop tool has successfully initialised!", flush=True)
 print("args:", " ".join(sys.argv[1:]), flush=True)
+# the real tool asks exactly this with an arrow-key menu (src/driver.py, execute_orders)
+choice = inquirer.select(
+    message="How would you like to upload this order?",
+    choices=["Create a new project (default)", "Add more cards to an existing project",
+             "Continue editing an existing project"],
+    default="Create a new project (default)",
+).execute()
+print("CHOICE:", choice, flush=True)
 answer = input("Press Enter to close this window - your browser window will remain open.\\n")
 print("got:", repr(answer), flush=True)
 """
+
+ANSI = __import__("re").compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\r")
+
+
+def _screen(job):
+    return ANSI.sub("", "".join(e.get("data", "") for e in job.events if e["type"] == "term"))
 
 
 def _wait(job_id, cond, timeout=15):
@@ -189,13 +204,23 @@ def test_gui_print_studio_flow(tmp_path):
         assert client.get("/api/decks/meren-print/print/files/pdf").content.startswith(b"%PDF")
 
         job = client.post("/api/decks/meren-print/print/autofill", json={"mode": "mpc"}).json()["job"]
-        _wait(job, lambda j: any("Press Enter" in e.get("text", "") for e in j.events))
-        assert client.post(f"/api/jobs/{job}/input", json={"text": "ok"}).json() == {"ok": True}
+        _wait(job, lambda j: "How would you like to upload this order?" in _screen(j))
+        assert "--directory" in _screen(gui.JOBS[job]) and "--no-image-post-processing" in _screen(gui.JOBS[job])
+        # arrow down + Enter in the menu, exactly what xterm.js sends from the browser
+        assert client.post(f"/api/jobs/{job}/input", json={"text": "\x1b[B", "raw": True}).json() == {"ok": True}
+        client.post(f"/api/jobs/{job}/input", json={"text": "\r", "raw": True})
+        _wait(job, lambda j: "Press Enter to close" in _screen(j))
+        assert "CHOICE: Add more cards to an existing project" in _screen(gui.JOBS[job])
+        client.post(f"/api/jobs/{job}/resize", json={"rows": 40, "cols": 120})
+        client.post(f"/api/jobs/{job}/input", json={"text": "ok"})  # line mode: text + Enter
         j = _wait(job, lambda j: j.done)
-        texts = [e.get("text", "") for e in j.events]
-        assert any("--directory" in t and "--no-image-post-processing" in t for t in texts)
-        assert "got: 'ok'" in texts
+        assert "got: 'ok'" in _screen(j)
         assert j.events[-1] == {"type": "done", "ok": True}
+        assert client.post(f"/api/jobs/{job}/input", json={"text": "x"}).status_code == 409
+
+        # own console window on request
+        r = client.post("/api/decks/meren-print/print/autofill", json={"mode": "mpc", "window": True}).json()
+        assert r["window"] is True and r["started"]
 
 
 def test_settings_creates_parent_dir(tmp_path, monkeypatch):
