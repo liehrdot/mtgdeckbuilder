@@ -92,7 +92,7 @@ ul.issues { margin: 6px 0; padding-left: 18px; }
 .cards .card { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; padding: 1px 0; cursor: default; }
 .cards .card .gc { color: var(--warn); font-size: 11px; margin-left: 4px; }
 .cards .card .price { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.card-preview { position: fixed; pointer-events: none; z-index: 10; }
+.card-preview { position: fixed; pointer-events: none; z-index: 10; display: flex; gap: 8px; }
 .card-preview img { width: 240px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
 .refine { display: flex; gap: 8px; } .refine input { margin: 0; }
 code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
@@ -236,3 +236,14 @@ dialog.compare-dialog { width: min(1400px, 96vw); }
 .compare-panes .pane { height: 68vh; overflow: auto; background: #111; border-radius: 8px; }
 .compare-panes .pane img { display: block; margin: 0 auto; }
 @media (max-width: 800px) { .compare-panes { grid-template-columns: 1fr; } .compare-panes .pane { height: 40vh; } }
+
+/* double-faced cards */
+.cards .card { cursor: pointer; }
+.cards .card .dfc { color: var(--accent); font-size: 12px; margin-left: 4px; }
+dialog.card-view { width: auto; max-width: 96vw; }
+.card-view-faces { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+.card-view-faces figure { margin: 0; text-align: center; }
+.card-view-faces img { width: min(360px, 80vw); border-radius: 16px; display: block; }
+.card-view-faces figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.pcard .tag.dfc { background: var(--accent); }
+.pcard .flip { top: auto; bottom: 24px; right: 4px; font-size: 15px; padding: 3px 8px; }

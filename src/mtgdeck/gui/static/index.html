@@ -361,7 +361,18 @@
   <option value="Casual / Kitchen Table"><option value="kompetitiv angehaucht"><option value="Group Hug">
 </datalist>
 
-<div id="preview" class="card-preview hidden"><img alt=""></div>
+<div id="preview" class="card-preview hidden"><img alt=""><img alt="" class="back hidden"></div>
+
+<dialog id="card-view" class="picker card-view">
+  <div class="picker-head">
+    <h3 id="card-view-title"></h3>
+    <div class="deck-actions">
+      <a id="card-view-link" href="#" target="_blank" rel="noopener">Auf Scryfall öffnen</a>
+      <button type="button" class="secondary" id="card-view-close" autofocus>Schließen</button>
+    </div>
+  </div>
+  <div id="card-view-faces" class="card-view-faces"></div>
+</dialog>
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/app.js"></script>
 </body>

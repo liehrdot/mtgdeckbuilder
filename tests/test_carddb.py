@@ -66,3 +66,26 @@ async def test_resolve_prefers_local_db_and_renames(tmp_path):
     assert set(cards) == {"Sol Ring", "Cultivate"}
     assert "ramp" in cards["Sol Ring"]["roles"]
     assert missing == []
+
+
+async def test_old_db_without_back_faces_is_completed_live(tmp_path):
+    build_db(tmp_path)
+    dfc = "Delver of Secrets // Insectile Aberration"
+    # simulate a DB built before layout/image_back were stored
+    with closing(carddb._connect()) as conn, conn:
+        row = conn.execute("SELECT oracle_id, data FROM cards WHERE name = ?", (dfc,)).fetchone()
+        data = json.loads(row["data"])
+        data.pop("layout", None)
+        data.pop("image_back", None)
+        conn.execute("UPDATE cards SET data = ? WHERE oracle_id = ?", (json.dumps(data), row["oracle_id"]))
+    assert carddb.status()["schema_outdated"] and carddb.needs_refresh()
+
+    cards, _, missing = await resolve([dfc, "Sol Ring"])
+    assert not missing
+    assert cards[dfc]["layout"] == "transform"
+    assert cards[dfc]["image_back"] == "https://cards.scryfall.io/normal/back/delver.jpg"
+
+    with closing(carddb._connect()) as conn, conn:
+        carddb._set_meta(conn, "schema_version", str(carddb.SCHEMA_VERSION))
+        carddb._set_meta(conn, "last_refresh_epoch", "9999999999")
+    assert not carddb.status()["schema_outdated"] and not carddb.needs_refresh()

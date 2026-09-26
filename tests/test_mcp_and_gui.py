@@ -65,3 +65,12 @@ async def test_gui_routes():
 def test_build_prompt():
     p = build_prompt(BuildRequest(commander="Meren of Clan Nel Toth", bracket=2, budget=100, strategy="Aristocrats"))
     assert "commander-deckbuilder" in p and "Bracket: 2 (Core)" in p and "max. 100 EUR" in p and "Aristocrats" in p
+
+
+def test_deck_view_has_back_faces():
+    storage.save({"name": "Dfc Deck", "commanders": ["Meren of Clan Nel Toth"], "bracket": 2,
+                  "cards": [{"name": "Delver of Secrets // Insectile Aberration", "qty": 1}, {"name": "Sol Ring", "qty": 1}]})  # fmt: skip
+    d = TestClient(app).get("/api/decks/dfc-deck").json()
+    delver = d["card_data"]["Delver of Secrets // Insectile Aberration"]
+    assert delver["image_back"].endswith("/back/delver.jpg") and delver["layout"] == "transform"
+    assert d["card_data"]["Sol Ring"]["image_back"] is None

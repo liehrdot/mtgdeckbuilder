@@ -526,7 +526,8 @@ async def api_deck(slug: str) -> dict[str, Any]:
     except Exception as exc:  # offline: show the list without images/prices
         card_data = {}
         deck["card_data_error"] = str(exc)
-    keep = ("image", "type_line", "mana_cost", "cmc", "price_eur", "price_usd", "game_changer", "scryfall_uri")
+    keep = ("image", "image_back", "layout", "type_line", "mana_cost", "cmc", "price_eur", "price_usd",
+            "game_changer", "scryfall_uri")  # fmt: skip
     deck["card_data"] = {n: {k: c.get(k) for k in keep} for n, c in card_data.items()}
     entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
     deck["export_text"] = to_text(deck.get("commanders", []), entries)

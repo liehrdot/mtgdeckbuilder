@@ -19,6 +19,7 @@ async def resolve(names: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str
     missing = queries
     if carddb.available():
         found, missing = carddb.lookup(queries)
+        await _complete_double_faced(found)
     if missing:
         raw, missing = await scryfall.collection(missing)
         found += [scryfall.compact(c) for c in raw]
@@ -32,3 +33,19 @@ async def resolve(names: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str
         c["roles"] = card_roles(c)
         by_name[c["name"]] = c
     return by_name, renames, missing
+
+
+async def _complete_double_faced(cards: list[dict[str, Any]]) -> None:
+    """Cards from a DB built before layout/image_back existed: fetch those fields live for
+    multi-face cards (otherwise their back faces would be missing in previews and prints)."""
+    stale = [c for c in cards if " // " in c.get("name", "") and "layout" not in c]
+    if not stale:
+        return
+    try:
+        raw, _ = await scryfall.collection([c["name"] for c in stale])
+    except Exception:  # offline: keep what we have
+        return
+    fresh = {r["name"]: scryfall.compact(r) for r in raw}
+    for c in stale:
+        if f := fresh.get(c["name"]):
+            c.update({k: f[k] for k in ("layout", "image", "image_back") if k in f})

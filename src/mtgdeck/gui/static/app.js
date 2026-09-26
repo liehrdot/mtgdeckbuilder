@@ -316,10 +316,10 @@ function cardTile(c, i, side) {
   const img = f?.image;
   return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
     ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
-    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
-    ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}">${side === "front" ? "↻" : "↺"}</span>` : ""}
+    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
+    ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}" aria-label="Karte umdrehen">↻</span>` : ""}
     ${f && prepared.faces?.[f.face] ? `<span class="zoom" data-compare="${esc(f.face)}" title="Vorher/Nachher vergleichen">🔍 ${prepared.faces[f.face].dpi ? esc(prepared.faces[f.face].dpi) + " DPI" : ""}</span>` : ""}
-    <div class="cap">${esc(f?.face || c.name)}</div>
+    <div class="cap">${esc(f?.face || c.name)}${c.back ? `<span class="hint"> · ${side === "front" ? "Vorderseite" : "Rückseite"}</span>` : ""}</div>
   </button>`;
 }
 
@@ -841,8 +841,9 @@ function renderCards(d) {
     <div class="group"><h4>${esc(g)} <span class="count">(${cards.reduce((a, c) => a + (c.qty || 1), 0)})</span></h4>
     ${cards.sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
       const cd = data[c.name] || {};
-      return `<div class="card" data-img="${esc(cd.image || "")}">
-        <span>${c.qty > 1 ? c.qty + "× " : ""}${esc(c.name)}${cd.game_changer ? '<span class="gc">GC</span>' : ""}</span>
+      return `<div class="card" data-img="${esc(cd.image || "")}" data-img-back="${esc(cd.image_back || "")}" data-name="${esc(c.name)}"
+          title="${cd.image_back ? "Doppelseitige Karte – Klick zeigt beide Seiten" : "Klick für große Ansicht"}">
+        <span>${c.qty > 1 ? c.qty + "× " : ""}${esc(c.name)}${cd.image_back ? '<span class="dfc" aria-label="doppelseitig">⇄</span>' : ""}${cd.game_changer ? '<span class="gc">GC</span>' : ""}</span>
         <span class="price">${cd[priceKey] ? cd[priceKey] : ""}</span></div>`;
     }).join("")}</div>`).join("");
 }
@@ -851,14 +852,38 @@ function renderCards(d) {
 const preview = $("#preview");
 document.addEventListener("mouseover", (e) => {
   const el = e.target.closest(".card[data-img]");
-  if (el && el.dataset.img) { preview.querySelector("img").src = el.dataset.img; preview.classList.remove("hidden"); }
+  if (!el || !el.dataset.img) return;
+  const [front, back] = preview.querySelectorAll("img");
+  front.src = el.dataset.img;
+  back.classList.toggle("hidden", !el.dataset.imgBack);  // double-faced: both sides side by side
+  if (el.dataset.imgBack) back.src = el.dataset.imgBack;
+  preview.classList.remove("hidden");
 });
 document.addEventListener("mouseout", (e) => { if (e.target.closest(".card[data-img]")) preview.classList.add("hidden"); });
 document.addEventListener("mousemove", (e) => {
-  const x = e.clientX + 260 > window.innerWidth ? e.clientX - 260 : e.clientX + 20;
+  const w = preview.querySelector("img.back:not(.hidden)") ? 500 : 260;
+  const x = e.clientX + w > window.innerWidth ? e.clientX - w : e.clientX + 20;
   const y = Math.min(e.clientY - 40, window.innerHeight - 350);
   preview.style.left = x + "px"; preview.style.top = Math.max(8, y) + "px";
 });
+
+// click on a card: large view, both faces for double-faced cards (works on touch devices too)
+$("#cards").addEventListener("click", (e) => {
+  const el = e.target.closest(".card[data-name]");
+  if (!el || !currentDeck) return;
+  const name = el.dataset.name;
+  const cd = currentDeck.card_data?.[name] || {};
+  const faces = name.split(" // ");
+  const imgs = [[cd.image, faces[0]], ...(cd.image_back ? [[cd.image_back, faces[1] || "Rückseite"]] : [])];
+  $("#card-view-title").textContent = name + (cd.image_back ? " – doppelseitig" : "");
+  $("#card-view-faces").innerHTML = imgs.filter(([u]) => u).map(([u, label], i) =>
+    `<figure><img src="${esc(u.replace("/normal/", "/large/"))}" alt="${esc(label)}"><figcaption>${i ? "Rückseite" : "Vorderseite"}: ${esc(label)}</figcaption></figure>`).join("")
+    || '<p class="hint">Kein Bild verfügbar.</p>';
+  $("#card-view-link").href = cd.scryfall_uri || `https://scryfall.com/search?q=${encodeURIComponent('!"' + name + '"')}`;
+  preview.classList.add("hidden");
+  $("#card-view").showModal();
+});
+$("#card-view-close").addEventListener("click", () => $("#card-view").close());
 
 $("#copy-btn").addEventListener("click", async () => {
   if (!currentDeck) return;
@@ -895,7 +920,9 @@ async function refreshDbStatus() {
   $("#db-btn").disabled = false;
   if (run.error) el.innerHTML = `<span class="bad">Fehler: ${esc(run.error)}</span>`;
   else if (!st.available) el.textContent = "Nicht vorhanden – ohne lokale DB wird die Scryfall-API live genutzt (langsamer, nur englische Namen).";
-  else el.textContent = `${st.cards} Karten, ${st.tags} Tags, ${st.languages.length} Sprachen · Stand ${st.cards_updated_at?.slice(0, 10) ?? "?"}${st.needs_refresh ? " · Update empfohlen" : ""}`;
+  else el.textContent = `${st.cards} Karten, ${st.tags} Tags, ${st.languages.length} Sprachen · Stand ${st.cards_updated_at?.slice(0, 10) ?? "?"}`
+    + (st.schema_outdated ? " · Update empfohlen: Datenbank kennt noch keine Rückseiten doppelseitiger Karten (werden solange live bei Scryfall nachgeladen)"
+      : st.needs_refresh ? " · Update empfohlen" : "");
 }
 $("#db-btn").addEventListener("click", async () => {
   await api("/api/carddb/refresh", { method: "POST" });

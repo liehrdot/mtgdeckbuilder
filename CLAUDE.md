@@ -41,6 +41,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
     - the representative printing is chosen by `_printing_score`: English, paper, non-promo;
     - the price is the cheapest paper printing;
     - every printed/face name in every language goes into the `names` table, so German names resolve.
+  - `SCHEMA_VERSION` (meta `schema_version`) marks which compact fields exist. v2 adds `layout` / `image_back` for double-faced cards. An older DB reports `schema_outdated` and `needs_refresh()`.
+  - Meanwhile `cards._complete_double_faced()` fetches `layout` / `image_back` live for multi-face cards that lack them.
   - The Oracle Tags file (Tagger) goes into `card_tags`. Tags are **rolled up to all ancestors** via `parent_ids`, and aliases live in `tag_aliases`.
 - **`cards.resolve()`** is the one entry point for turning names into card data.
   - It tries the local DB first, then falls back to Scryfall `/cards/collection`, then fuzzy `/cards/named`.

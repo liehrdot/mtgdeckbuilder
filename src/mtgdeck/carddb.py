@@ -35,6 +35,9 @@ DATA_DIR = Path(os.environ.get("MTG_DATA_DIR", Path.home() / ".cache" / "mtgdeck
 DB_PATH = DATA_DIR / "cards.sqlite"
 MAX_AGE = float(os.environ.get("MTG_BULK_MAX_AGE_DAYS", 7)) * 86400
 BULK_TYPE = os.environ.get("MTG_BULK_TYPE", "all_cards")
+# Bump when the stored card JSON (scryfall.compact) gains fields; older DBs are flagged for refresh.
+# 2: layout + image_back (double-faced cards)
+SCHEMA_VERSION = 2
 
 # Layouts in the bulk file that are not deck cards.
 _SKIP_LAYOUTS = {"token", "double_faced_token", "emblem", "art_series", "planar", "scheme", "vanguard", "augment", "host"}
@@ -111,11 +114,19 @@ def status() -> dict[str, Any]:
             "cards_updated_at": _meta(conn, "cards_updated_at"),
             "oracle_tags_updated_at": _meta(conn, "oracle_tags_updated_at"),
             "last_refresh": _meta(conn, "last_refresh"),
+            "schema_outdated": (_meta(conn, "schema_version") or "1") != str(SCHEMA_VERSION),
         }
 
 
+def schema_outdated() -> bool:
+    if not DB_PATH.exists():
+        return False
+    with closing(_connect()) as conn:
+        return (_meta(conn, "schema_version") or "1") != str(SCHEMA_VERSION)
+
+
 def needs_refresh() -> bool:
-    if not available():
+    if not available() or schema_outdated():
         return True
     with closing(_connect()) as conn:
         last = _meta(conn, "last_refresh_epoch")
@@ -317,6 +328,7 @@ async def refresh(force: bool = False, with_tags: bool = True) -> dict[str, Any]
                     counts["tag_links"] = _import_tags(conn, _iter_jsonl_gz(tags_file))
                     _set_meta(conn, "oracle_tags_updated_at", tags_item.get("updated_at", ""))
                 _set_meta(conn, "last_refresh", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
                 _set_meta(conn, "last_refresh_epoch", str(time.time()))
                 return counts
 

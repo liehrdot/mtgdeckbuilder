@@ -145,6 +145,22 @@ In Claude Code: „Druck mir das Deck als Proxies“, „Mach ein PDF zum Selbst
 „Schick es an MakePlayingCards“ (Tools `create_proxy_order`, `export_proxy_pdf`,
 `launch_proxy_tool`, `proxy_settings`).
 
+## Doppelseitige Karten (DFC)
+
+Transform-, Modal-DFC- und ähnliche Karten (z. B. *Delver of Secrets // Insectile Aberration*)
+werden überall mit beiden Seiten behandelt:
+
+- **Deckansicht:** Symbol ⇄ hinter dem Namen; beim Überfahren erscheinen beide Seiten nebeneinander,
+  ein Klick öffnet eine große Ansicht (auch am Tablet).
+- **Druckstudio:** Schild „DFC“, ↻ dreht die Kachel um; für die Rückseite lässt sich ein eigenes Bild
+  wählen und per 🔍 kontrollieren.
+- **MPC:** Die Rückseite wird auf die Rückseite *derselben* Karte gedruckt (statt des Kartenrückens) –
+  wie das Original, keine Platzhalterkarte nötig.
+- **PDF zum Selbstdrucken:** Mit „DFC-Rückseiten“ kommen die Rückseiten als zusätzliche Karten ans
+  Ende (zum Beilegen in die Hülle oder als Checkliste).
+- Kartendatenbanken, die vor dieser Funktion geladen wurden, kennen die Rückseiten noch nicht: Sie werden
+  dann automatisch live bei Scryfall nachgeladen, und die GUI empfiehlt ein Update der Datenbank.
+
 ## Commander finden, Proxy-Decks, Blacklist
 
 - **Commander finden:** Beschreibe frei, was du spielen willst (Farben, Kreaturtypen, Mechaniken,
