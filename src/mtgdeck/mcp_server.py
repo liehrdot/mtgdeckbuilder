@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, edhrec, importers, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, deckedit, edhrec, importers, proxy, scryfall, spellbook, storage
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -299,6 +299,32 @@ async def save_deck(
         "unresolved_cards": [n for n in categories if n not in card_data],
         "hint": "Fix errors/violations and call save_deck again with the same slug." if not result["legal"] or not result["bracket"]["compliant"] else "",
     }
+
+
+@mcp.tool()
+async def edit_deck(
+    slug: str,
+    add: Annotated[list[CardEntry] | None, Field(description="Cards to add (quantities add up; category optional)")] = None,
+    remove: Annotated[list[str] | None, Field(description="Card names to remove completely")] = None,
+    change_note: Annotated[str, Field(description="Why (stored in the deck history)")] = "",
+) -> dict[str, Any]:
+    """Targeted swaps in a saved deck without resending the whole list: adds/removes cards,
+    re-validates and saves a new version. Keep the deck at 100 cards (add as many as you remove)."""
+    try:
+        return await deckedit.edit_deck(
+            slug, add=[c.model_dump() for c in add or []], remove=remove or [], note=change_note
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def similar_cards(
+    slug: str, card: Annotated[str, Field(description="Card in the deck to replace")], limit: int = 12
+) -> list[dict[str, Any]]:
+    """Replacement candidates for one card of a saved deck: same role/tags, inside the colour
+    identity, not in the deck, not blacklisted, most popular first."""
+    return [_slim(c) for c in await deckedit.similar_cards(storage.load(slug), card, limit=limit)]
 
 
 # --- blacklist --------------------------------------------------------------------------------

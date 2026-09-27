@@ -516,6 +516,13 @@ async function openDeck(slug) {
   let d;
   try { d = await api(`/api/decks/${enc(slug)}`); }
   catch (err) { toast(`Deck „${slug}“ nicht gefunden.`, "error"); go("#/new"); return false; }
+  if (edit && edit.slug !== d.slug) {
+    if (editChanges()) toast("Ungespeicherte Kartenänderungen wurden verworfen.", "error");
+    edit = null;
+    $("#edit-toggle").setAttribute("aria-pressed", "false");
+    $("#edit-toggle span").textContent = "Bearbeiten";
+    $("#add-card-form").hidden = true;
+  }
   currentDeck = d;
   printLoadedFor = null;
   renderDeckHead(d);
@@ -645,46 +652,287 @@ function renderStats(s, v = {}) {
     </dl>`;
 }
 
-// ---------- card list: grouped by category, as text list or image grid ----------
+// ---------- card list: grouped + sorted, as text list or image grid, with an edit mode ----------
 let cardView = store.get("cardview") === "grid" ? "grid" : "list";
+let cardGroup = store.get("cardgroup") || "category";
+let cardSort = store.get("cardsort") || "name";
 document.querySelector(`[name="cardview"][value="${cardView}"]`).checked = true;
+$("#card-group").value = cardGroup;
+$("#card-sort").value = cardSort;
 $$('[name="cardview"]').forEach((r) => r.addEventListener("change", () => {
   cardView = r.value;
   store.set("cardview", cardView);
   if (currentDeck) renderCards(currentDeck);
 }));
+$("#card-group").addEventListener("change", (e) => { cardGroup = e.target.value; store.set("cardgroup", cardGroup); renderCards(currentDeck); });
+$("#card-sort").addEventListener("change", (e) => { cardSort = e.target.value; store.set("cardsort", cardSort); renderCards(currentDeck); });
+
+const CATEGORY_ORDER = ["Commander", "Ramp", "Draw", "Removal", "Board Wipe", "Protection", "Synergy", "Win Condition", "Utility", "Land"];
+const TYPE_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Artifact", "Enchantment", "Instant", "Sorcery", "Land", "Sonstiges"];
+const TYPE_LABELS = { Creature: "Kreaturen", Planeswalker: "Planeswalker", Battle: "Schlachten", Artifact: "Artefakte",
+  Enchantment: "Verzauberungen", Instant: "Spontanzauber", Sorcery: "Hexereien", Land: "Länder", Sonstiges: "Sonstiges" };
+const COLOR_GROUPS = { W: "Weiß", U: "Blau", B: "Schwarz", R: "Rot", G: "Grün" };
+
+function typeOf(cd) {
+  const t = (cd?.type_line || "").split("//")[0];
+  for (const k of ["Land", "Creature", "Planeswalker", "Battle", "Artifact", "Enchantment", "Instant", "Sorcery"]) if (t.includes(k)) return k;
+  return "Sonstiges";
+}
+const priceOf = (cd, d) => Number(cd?.[d.currency === "usd" ? "price_usd" : "price_eur"]) || 0;
+
+function groupOf(c, cd) {
+  if (c.commander) return "Commander";
+  switch (cardGroup) {
+    case "type": return TYPE_LABELS[typeOf(cd)];
+    case "cmc": return typeOf(cd) === "Land" ? "Länder" : `Manawert ${cd?.cmc >= 7 ? "7+" : Math.round(cd?.cmc || 0)}`;
+    case "color": {
+      if (typeOf(cd) === "Land") return "Länder";
+      const ci = cd?.color_identity || [];
+      return ci.length === 0 ? "Farblos" : ci.length > 1 ? "Mehrfarbig" : COLOR_GROUPS[ci[0]];
+    }
+    case "owned": return ownershipLabel(c.name);
+    default: return c.category || TYPE_LABELS[typeOf(cd)] || "Sonstiges";
+  }
+}
+
+function groupRank(g) {
+  const order = cardGroup === "type" ? TYPE_ORDER.map((t) => TYPE_LABELS[t] || t)
+    : cardGroup === "color" ? ["Commander", "Weiß", "Blau", "Schwarz", "Rot", "Grün", "Mehrfarbig", "Farblos", "Länder"]
+    : cardGroup === "owned" ? ["Commander", ...OWNED_ORDER]
+    : CATEGORY_ORDER;
+  const i = order.indexOf(g);
+  if (cardGroup === "cmc" && g.startsWith("Manawert")) return 1 + (g.endsWith("7+") ? 7 : Number(g.split(" ")[1]));
+  if (cardGroup === "cmc") return g === "Commander" ? 0 : 99;
+  return i < 0 ? 50 : i;
+}
+
+// pending edits (saved together as one new version)
+let edit = null;  // { slug, add: Map(name -> {qty, category, data}), qty: Map(name -> qty), remove: Set, cat: Map(name -> category) }
+const editChanges = () => edit ? edit.add.size + edit.qty.size + edit.remove.size + edit.cat.size : 0;
+
+function deckRows(d) {
+  const rows = d.commanders.map((n) => ({ name: n, qty: 1, commander: true, cd: d.card_data?.[n] || {} }));
+  for (const c of d.cards) {
+    const row = { ...c, cd: d.card_data?.[c.name] || {} };
+    if (edit) {
+      if (edit.remove.has(c.name)) row.status = "removed";
+      else if (edit.qty.has(c.name)) { row.qty = edit.qty.get(c.name); row.status = "changed"; }
+      if (edit.cat.has(c.name)) { row.category = edit.cat.get(c.name); row.status ||= "changed"; }
+    }
+    rows.push(row);
+  }
+  if (edit) for (const [name, a] of edit.add) rows.push({ name, qty: a.qty, category: a.category || "", cd: a.data || {}, status: "new" });
+  return rows;
+}
 
 function renderCards(d) {
-  const data = d.card_data || {};
+  if (!d) return;
+  const editing = !!edit;
+  const grid = cardView === "grid" && !editing;
+  const rows = deckRows(d);
   const groups = {};
-  const typeOf = (name) => {
-    const t = (data[name]?.type_line || "").split("//")[0];
-    for (const k of ["Land", "Creature", "Planeswalker", "Battle", "Artifact", "Enchantment", "Instant", "Sorcery"]) if (t.includes(k)) return k;
-    return "Sonstiges";
-  };
-  groups["Commander"] = d.commanders.map((n) => ({ name: n, qty: 1 }));
-  for (const c of d.cards) (groups[c.category || typeOf(c.name)] ||= []).push(c);
-  const grid = cardView === "grid";
-  const priceKey = d.currency === "usd" ? "price_usd" : "price_eur";
-  const total = Object.values(groups).flat().reduce((a, c) => a + (c.qty || 1), 0);
+  for (const r of rows) (groups[groupOf(r, r.cd)] ||= []).push(r);
+  const cmp = {
+    name: (a, b) => a.name.localeCompare(b.name),
+    cmc: (a, b) => (a.cd.cmc || 0) - (b.cd.cmc || 0) || a.name.localeCompare(b.name),
+    price: (a, b) => priceOf(b.cd, d) - priceOf(a.cd, d) || a.name.localeCompare(b.name),
+  }[cardSort] || ((a, b) => a.name.localeCompare(b.name));
+  const live = rows.filter((r) => r.status !== "removed");
+  const total = live.reduce((a, r) => a + (r.qty || 1), 0);
   $("#card-total").textContent = total;
+  $("#card-total").classList.toggle("bad", editing && total !== 100);
   $("#cards").classList.toggle("grid", grid);
-  $("#cards").innerHTML = Object.entries(groups).map(([g, cards]) => {
-    const items = cards.sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
-      const cd = data[c.name] || {};
-      const attrs = `class="card" role="button" tabindex="0" data-img="${esc(cd.image || "")}" data-img-back="${esc(cd.image_back || "")}"
-        data-name="${esc(c.name)}" aria-label="${esc(`${c.qty > 1 ? c.qty + "× " : ""}${c.name}`)} – große Ansicht"`;
+  $("#cards").classList.toggle("editing", editing);
+  const catOptions = (sel) => ["", ...CATEGORY_ORDER.slice(1)].map((c) => `<option value="${esc(c)}" ${c === sel ? "selected" : ""}>${esc(c || "Kategorie …")}</option>`).join("");
+  $("#cards").innerHTML = Object.entries(groups).sort(([a], [b]) => groupRank(a) - groupRank(b) || a.localeCompare(b)).map(([g, items]) => {
+    const html = items.sort(cmp).map((c) => {
+      const cd = c.cd;
+      const own = ownershipBadge(c.name, c.qty, c.commander);
+      const data = `data-img="${esc(cd.image || "")}" data-img-back="${esc(cd.image_back || "")}" data-name="${esc(c.name)}"`;
+      const label = `${c.qty > 1 ? c.qty + "× " : ""}${c.name}`;
       if (grid) {
-        return `<div ${attrs}>${cd.image ? `<img src="${esc(cd.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(c.name)}</div>`}
-          ${c.qty > 1 ? `<span class="qty-badge">${c.qty}×</span>` : ""}</div>`;
+        return `<div class="card" role="button" tabindex="0" ${data} aria-label="${esc(label)} – große Ansicht">
+          ${cd.image ? `<img src="${esc(cd.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(c.name)}</div>`}
+          ${c.qty > 1 ? `<span class="qty-badge">${c.qty}×</span>` : ""}${own ? `<span class="own-badge">${own}</span>` : ""}</div>`;
       }
-      return `<div ${attrs}><span>${c.qty > 1 ? `<span class="qty">${c.qty}× </span>` : ""}${esc(c.name)}${cd.image_back ? '<span class="dfc" title="doppelseitig">⇄</span>' : ""}${cd.game_changer ? '<span class="gc" title="Game Changer">GC</span>' : ""}</span>
-        <span class="price">${cd[priceKey] ? esc(cd[priceKey]) : ""}</span></div>`;
+      const name = `${esc(c.name)}${cd.image_back ? '<span class="dfc" title="doppelseitig">⇄</span>' : ""}${cd.game_changer ? '<span class="gc" title="Game Changer">GC</span>' : ""}`;
+      const price = `<span class="price">${priceOf(cd, d) ? esc(cd[d.currency === "usd" ? "price_usd" : "price_eur"]) : ""}</span>`;
+      if (!editing || c.commander) {
+        return `<div class="card" role="button" tabindex="0" ${data} aria-label="${esc(label)} – große Ansicht">
+          <span>${c.qty > 1 ? `<span class="qty">${c.qty}× </span>` : ""}${name}${own}</span>${price}</div>`;
+      }
+      if (c.status === "removed") {
+        return `<div class="card removed" ${data}><span class="card-name"><s>${esc(label)}</s></span>
+          <span class="edit-ctrls"><button type="button" class="mini" data-act="undo" title="Rückgängig">↶ zurück</button></span></div>`;
+      }
+      return `<div class="card ${c.status || ""}" ${data}>
+        <button type="button" class="card-name" data-act="view">${name}${c.status === "new" ? ' <span class="tag-new">neu</span>' : ""}</button>
+        <span class="edit-ctrls">
+          <select class="cat" data-act="cat" aria-label="Kategorie von ${esc(c.name)}">${catOptions(c.category || "")}</select>
+          <button type="button" class="mini" data-act="minus" aria-label="Eine weniger">−</button>
+          <span class="q">${c.qty}</span>
+          <button type="button" class="mini" data-act="plus" aria-label="Eine mehr">+</button>
+          <button type="button" class="mini" data-act="similar" title="Ähnliche Karten zum Tauschen">${icon("swap")}</button>
+          <button type="button" class="mini danger" data-act="remove" title="Entfernen" aria-label="${esc(c.name)} entfernen">✕</button>
+        </span></div>`;
     }).join("");
-    const n = cards.reduce((a, c) => a + (c.qty || 1), 0);
-    return `<section class="group${!grid && cards.length > 16 ? " long" : ""}"><h3>${esc(g)} <span class="count">${n}</span></h3>${grid ? `<div class="group-cards">${items}</div>` : items}</section>`;
+    const n = items.filter((r) => r.status !== "removed").reduce((a, c) => a + (c.qty || 1), 0);
+    return `<section class="group${!grid && items.length > 16 ? " long" : ""}"><h3>${esc(g)} <span class="count">${n}</span></h3>${grid ? `<div class="group-cards">${html}</div>` : html}</section>`;
   }).join("");
+  updateEditBar(total);
 }
+
+// ---------- edit mode ----------
+function setEditing(on) {
+  if (on && !currentDeck) return;
+  edit = on ? { slug: currentDeck.slug, add: new Map(), qty: new Map(), remove: new Set(), cat: new Map() } : null;
+  $("#edit-toggle").setAttribute("aria-pressed", String(on));
+  $("#edit-toggle span").textContent = on ? "Fertig" : "Bearbeiten";
+  $("#add-card-form").hidden = !on;
+  renderCards(currentDeck);
+  if (on) $("#add-card-name").focus();
+}
+$("#edit-toggle").addEventListener("click", async () => {
+  if (!edit) return setEditing(true);
+  if (editChanges() && !(await ask({ title: "Änderungen verwerfen?", text: `${editChanges()} ungespeicherte Änderungen gehen verloren.`, ok: "Verwerfen", danger: true }))) return;
+  setEditing(false);
+});
+$("#edit-discard").addEventListener("click", () => setEditing(false));
+
+function updateEditBar(total) {
+  const n = editChanges();
+  $("#edit-bar").hidden = !edit || !n;
+  if (!edit || !n) return;
+  const parts = [];
+  if (edit.add.size) parts.push(`${edit.add.size} neu`);
+  if (edit.remove.size) parts.push(`${edit.remove.size} raus`);
+  if (edit.qty.size + edit.cat.size) parts.push(`${edit.qty.size + edit.cat.size} geändert`);
+  $("#edit-summary").innerHTML = `${parts.join(" · ")} · <b class="${total === 100 ? "ok" : "bad"}">${total} Karten</b>${total === 100 ? "" : " (Commander-Decks brauchen 100)"}`;
+}
+
+function currentQty(name) {
+  if (edit.add.has(name)) return edit.add.get(name).qty;
+  if (edit.qty.has(name)) return edit.qty.get(name);
+  return currentDeck.cards.find((c) => c.name === name)?.qty || 0;
+}
+function setQty(name, qty) {
+  if (edit.add.has(name)) {
+    if (qty <= 0) edit.add.delete(name); else edit.add.get(name).qty = qty;
+    return;
+  }
+  const orig = currentDeck.cards.find((c) => c.name === name)?.qty || 0;
+  if (qty <= 0) { edit.qty.delete(name); edit.remove.add(name); }
+  else if (qty === orig) edit.qty.delete(name);
+  else edit.qty.set(name, qty);
+}
+
+async function addCard(name, qty = 1, category = "") {
+  const inDeck = currentDeck.cards.find((c) => c.name.toLowerCase() === name.toLowerCase());
+  if (inDeck && !edit.remove.has(inDeck.name)) { setQty(inDeck.name, currentQty(inDeck.name) + qty); return inDeck.name; }
+  if (inDeck) { edit.remove.delete(inDeck.name); return inDeck.name; }
+  const data = await api(`/api/card?name=${enc(name)}`);
+  if (currentDeck.commanders.includes(data.name)) throw new Error(`${data.name} ist der Commander.`);
+  const existing = edit.add.get(data.name);
+  edit.add.set(data.name, { qty: (existing?.qty || 0) + qty, category: category || existing?.category || "", data });
+  return data.name;
+}
+
+wireAutocomplete($("#add-card-name"), $("#ac-add"));
+$("#add-card-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("#add-card-name").value.trim();
+  if (!name || !edit) return;
+  try {
+    const added = await addCard(name, Math.max(1, Number($("#add-card-qty").value) || 1), $("#add-card-cat").value);
+    $("#add-card-name").value = "";
+    $("#add-card-qty").value = 1;
+    renderCards(currentDeck);
+    toast(`${added} vorgemerkt – mit „Speichern & prüfen“ übernehmen.`);
+  } catch (err) { fail(err); }
+});
+
+$("#cards").addEventListener("change", (e) => {
+  const sel = e.target.closest("select[data-act=cat]");
+  if (!sel || !edit) return;
+  const name = sel.closest(".card").dataset.name;
+  if (edit.add.has(name)) edit.add.get(name).category = sel.value;
+  else if (sel.value === (currentDeck.cards.find((c) => c.name === name)?.category || "")) edit.cat.delete(name);
+  else edit.cat.set(name, sel.value);
+  renderCards(currentDeck);
+});
+
+$("#edit-save").addEventListener("click", async () => {
+  if (!edit || !editChanges()) return;
+  const body = {
+    add: [...edit.add].map(([name, a]) => ({ name, qty: a.qty, category: a.category || null })),
+    remove: [...edit.remove],
+    set_qty: Object.fromEntries(edit.qty),
+    set_category: Object.fromEntries([...edit.cat].filter(([n]) => !edit.remove.has(n))),
+  };
+  const btn = $("#edit-save");
+  btn.disabled = true;
+  btn.textContent = "Speichere …";
+  try {
+    const r = await api(`/api/decks/${enc(edit.slug)}/cards`, { method: "POST", body });
+    setEditing(false);
+    currentDeck = null;
+    await refreshDeckList();
+    await route();
+    toast(`Gespeichert als v${r.version}.${r.legal ? "" : " Achtung: das Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
+  } catch (err) { fail(err); }
+  finally { btn.disabled = false; btn.textContent = "Speichern & prüfen"; }
+});
+
+// ---------- collection ownership in the deck (filled by loadOwnership) ----------
+let ownership = null;  // { cards: {name: {need, real, proxy, missing, other_decks}}, ... }
+const OWNED_ORDER = ["Fehlt", "Als Proxy vorhanden", "Vorhanden"];
+function ownershipLabel(name) {
+  const o = ownership?.cards?.[name];
+  if (!o) return "Unbekannt";
+  return o.missing > 0 ? "Fehlt" : o.real >= o.need ? "Vorhanden" : "Als Proxy vorhanden";
+}
+function ownershipBadge(name, need = 1, commander = false) {
+  const o = ownership?.cards?.[name];
+  if (!ownership?.collection_size || (!o && !ownership.all)) return "";
+  const real = o?.real || 0, prox = o?.proxy || 0;
+  if (real >= need) return '<span class="own ok" title="In deiner Sammlung">✓</span>';
+  if (real + prox >= need) return '<span class="own proxy" title="Als Proxy in deiner Sammlung">P</span>';
+  if (real + prox > 0) return `<span class="own part" title="Nur ${real + prox} von ${need} vorhanden">${real + prox}/${need}</span>`;
+  return commander ? "" : '<span class="own miss" title="Nicht in deiner Sammlung">–</span>';
+}
+
+// ---------- replacement suggestions ----------
+let similarFor = null;
+async function openSimilar(name) {
+  similarFor = name;
+  $("#similar-title").textContent = `Ersatz für ${name}`;
+  $("#similar-hint").textContent = "Suche Karten mit gleicher Rolle in deinen Farben …";
+  $("#similar-grid").innerHTML = "";
+  $("#similar").showModal();
+  try {
+    const items = await api(`/api/decks/${enc(currentDeck.slug)}/similar?card=${enc(name)}`);
+    const cur = (currentDeck.currency || "eur") === "usd" ? "price_usd" : "price_eur";
+    $("#similar-hint").textContent = items.length ? "Klick tauscht die Karte (wird erst beim Speichern übernommen)." : "Keine passenden Karten gefunden.";
+    $("#similar-grid").innerHTML = items.map((c, i) => `<button type="button" class="similar" data-i="${i}" data-name="${esc(c.name)}">
+      ${c.image ? `<img src="${esc(c.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(c.name)}</div>`}
+      <span class="sim-name">${esc(c.name)}</span>
+      <span class="muted small">${esc(c.reason || "")}${c[cur] ? ` · ${esc(c[cur])}` : ""}${ownershipBadge(c.name, 1) ? " · " + ownershipBadge(c.name, 1) : ""}</span></button>`).join("");
+  } catch (err) { $("#similar-hint").textContent = err.message; }
+}
+$("#similar-grid").addEventListener("click", async (e) => {
+  const b = e.target.closest(".similar");
+  if (!b || !edit || !similarFor) return;
+  const old = similarFor;
+  const category = edit.add.get(old)?.category || edit.cat.get(old) || currentDeck.cards.find((c) => c.name === old)?.category || "";
+  try {
+    const added = await addCard(b.dataset.name, 1, category);
+    setQty(old, currentQty(old) - 1);
+    $("#similar").close();
+    renderCards(currentDeck);
+    toast(`${old} → ${added} vorgemerkt.`);
+  } catch (err) { fail(err); }
+});
+$("#similar-close").addEventListener("click", () => $("#similar").close());
 
 // hover preview of card images (list view and card references in answers)
 const preview = $("#preview");
@@ -710,10 +958,26 @@ document.addEventListener("mousemove", (e) => {
 function openCardFromEvent(e) {
   const el = e.target.closest(".card[data-name]");
   if (!el || !currentDeck) return;
-  showCardView(el.dataset.name, currentDeck.card_data?.[el.dataset.name] || {});
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  const name = el.dataset.name;
+  if (edit && act && act !== "view") {
+    if (act === "cat") return;
+    if (act === "plus") setQty(name, currentQty(name) + 1);
+    if (act === "minus") setQty(name, currentQty(name) - 1);
+    if (act === "remove") setQty(name, 0);
+    if (act === "undo") edit.remove.delete(name);
+    if (act === "similar") return openSimilar(name);
+    renderCards(currentDeck);
+    return;
+  }
+  if (edit && !act) return;  // clicks on the row background in edit mode
+  const cd = currentDeck.card_data?.[name] || edit?.add.get(name)?.data || {};
+  showCardView(name, cd);
 }
 $("#cards").addEventListener("click", openCardFromEvent);
-$("#cards").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCardFromEvent(e); } });
+$("#cards").addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".card[role=button]")) { e.preventDefault(); openCardFromEvent(e); }
+});
 
 function showCardView(name, cd) {
   const faces = name.split(" // ");

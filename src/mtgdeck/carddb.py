@@ -410,6 +410,14 @@ def search(
         return [json.loads(r[0]) for r in conn.execute(sql, args)]
 
 
+def tag_counts(tags: list[str]) -> dict[str, int]:
+    """Number of cards per Tagger tag (how specific a tag is)."""
+    if not tags:
+        return {}
+    with closing(_connect()) as conn:
+        return {t: conn.execute("SELECT COUNT(*) FROM card_tags WHERE tag = ?", (t,)).fetchone()[0] for t in tags}
+
+
 def game_changers() -> list[str]:
     with closing(_connect()) as conn:
         return [r[0] for r in conn.execute("SELECT name FROM cards WHERE game_changer = 1 ORDER BY name")]

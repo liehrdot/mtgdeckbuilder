@@ -136,6 +136,9 @@ def handler(request: httpx.Request) -> httpx.Response:
                 data = [{**base, "set_name": f"Set {i}", "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/p{i}.jpg"}}
                         for i in range(3)]  # fmt: skip
                 return httpx.Response(200, json={"total_cards": 3, "has_more": False, "data": data})
+            if "otag:" in q or q.startswith("t:"):  # role search for replacement suggestions
+                data = [lookup_card("Filler Ramp Rock"), CARDS["Cultivate"], CARDS["Sol Ring"]]
+                return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})
             if "gamechanger" in q:
                 data = [c for c in CARDS.values() if c["game_changer"]]
                 return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})

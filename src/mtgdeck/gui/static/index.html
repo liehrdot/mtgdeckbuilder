@@ -25,6 +25,8 @@
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
 
@@ -224,12 +226,41 @@
           <section class="panel">
             <div class="panel-head">
               <h2>Karten <span id="card-total" class="count"></span></h2>
-              <div class="segmented small" role="radiogroup" aria-label="Darstellung">
-                <label title="Liste"><input type="radio" name="cardview" value="list" checked><span><svg class="icon"><use href="#i-list"/></svg>Liste</span></label>
-                <label title="Bilder"><input type="radio" name="cardview" value="grid"><span><svg class="icon"><use href="#i-grid"/></svg>Bilder</span></label>
+              <div class="card-tools">
+                <select id="card-group" aria-label="Gruppieren nach" title="Gruppieren nach">
+                  <option value="category">nach Kategorie</option><option value="type">nach Typ</option>
+                  <option value="cmc">nach Manawert</option><option value="color">nach Farbe</option>
+                  <option value="owned">nach Besitz</option>
+                </select>
+                <select id="card-sort" aria-label="Sortieren nach" title="Sortieren nach">
+                  <option value="name">Name</option><option value="cmc">Manawert</option><option value="price">Preis</option>
+                </select>
+                <div class="segmented small" role="radiogroup" aria-label="Darstellung">
+                  <label title="Liste"><input type="radio" name="cardview" value="list" checked><span><svg class="icon"><use href="#i-list"/></svg>Liste</span></label>
+                  <label title="Bilder"><input type="radio" name="cardview" value="grid"><span><svg class="icon"><use href="#i-grid"/></svg>Bilder</span></label>
+                </div>
+                <button type="button" class="btn" id="edit-toggle" aria-pressed="false"><svg class="icon"><use href="#i-edit"/></svg><span>Bearbeiten</span></button>
               </div>
             </div>
+            <form id="add-card-form" class="add-card" autocomplete="off" hidden>
+              <input id="add-card-name" list="ac-add" placeholder="Karte hinzufügen …" aria-label="Karte hinzufügen" required>
+              <datalist id="ac-add"></datalist>
+              <input id="add-card-qty" type="number" min="1" max="99" value="1" aria-label="Anzahl">
+              <select id="add-card-cat" aria-label="Kategorie">
+                <option value="">Kategorie automatisch</option>
+                <option>Ramp</option><option>Draw</option><option>Removal</option><option>Board Wipe</option>
+                <option>Protection</option><option>Synergy</option><option>Win Condition</option><option>Utility</option><option>Land</option>
+              </select>
+              <button type="submit" class="btn"><svg class="icon"><use href="#i-plus"/></svg>Hinzufügen</button>
+            </form>
             <div id="cards" class="cards"></div>
+            <div id="edit-bar" class="edit-bar" hidden>
+              <span id="edit-summary"></span>
+              <div class="btn-group">
+                <button type="button" class="btn ghost" id="edit-discard">Verwerfen</button>
+                <button type="button" class="btn primary" id="edit-save">Speichern &amp; prüfen</button>
+              </div>
+            </div>
           </section>
           <aside class="deck-side">
             <section class="panel"><h2>Prüfung</h2><div id="validation"></div></section>
@@ -569,6 +600,15 @@
     <figure><figcaption id="compare-cap-a"></figcaption><div class="pane" id="pane-a"><img id="compare-a" alt="Original"></div></figure>
     <figure><figcaption id="compare-cap-b"></figcaption><div class="pane" id="pane-b"><img id="compare-b" alt="Druckdatei"></div></figure>
   </div>
+</dialog>
+
+<dialog id="similar" class="dialog">
+  <div class="dialog-head">
+    <h2 id="similar-title">Ähnliche Karten</h2>
+    <button type="button" class="icon-btn" id="similar-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <p id="similar-hint" class="muted small"></p>
+  <div id="similar-grid" class="similar-grid"></div>
 </dialog>
 
 <dialog id="card-view" class="dialog card-view">

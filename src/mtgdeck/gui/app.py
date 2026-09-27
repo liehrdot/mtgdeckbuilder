@@ -24,14 +24,13 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, proxy, scryfall, storage
+from .. import blacklist, brackets, carddb, deckedit, proxy, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
 from . import terminal
-from ..validate import validate_deck
 
 STATIC = Path(__file__).parent / "static"
 PROJECT_ROOT = storage.PROJECT_ROOT
@@ -648,7 +647,7 @@ async def api_deck(slug: str) -> dict[str, Any]:
         card_data = {}
         deck["card_data_error"] = str(exc)
     keep = ("image", "image_back", "layout", "type_line", "mana_cost", "cmc", "price_eur", "price_usd",
-            "game_changer", "scryfall_uri")  # fmt: skip
+            "game_changer", "scryfall_uri", "color_identity", "roles")  # fmt: skip
     deck["card_data"] = {n: {k: c.get(k) for k in keep} for n, c in card_data.items()}
     entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
     deck["export_text"] = to_text(deck.get("commanders", []), entries)
@@ -661,17 +660,49 @@ async def api_validate(slug: str) -> dict[str, Any]:
         deck = storage.load(slug)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    lines = [f"{c.get('qty', 1)} {c['name']}" for c in deck.get("cards", [])]
-    result = await validate_deck(
-        deck["commanders"], lines, int(deck.get("bracket") or 3), currency=deck.get("currency", "eur"),
-        budget=deck.get("budget"), proxy=bool(deck.get("proxy")),
-        profile=PowerProfile(**deck["power_profile"]) if deck.get("power_profile") else None,
-    )  # fmt: skip
-    result.pop("_card_data", None)
-    result.pop("cards", None)
-    deck["validation"] = result
+    result = await deckedit.revalidate(deck)
     storage.save(deck)
     return result
+
+
+class AddCard(BaseModel):
+    name: str
+    qty: int = Field(default=1, ge=1, le=99)
+    category: str | None = None
+
+
+class EditRequest(BaseModel):
+    add: list[AddCard] = []
+    remove: list[str] = []
+    set_qty: dict[str, int] = {}
+    set_category: dict[str, str] = {}
+    note: str = ""
+
+
+@app.post("/api/decks/{slug}/cards")
+async def api_edit_cards(slug: str, req: EditRequest) -> dict[str, Any]:
+    """Change cards directly (no Claude run): re-validates and saves a new version."""
+    try:
+        return await deckedit.edit_deck(
+            slug, add=[a.model_dump() for a in req.add], remove=req.remove, set_qty=req.set_qty,
+            set_category=req.set_category, note=req.note,
+        )  # fmt: skip
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/decks/{slug}/similar")
+async def api_similar(slug: str, card: str, limit: int = 12) -> list[dict[str, Any]]:
+    try:
+        return await deckedit.similar_cards(storage.load(slug), card, limit=min(limit, 30))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except HttpError as exc:
+        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
 
 
 @app.delete("/api/decks/{slug}")
