@@ -41,7 +41,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
     - the representative printing is chosen by `_printing_score`: English, paper, non-promo;
     - the price is the cheapest paper printing;
     - every printed/face name in every language goes into the `names` table, so German names resolve.
-  - `SCHEMA_VERSION` (meta `schema_version`) marks which compact fields exist. v2 adds `layout` / `image_back` for double-faced cards. An older DB reports `schema_outdated` and `needs_refresh()`.
+  - `SCHEMA_VERSION` (meta `schema_version`) marks which compact fields exist. v2 adds `layout` / `image_back` for double-faced cards, v3 `tokens` (from `all_parts`: tokens, emblems, markers like The Monarch). An older DB reports `schema_outdated` and `needs_refresh()`; `cards.deck_tokens()` completes missing `tokens` live.
   - Meanwhile `cards._complete_double_faced()` fetches `layout` / `image_back` live for multi-face cards that lack them.
   - The Oracle Tags file (Tagger) goes into `card_tags`. Tags are **rolled up to all ancestors** via `parent_ids`, and aliases live in `tag_aliases`.
 - **`cards.resolve()`** is the one entry point for turning names into card data.
@@ -61,6 +61,13 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `validate_deck()` orchestrates everything above: 100 cards, singleton, color identity, banned cards, role minimums and the bracket check.
   - It returns a private `_card_data` key that callers must pop before serializing or returning it.
   - A Spellbook outage degrades to a warning and does not fail validation.
+- **`deckedit.py`**: `edit_deck()` changes a saved deck directly (add/remove/set_qty/set_category), re-validates via `revalidate()` and saves one version with a "Manuell: …" note (route `POST /api/decks/{slug}/cards`, MCP `edit_deck`). `similar_cards()` suggests replacements (local DB tags, else Scryfall `otag:` search).
+- **`collection.py`**: the user's collection in `collection.json` (`MTG_COLLECTION_FILE`, gitignored).
+  - One entry per printing: name, qty, proxy, foil, lang, `set`/`set_name`/`collector_number`/`scryfall_id`/`image` (artwork), price at import, note. Identical entries are merged.
+  - `parse_import()` reads ManaBox/Moxfield/Archidekt CSV (column aliases in `_COLS`) and plain lists. Printings resolve via `scryfall.by_identifiers()` (id or set+number); a picked printing (`printing` dict) is stored as is.
+  - `deck_ownership()` (real/proxy/missing, shopping list, `shared_shortages` across decks; basics count as owned), `missing_counts()` for printing only missing cards, `add_printed()` after printing, `search_owned()` for building from the collection.
+  - Routes `/api/collection[...]`, `/api/cards/prints`, `/api/decks/{slug}/ownership`, `/collection/add-printed`; MCP `collection_search`, `collection_status`, `update_collection`.
+- **`exports.py`**: Cockatrice `.cod` (commander in the side zone, DFCs by front face) and Tabletop Simulator saved objects; route `/api/decks/{slug}/export/{text|cockatrice|tts}`.
 - **`blacklist.py`**: the user's card blacklist in `blacklist.txt` (plain text, gitignored, `MTG_BLACKLIST_FILE`).
   - Names are resolved to Oracle names on add.
   - `validate_deck` treats blacklisted cards as errors.
@@ -80,6 +87,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `copy()` creates a new slug with its own history.
   - Legacy decks without a `version` are snapshotted as v1 on their next save.
 - **Proxy printing:** `proxy.py` and `imaging.py` (Pillow) integrate the MPC Autofill desktop tool (chilli-axe/mpc-autofill).
+  - `plan(only_missing=, tokens=)`: `only_missing` skips cards the collection covers; `tokens=N` adds N copies of every token/marker (MPC Autofill `cardType` TOKEN, else Scryfall).
   - `plan()` picks one image per face. Priority: `proxies/<slug>/selection.json` › MPC Autofill search server (`/2/sources/`, `/3/editorSearch/`, `/2/cards/`, `/2/cardbacks/`) › Scryfall scan. Full images come from the CDN (`cdn.mpcautofill.com/images/google_drive/{small|full}/<id>.jpg`).
   - `prepare()` downloads into the shared cache `<MTG_DATA_DIR>/images`. Scryfall scans get bleed via `imaging.add_bleed`, 822×1122 px at 300 DPI.
   - `prepare()` hardlinks (or copies) every print file to `proxies/<slug>/images/<face name>.<ext>` plus `_Kartenrücken.*`, and clears stale files first.
@@ -106,7 +114,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `save_deck` re-validates before writing and stores the validation result inside the deck JSON.
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
   - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
-    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anpassen|fragen|verlauf|drucken`) · `#/blacklist` · `#/settings`. Views are `<section class="view" data-view=…>`; tab switches use `history.replaceState`.
+    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|testen|anpassen|fragen|verlauf|drucken`) · `#/collection` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`).
+    - Card list edits are collected in `edit` (add/qty/remove/cat) and saved in one request; test-hand odds are computed client-side (`renderOdds`, hypergeometric). Views are `<section class="view" data-view=…>`; tab switches use `history.replaceState`.
     - One job panel (`#job`) is moved into the slot of the view that started it (`startJob(id, title, {kind, slot, route, slug})`); the sidebar shows `#job-indicator` while it runs. `TOOL_LABELS` turns tool calls into plain-language status.
     - Use the design tokens in `style.css` (`--space-*`, `--fs-*`, `--radius*`, semantic colours incl. `--input-border` ≥ 3:1) for light and dark. Surfaces are `.panel`; `.card` is reserved for card rows (hover preview uses `.card[data-img]`).
     - Show and hide with the `hidden` attribute. Report with `toast()` and ask with `ask()` (a `<dialog>`), never `alert`/`prompt`/`confirm`. Keep one primary button per view and put rare options into `<details class="more">` or the ⋯ menu.
@@ -121,6 +130,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Print routes: `/api/decks/{slug}/print/{plan,alternatives,choose,prepare,pdf,autofill,files/{xml|pdf}}`. Settings: `/api/settings`.
   - Version routes: `/api/decks/{slug}/versions[/{v}[/restore]]`, `/diff?a=&b=` and `/copy`.
   - Deck questions (`/api/decks/{slug}/ask`, `ask_prompt`, panel „Fragen zum Deck“) run `_run_claude(read_only=True, finish=)`: only `READ_ONLY_TOOLS` are allowed, `WRITE_TOOLS` plus Write/Edit/Bash are disallowed. The final answer (`ResultMessage.result`) goes to `storage.add_question()` (`decks/.questions/<slug>.json`), with images for its `[[Card]]` references (`_card_refs`). The last `ASK_HISTORY` Q&As go into the prompt for follow-ups. The skill side is `references/deck-questions.md`.
+  - Upgrade jobs (`/api/decks/{slug}/upgrades`, `upgrade_prompt`, `UPGRADE_SCHEMA`) are read-only with structured output; `_enrich_upgrades()` drops invalid swaps and adds current prices/ownership. The GUI applies the chosen ones through `POST /api/decks/{slug}/cards`. `finish` callbacks receive `(job, ok, final_text, structured_output)`.
   - Commander-finder jobs pass `output_format` (JSON schema `SUGGESTION_SCHEMA`) to the SDK. They read `ResultMessage.structured_output`, enrich it with card data (`_enrich_suggestions`) and emit a `suggestions` SSE event instead of a deck.
 
 **Skill ↔ tools contract:**
@@ -133,9 +143,10 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 - Tests must never hit the network.
 - `tests/conftest.py` sets up an autouse fixture that:
   - replaces `http._client` with an `httpx.MockTransport` that fakes Scryfall, EDHREC and Spellbook;
-  - redirects the cache, DB and decks directories to `tmp_path`;
+  - redirects the cache, DB, decks, blacklist, collection and proxies to `tmp_path`;
   - disables throttling.
 - Any card name starting with `Filler` is synthesized on demand. `deck_lines()` builds a legal 99-card main deck for Meren (BG).
+- `PRINTINGS` fakes specific printings for `/cards/collection` id and set+number lookups; "Pitiless Plunderer" carries `all_parts` (Treasure token, The Monarch) for token tests; `otag:`/`t:` searches return replacement candidates.
 - Add new endpoints to the mock `handler`. It also fakes `cards.scryfall.io`, the MPC Autofill server (`MPC_SERVER`) and its CDN, returning generated images.
 - `test_proxy.py` drives the terminal with a fake `autofill.py` that shows the same InquirerPy menu (inquirerpy is a dev dependency). The test answers it with raw arrow-key input.
 - Async tests run with `asyncio_mode = "auto"`.
@@ -145,6 +156,6 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_PROXIES_DIR`
+- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`
 - `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`, `MTG_UPSCALER_PATH`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`

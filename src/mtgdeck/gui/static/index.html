@@ -44,6 +44,7 @@
   <aside id="sidebar" class="sidebar" aria-label="Navigation">
     <a class="brand" href="#/new"><span class="logo" aria-hidden="true"></span>Commander Deckbuilder</a>
     <a class="btn primary block" href="#/new" data-nav="new"><svg class="icon"><use href="#i-plus"/></svg>Neues Deck</a>
+    <button type="button" class="search-btn" id="palette-btn"><svg class="icon"><use href="#i-search"/></svg><span>Suchen …</span><kbd>Strg K</kbd></button>
     <a id="job-indicator" class="job-indicator" href="#/job" hidden>
       <span class="spinner" aria-hidden="true"></span><span id="job-indicator-text">Claude arbeitet …</span></a>
 
@@ -209,6 +210,10 @@
             <div class="menu-list" role="menu">
               <button type="button" id="duplicate-btn" role="menuitem">Als neues Deck kopieren</button>
               <button type="button" id="validate-btn" role="menuitem">Neu prüfen</button>
+              <hr>
+              <a id="export-cod" role="menuitem" href="#" download>Export für Cockatrice (.cod)</a>
+              <a id="export-tts" role="menuitem" href="#" download>Export für Tabletop Simulator (.json)</a>
+              <a id="export-txt" role="menuitem" href="#" download>Decklist als Textdatei</a>
               <hr>
               <button type="button" id="delete-btn" role="menuitem" class="danger">Deck löschen …</button>
             </div>
@@ -685,6 +690,14 @@
 </section>
 
 <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+<dialog id="palette" class="dialog palette" aria-label="Schnellsuche">
+  <div class="palette-input"><svg class="icon"><use href="#i-search"/></svg>
+    <input id="palette-input" placeholder="Deck, Seite oder Aktion …" role="combobox" aria-controls="palette-list"
+      aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false"></div>
+  <ul id="palette-list" role="listbox" aria-label="Treffer"></ul>
+  <p class="muted small palette-foot">↑ ↓ auswählen · Enter öffnen · Esc schließen</p>
+</dialog>
 
 <dialog id="ask-dialog" class="dialog small-dialog">
   <form method="dialog" id="ask-form">

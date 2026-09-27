@@ -59,11 +59,11 @@ Gleicher Name + Druck + Proxy + Foil + Sprache werden zusammengeführt (Anzahl a
 ## Phase 6 – Kleinere Verbesserungen
 
 - [x] Kartenliste gruppieren (Kategorie, Typ, Manawert, Farbe) und sortieren (Name, Manawert, Preis).
-- [ ] Schnellsuche Strg+K: Decks und Aktionen.
-- [ ] Export für Cockatrice (.cod) und Tabletop Simulator (.json).
+- [x] Schnellsuche Strg+K: Decks und Aktionen.
+- [x] Export für Cockatrice (.cod) und Tabletop Simulator (.json).
 - [x] Überschneidungen zwischen Decks (in Sammlung und Deck-Abgleich, siehe Phase 2).
 
 ## Abschluss
 
-- [ ] README, CLAUDE.md, Skill-Dokumentation aktualisieren.
-- [ ] Alle Abläufe im Browser prüfen (hell, dunkel, Handy), Tests offline grün.
+- [x] README, CLAUDE.md, Skill-Dokumentation aktualisieren.
+- [x] Alle Abläufe im Browser prüfen (hell, dunkel, Handy), Tests offline grün.

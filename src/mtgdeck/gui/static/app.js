@@ -570,6 +570,7 @@ function renderDeckHead(d) {
   $("#deck-meta").innerHTML = pills.join("");
   $("#deck-desc").textContent = d.description || "";
   $("#deck-desc").hidden = !d.description;
+  for (const [id, fmt] of [["#export-cod", "cockatrice"], ["#export-tts", "tts"], ["#export-txt", "text"]]) $(id).href = `/api/decks/${enc(d.slug)}/export/${fmt}`;
 }
 
 // tabs (WAI-ARIA APG pattern: arrow keys move between tabs)
@@ -605,7 +606,7 @@ $("#deck-tabs").addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => {
   for (const m of $$("details.menu[open]")) if (!m.contains(e.target)) m.open = false;
 });
-$("#deck-menu").addEventListener("click", (e) => { if (e.target.closest(".menu-list button")) $("#deck-menu").open = false; });
+$("#deck-menu").addEventListener("click", (e) => { if (e.target.closest(".menu-list button, .menu-list a")) $("#deck-menu").open = false; });
 $("#deck-menu").addEventListener("keydown", (e) => {
   if (e.key === "Escape") { $("#deck-menu").open = false; $("#deck-menu summary").focus(); }
 });
@@ -2237,6 +2238,71 @@ $("#db-btn").addEventListener("click", async () => {
   await api("/api/carddb/refresh", { method: "POST" }).catch(fail);
   refreshDbStatus();
 });
+
+// ============================================================================================
+// quick search (Ctrl+K): decks, pages and actions
+// ============================================================================================
+let paletteHits = [];
+let paletteSel = 0;
+function paletteItems() {
+  const items = [
+    { label: "Neues Deck", hint: "Seite", run: () => { go("#/new"); setMode("build"); } },
+    { label: "Commander vorschlagen lassen", hint: "Neues Deck", run: () => { go("#/new"); setMode("find"); } },
+    { label: "Meine Sammlung", hint: "Seite", run: () => go("#/collection") },
+    { label: "Karte zur Sammlung hinzufügen", hint: "Sammlung", run: () => { go("#/collection"); openCollAdd(); } },
+    { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },
+    { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
+    { label: "Einstellungen", hint: "Seite", run: () => go("#/settings") },
+  ];
+  if (currentDeck && parseHash().view === "deck") {
+    const d = currentDeck;
+    const tabNames = { karten: "Karten", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", fragen: "Fragen zum Deck", verlauf: "Verlauf", drucken: "Drucken" };
+    for (const [tab, label] of Object.entries(tabNames)) items.push({ label, hint: d.name, run: () => selectTab(tab) });
+    items.push({ label: "Karten bearbeiten", hint: d.name, run: () => { selectTab("karten"); if (!edit) setEditing(true); } });
+    items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });
+  }
+  for (const d of deckIndex) items.push({ label: d.name, hint: `Deck · ${d.commanders.join(" + ")} · ${d.level || ""}`, run: () => go(`#/deck/${enc(d.slug)}`) });
+  return items;
+}
+function renderPalette() {
+  const words = $("#palette-input").value.toLowerCase().split(/\s+/).filter(Boolean);
+  paletteHits = paletteItems().filter((it) => words.every((w) => `${it.label} ${it.hint}`.toLowerCase().includes(w))).slice(0, 14);
+  paletteSel = Math.min(paletteSel, Math.max(0, paletteHits.length - 1));
+  $("#palette-list").innerHTML = paletteHits.map((it, i) => `<li role="option" id="pal-${i}" data-i="${i}" aria-selected="${i === paletteSel}">
+    <span>${esc(it.label)}</span><span class="muted small">${esc(it.hint)}</span></li>`).join("") || '<li class="muted small">Nichts gefunden.</li>';
+  $("#palette-input").setAttribute("aria-activedescendant", paletteHits.length ? `pal-${paletteSel}` : "");
+  $(`#pal-${paletteSel}`)?.scrollIntoView({ block: "nearest" });
+}
+function openPalette() {
+  if ($("#palette").open) return;
+  $("#palette-input").value = "";
+  paletteSel = 0;
+  renderPalette();
+  setNavOpen(false);
+  $("#palette").showModal();
+  $("#palette-input").focus();
+}
+function runPalette(i) {
+  const it = paletteHits[i];
+  if (!it) return;
+  $("#palette").close();
+  it.run();
+}
+$("#palette-btn").addEventListener("click", openPalette);
+$("#palette-input").addEventListener("input", () => { paletteSel = 0; renderPalette(); });
+$("#palette-input").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const n = paletteHits.length;
+    if (n) paletteSel = (paletteSel + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
+    renderPalette();
+  } else if (e.key === "Enter") { e.preventDefault(); runPalette(paletteSel); }
+});
+$("#palette-list").addEventListener("click", (e) => { const li = e.target.closest("li[data-i]"); if (li) runPalette(Number(li.dataset.i)); });
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); }
+});
+if (/Mac|iPhone|iPad/.test(navigator.platform)) $("#palette-btn kbd").textContent = "⌘ K";
 
 // ============================================================================================
 // start

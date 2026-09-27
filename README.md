@@ -205,22 +205,52 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
   Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich.
 - **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und fünf Tabs –
   die Adresse merkt sich den Tab, der Zurück-Button des Browsers funktioniert:
-  - **Karten:** nach Kategorie gruppiert als Liste (Bild beim Hovern) oder als Bildraster; daneben
-    Prüfung (Legalität, Bracket, Hinweise, Details zu Game Changern/Combos) und Statistik (Manakurve,
-    Rollen, Preis). Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten beide Seiten.
-  - **Anpassen:** „Mit eigenen Worten ändern“ (Freitext + Schnellwahl) und „Stärke ändern“ (Retune).
+  - **Karten:** gruppiert nach Kategorie, Typ, Manawert, Farbe oder Besitz, sortiert nach Name, Manawert
+    oder Preis, als Liste (Bild beim Hovern) oder Bildraster; daneben Prüfung, Statistik, Sammlungs-Abgleich
+    und „Tokens & Marker“. Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten beide Seiten.
+    **Bearbeiten** (ohne Claude): Karten hinzufügen, Anzahl ±, entfernen, Kategorie ändern und über ⇄
+    „Ähnliche Karten“ (gleiche Rolle, passende Farben) tauschen – gespeichert wird alles zusammen als neue,
+    geprüfte Version.
+  - **Testen:** Starthand ziehen, London-Mulligan (der erste ist in Commander frei), Zug für Zug nachziehen,
+    auf dem Play oder Draw; dazu exakte Wahrscheinlichkeiten: Länder in der Starthand, Landdrops bis Zug 5,
+    Ramp bis Zug 2, Kartenzug bis Zug 3, Interaktion bis Zug 4.
+  - **Anpassen:** „Mit eigenen Worten ändern“ (Freitext + Schnellwahl), **Upgrade-Vorschläge** (Budget und
+    Fokus angeben → Claude liefert Tausche mit Preis und Grund, Karten aus der Sammlung zählen als kostenlos;
+    ankreuzen und übernehmen, ohne weiteren KI-Lauf) und „Stärke ändern“ (Retune).
   - **Fragen:** Fragen in natürlicher Sprache – Strategie, Mulligan, ist es zu stark für meine Runde, wie
     schlägt es sich gegen Commander XY (Claude holt sich dessen typisches Deck von EDHREC), Schwächen,
     warum ist Karte X drin. Anschlussfragen („und gegen Kinnan?“) kennen den bisherigen Verlauf.
     Claude darf dabei nur lesen (kein Speichern); Fragen und Antworten liegen pro Deck in
     `decks/.questions/<slug>.json`, Kartennamen in Antworten zeigen beim Hovern das Bild.
   - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren.
-  - **Drucken:** Bilder prüfen/tauschen, dann 1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards.
-  - „Liste kopieren“ steht oben rechts; „Als neues Deck kopieren“, „Neu prüfen“ und „Löschen“ im ⋯-Menü.
-- **Blacklist** und **Einstellungen** (Kartendatenbank, Proxy-Druck, KI-Hochskalierung) als eigene Seiten.
+  - **Drucken:** Bilder prüfen/tauschen, optional „Tokens mitdrucken“ und „Nur fehlende Karten“, dann
+    1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung übernehmen.
+  - „Liste kopieren“ steht oben rechts; im ⋯-Menü: „Als neues Deck kopieren“, „Neu prüfen“, Export für
+    Cockatrice (.cod) und Tabletop Simulator (.json), Decklist als Textdatei, „Löschen“.
+- **Meine Sammlung** (eigene Seite, siehe unten), **Blacklist** und **Einstellungen** (Kartendatenbank,
+  Proxy-Druck, KI-Hochskalierung) als eigene Seiten.
+- **Schnellsuche Strg+K** (⌘K): Decks, Seiten, Deck-Tabs und Aktionen wie „Sammlung importieren“.
 - Hell/Dunkel folgt dem Betriebssystem; bedienbar mit Tastatur (Pfeiltasten in den Tabs, Esc schließt
   Dialoge und Menüs).
 - Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
+
+## Meine Sammlung
+
+Die Seite „Meine Sammlung“ merkt sich, welche Karten du hast (`collection.json`, lokal):
+
+- pro Eintrag **Anzahl**, **echt oder Proxy**, Foil, Sprache und das **Artwork** (der konkrete Druck –
+  über „Artwork wählen“ aus allen Scryfall-Drucken, mit Bild, Set, Nummer und Preis)
+- **Import** aus ManaBox, Moxfield (inkl. Proxy-Spalte) und Archidekt als CSV oder als Liste
+  („2 Sol Ring (C21) 263 *F*“, „1 Demonic Tutor [proxy]“); **Export** als CSV
+- Suche, Filter echt/Proxy, Sortierung, Liste oder Bilder, Anzahl ±, Proxy/Foil umschalten, in welchen
+  Decks eine Karte steckt
+- **Im Deck:** ✓ = hast du, P = als Proxy, „2/3“ = teilweise; Panel „Sammlung“ mit „X von 100 vorhanden“,
+  Preis der fehlenden Karten, **Einkaufsliste** (für Cardmarket-Wants) und Warnung, wenn mehrere Decks
+  dieselbe Karte brauchen, du aber zu wenige hast. Basic Lands zählen als vorhanden.
+- **Beim Bauen:** „Karten aus meiner Sammlung bevorzugen“ – Claude nimmt passende Karten aus deiner
+  Sammlung, beim Budget zählen nur fehlende.
+- **Beim Drucken:** „Nur fehlende Karten“ druckt nur, was dir fehlt; danach trägt „Zur Sammlung
+  hinzufügen“ die gedruckten Proxies samt Artwork ein.
 
 ## Datenquellen & Zugänge
 
@@ -263,6 +293,8 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `bracket_rules` / `game_changers` | Bracket-Regeln, aktuelle Game-Changer-Liste |
 | `validate_deck` | 100 Karten, Singleton, Farbidentität, Bannliste, Blacklist, Budget, Rollen-Richtwerte, Bracket-Prüfung, Power-Profil & Power-Score |
 | `save_deck` / `load_deck` / `list_decks` / `export_deck` | Decks speichern, laden, exportieren |
+| `edit_deck` / `similar_cards` | gezielte Tausche ohne die ganze Liste neu zu schicken; Ersatzkarten für eine Karte |
+| `collection_search` / `collection_status` / `update_collection` | Sammlung durchsuchen, Deck mit Sammlung abgleichen, Karten eintragen |
 | `import_deck` | Archidekt-/Moxfield-URL importieren |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
@@ -284,6 +316,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_CACHE_TTL` | `86400` | HTTP-Cache-Dauer in Sekunden |
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
+| `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
 | `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` / `MTG_UPSCALER_PATH` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |

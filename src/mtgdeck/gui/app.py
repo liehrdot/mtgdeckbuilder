@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, proxy, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, exports, proxy, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -827,6 +827,31 @@ async def api_similar(slug: str, card: str, limit: int = 12) -> list[dict[str, A
         raise HTTPException(400, str(exc)) from exc
     except HttpError as exc:
         raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+
+
+@app.get("/api/decks/{slug}/export/{fmt}")
+async def api_export(slug: str, fmt: str) -> Response:
+    """Download the deck: text (Moxfield/Archidekt), cockatrice (.cod) or tts (Tabletop Simulator)."""
+    try:
+        deck = storage.load(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    names = deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])]
+    if fmt == "text":
+        entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
+        body, media, ext = to_text(deck.get("commanders", []), entries), "text/plain; charset=utf-8", "txt"
+    elif fmt in ("cockatrice", "tts"):
+        try:
+            card_data, _, _ = await resolve(names)
+        except Exception as exc:
+            raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+        if fmt == "cockatrice":
+            body, media, ext = exports.to_cockatrice(deck, card_data), "application/xml", "cod"
+        else:
+            body, media, ext = json.dumps(exports.to_tts(deck, card_data), ensure_ascii=False, indent=1), "application/json", "json"
+    else:
+        raise HTTPException(404, "Format: text, cockatrice oder tts")
+    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{deck["slug"]}.{ext}"'})
 
 
 @app.get("/api/decks/{slug}/tokens")
