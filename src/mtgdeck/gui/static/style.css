@@ -392,14 +392,15 @@ ul.issues li { margin-bottom: 3px; }
 .history .vactions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--space-2); }
 
 /* questions about the deck */
-.qa-list { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); max-height: 70vh; overflow: auto; }
+.qa-list { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
 .qa-list:empty { display: none; }
-.qa-item { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.qa-item { flex: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .qa-q { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 10px 14px; background: var(--surface-2); font-weight: 600; }
 .qa-q .meta { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; white-space: nowrap; }
 .qa-q .qa-del { background: none; border: none; color: var(--muted); padding: 0 0 0 6px; font-size: 14px; cursor: pointer; }
 .qa-q .qa-del:hover { color: var(--bad); }
-.qa-a { padding: 4px 14px 12px; font-size: 14px; overflow-x: auto; }
+.qa-a { padding: 4px 14px 12px; font-size: 14px; max-height: min(60vh, 640px); overflow: auto; overscroll-behavior: contain; }
+.qa-a:focus-visible { outline-offset: -2px; }
 .qa-a h4, .qa-a h5 { margin: 14px 0 4px; font-size: 14px; }
 .qa-a p { margin: 8px 0; }
 .qa-a ul, .qa-a ol { margin: 6px 0; padding-left: 22px; }

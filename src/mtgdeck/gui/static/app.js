@@ -910,7 +910,7 @@ function qaItem(q) {
   return `<article class="qa-item" data-id="${esc(q.id)}">
     <div class="qa-q"><span>${esc(q.question)}</span>
       <span class="meta">${esc(fmtDate(q.asked))}${esc(ver)}<button type="button" class="qa-del" title="Frage löschen" aria-label="Frage löschen">✕</button></span></div>
-    <div class="qa-a">${md(q.answer, q.cards || {})}</div></article>`;
+    <div class="qa-a" tabindex="0" role="region" aria-label="Antwort">${md(q.answer, q.cards || {})}</div></article>`;
 }
 
 function updateQaCount() {
@@ -924,8 +924,6 @@ async function renderQuestions(d) {
   if (currentDeck?.slug !== d.slug) return;
   $("#qa-list").innerHTML = items.map(qaItem).join("");
   updateQaCount();
-  const list = $("#qa-list");
-  list.scrollTop = list.scrollHeight;
   updateQaLive();
 }
 
