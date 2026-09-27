@@ -1658,25 +1658,60 @@ $("#print-grid").addEventListener("click", (e) => {
   openPicker(i, tile.dataset.side);
 });
 
+// image picker: MPC Autofill scans + every Scryfall printing, loaded page by page (175 per page)
 let pickerCtx = null;
 async function openPicker(i, side) {
   const c = printPlan.cards[i];
-  pickerCtx = { i, card: c, side, face: c[side].face, token: !!c.token };
+  pickerCtx = { i, card: c, side, face: c[side].face, token: !!c.token, options: [], page: 0, hasMore: true, total: 0, loading: false };
   $("#picker-title").textContent = `${c[side].face}${side === "back" ? " (Rückseite)" : ""}`;
-  $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und alle Scryfall-Drucke …";
+  $("#picker-filter").value = "";
+  $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und die Scryfall-Drucke …";
   $("#picker-grid").innerHTML = "";
+  $("#picker-more").hidden = true;
   $("#picker").showModal();
-  try {
-    const opts = await api(`/api/decks/${enc(currentDeck.slug)}/print/alternatives?card=${enc(c.name)}&side=${side}&token=${!!c.token}`);
-    pickerCtx.options = opts;
-    const current = c[side].image?.id;
-    $("#picker-hint").textContent = `${opts.length} Bilder · MPC-Autofill-Scans sind druckoptimiert (mit Beschnitt-Rand)`;
-    $("#picker-grid").innerHTML = opts.map((o, k) => `<button type="button" class="pcard ${o.id === current ? "selected" : ""}" data-k="${k}">
-      <img src="${esc(o.thumb)}" alt="" loading="lazy">
-      <div class="tags">${o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
-      <div class="cap">${esc(o.label || "")}</div></button>`).join("") || '<p class="muted">Keine Alternativen gefunden.</p>';
-  } catch (err) { $("#picker-hint").textContent = err.message; }
+  await loadPickerPage();
 }
+
+async function loadPickerPage() {
+  const ctx = pickerCtx;
+  if (!ctx || ctx.loading || !ctx.hasMore) return;
+  ctx.loading = true;
+  $("#picker-more-btn").disabled = $("#picker-all-btn").disabled = true;
+  try {
+    const r = await api(`/api/decks/${enc(currentDeck.slug)}/print/alternatives?card=${enc(ctx.card.name)}&side=${ctx.side}&token=${ctx.token}&page=${ctx.page + 1}`);
+    if (pickerCtx !== ctx) return;
+    ctx.options.push(...r.options);
+    ctx.page = r.page;
+    ctx.hasMore = r.has_more;
+    ctx.total = r.scryfall_total;
+    renderPicker();
+  } catch (err) { $("#picker-hint").textContent = err.message; }
+  finally { ctx.loading = false; $("#picker-more-btn").disabled = $("#picker-all-btn").disabled = false; }
+}
+
+function renderPicker() {
+  const ctx = pickerCtx;
+  const q = $("#picker-filter").value.trim().toLowerCase();
+  const current = ctx.card[ctx.side].image?.id;
+  const mpc = ctx.options.filter((o) => o.origin === "mpcfill").length;
+  const scry = ctx.options.length - mpc;
+  const shown = ctx.options.map((o, k) => [o, k]).filter(([o]) => !q || `${o.label || ""} ${o.released || ""} ${o.dpi || ""}`.toLowerCase().includes(q));
+  $("#picker-hint").textContent = `${mpc ? `${mpc} MPC-Autofill-Scans (druckoptimiert) · ` : ""}${scry} von ${ctx.total} Scryfall-Drucken geladen`
+    + (q ? ` · ${shown.length} passen zum Filter` : "") + (ctx.hasMore && q ? " – „Alle laden“ durchsucht alle Drucke" : "");
+  $("#picker-grid").innerHTML = shown.map(([o, k]) => `<button type="button" class="pcard ${o.id === current ? "selected" : ""}" data-k="${k}">
+    <img src="${esc(o.thumb)}" alt="" loading="lazy">
+    <div class="tags">${o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
+    <div class="cap">${esc(o.label || "")}${o.released ? ` · ${esc(o.released.slice(0, 4))}` : ""}</div></button>`).join("")
+    || '<p class="muted">Keine passenden Bilder.</p>';
+  $("#picker-more").hidden = !ctx.hasMore;
+}
+$("#picker-filter").addEventListener("input", debounce(() => pickerCtx && renderPicker(), 120));
+$("#picker-more-btn").addEventListener("click", loadPickerPage);
+$("#picker-all-btn").addEventListener("click", async () => {
+  const ctx = pickerCtx;
+  while (ctx && pickerCtx === ctx && ctx.hasMore && $("#picker").open) await loadPickerPage();
+});
+
 async function pick(option) {
   const { i, card, side, face } = pickerCtx;
   const slug = currentDeck.slug;
@@ -2000,30 +2035,63 @@ $("#coll-list").addEventListener("change", (e) => {
   if (box && row) patchEntry(row.dataset.id, { [box.dataset.act]: box.checked });
 });
 
-// artwork picker: all printings of a card; resolves with the chosen printing (or null)
+// artwork picker: all printings of a card, page by page; resolves with the chosen printing (or null)
+let printsCtx = null;
+function renderPrints() {
+  const ctx = printsCtx;
+  const q = $("#prints-filter").value.trim().toLowerCase();
+  const shown = ctx.prints.map((p, i) => [p, i]).filter(([p]) => !q || `${p.set_name || ""} ${p.set || ""} ${p.collector_number || ""} ${p.released || ""}`.toLowerCase().includes(q));
+  $("#prints-hint").textContent = ctx.prints.length
+    ? `${ctx.prints.length} von ${ctx.total} Drucken geladen${q ? ` · ${shown.length} passen zum Filter` : ""} – klick wählt das Artwork.`
+    : "Keine Drucke gefunden.";
+  $("#prints-grid").innerHTML = shown.map(([p, i]) => `<button type="button" class="similar" data-i="${i}">
+    ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(ctx.name)}</div>`}
+    <span class="sim-name">${esc(p.set_name || p.set)}</span>
+    <span class="muted small">#${esc(p.collector_number)} · ${esc((p.released || "").slice(0, 4))}${p.price_eur ? ` · ${esc(p.price_eur)} €` : ""}</span></button>`).join("");
+  $("#prints-more").hidden = !ctx.hasMore;
+}
+async function loadPrintsPage() {
+  const ctx = printsCtx;
+  if (!ctx || ctx.loading || !ctx.hasMore) return;
+  ctx.loading = true;
+  $("#prints-more-btn").disabled = $("#prints-all-btn").disabled = true;
+  try {
+    const r = await api(`/api/cards/prints?name=${enc(ctx.name)}&page=${ctx.page + 1}`);
+    if (printsCtx !== ctx) return;
+    ctx.prints.push(...r.prints);
+    ctx.page = r.page;
+    ctx.hasMore = r.has_more;
+    ctx.total = r.total;
+    renderPrints();
+  } catch (err) { $("#prints-hint").textContent = err.message; }
+  finally { ctx.loading = false; $("#prints-more-btn").disabled = $("#prints-all-btn").disabled = false; }
+}
+$("#prints-filter").addEventListener("input", debounce(() => printsCtx && renderPrints(), 120));
+$("#prints-more-btn").addEventListener("click", loadPrintsPage);
+$("#prints-all-btn").addEventListener("click", async () => {
+  const ctx = printsCtx;
+  while (ctx && printsCtx === ctx && ctx.hasMore && $("#prints-dialog").open) await loadPrintsPage();
+});
+
 function pickPrinting(name) {
   const dlg = $("#prints-dialog");
   $("#prints-title").textContent = `Artwork: ${name}`;
-  $("#prints-hint").textContent = "Lade alle Drucke von Scryfall …";
+  $("#prints-hint").textContent = "Lade die Drucke von Scryfall …";
+  $("#prints-filter").value = "";
   $("#prints-grid").innerHTML = "";
+  $("#prints-more").hidden = true;
+  printsCtx = { name, prints: [], page: 0, hasMore: true, total: 0, loading: false };
   dlg.showModal();
+  loadPrintsPage();
   return new Promise((resolve) => {
-    let prints = [];
+    const ctx = printsCtx;
     const done = (p) => { resolve(p); if (dlg.open) dlg.close(); };
     dlg.onclose = () => resolve(null);
     $("#prints-close").onclick = () => done(null);
     $("#prints-grid").onclick = (e) => {
       const b = e.target.closest("[data-i]");
-      if (b) done(prints[Number(b.dataset.i)]);
+      if (b) done(ctx.prints[Number(b.dataset.i)]);
     };
-    api(`/api/cards/prints?name=${enc(name)}`).then((list) => {
-      prints = list;
-      $("#prints-hint").textContent = list.length ? `${list.length} Drucke – klick wählt das Artwork.` : "Keine Drucke gefunden.";
-      $("#prints-grid").innerHTML = list.map((p, i) => `<button type="button" class="similar" data-i="${i}">
-        ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(name)}</div>`}
-        <span class="sim-name">${esc(p.set_name || p.set)}</span>
-        <span class="muted small">#${esc(p.collector_number)} · ${esc((p.released || "").slice(0, 4))}${p.price_eur ? ` · ${esc(p.price_eur)} €` : ""}</span></button>`).join("");
-    }).catch((err) => { $("#prints-hint").textContent = err.message; });
   });
 }
 

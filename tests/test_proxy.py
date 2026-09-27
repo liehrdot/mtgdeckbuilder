@@ -68,8 +68,9 @@ async def test_plan_with_mpc_server_and_own_choice():
     assert by["Delver of Secrets // Insectile Aberration"]["back"]["image"]["id"] == "drive-insect"
     assert by["Forest"]["front"]["image"]["origin"] == "scryfall"
 
-    opts = await proxy.alternatives(DECK, "Sol Ring")
-    assert [o["origin"] for o in opts] == ["mpcfill", "mpcfill", "scryfall", "scryfall", "scryfall"]
+    alts = await proxy.alternatives(DECK, "Sol Ring")
+    opts = alts["options"]
+    assert [o["origin"] for o in opts] == ["mpcfill", "mpcfill", "scryfall", "scryfall", "scryfall"] and not alts["has_more"]
     proxy.choose("meren-print", "Sol Ring", opts[3])
     p = await proxy.plan(DECK)
     sol = next(c for c in p["cards"] if c["name"] == "Sol Ring")["front"]["image"]
@@ -187,7 +188,7 @@ def test_gui_print_studio_flow(tmp_path):
 
         plan = client.get("/api/decks/meren-print/print/plan").json()
         assert plan["quantity"] == 7
-        alts = client.get("/api/decks/meren-print/print/alternatives", params={"card": "Sol Ring"}).json()
+        alts = client.get("/api/decks/meren-print/print/alternatives", params={"card": "Sol Ring"}).json()["options"]
         assert len(alts) == 3  # no server -> Scryfall printings
         client.post("/api/decks/meren-print/print/choose", json={"face": "Sol Ring", "option": alts[2]})
 
@@ -430,3 +431,12 @@ async def test_upscale_uses_descreened_input(tmp_path):
     settings.update({"descreen": "off"})
     await proxy.prepare(DECK, upscale=True)
     assert proxy.load_prepared("meren-print")["faces"]["Forest"]["file"]  # works without descreening too
+
+
+async def test_alternatives_load_all_printings_page_by_page():
+    deck = {"slug": "meren-print", "commanders": ["Meren of Clan Nel Toth"], "cards": [{"name": "Forest", "qty": 1}]}
+    first = await proxy.alternatives(deck, "Forest")
+    second = await proxy.alternatives(deck, "Forest", page=2)
+    assert (len(first["options"]), first["scryfall_total"], first["has_more"]) == (175, 250, True)
+    assert (len(second["options"]), second["has_more"]) == (75, False)
+    assert first["options"][0]["label"] == "Scryfall · Set 0 #0"

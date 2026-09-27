@@ -719,8 +719,15 @@
       <button type="button" class="icon-btn" id="picker-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
     </div>
   </div>
-  <p id="picker-hint" class="muted small"></p>
+  <div class="picker-bar">
+    <input type="search" id="picker-filter" placeholder="Filtern: Set, Nummer oder Jahr …" aria-label="Drucke filtern">
+    <p id="picker-hint" class="muted small"></p>
+  </div>
   <div id="picker-grid" class="picker-grid"></div>
+  <div id="picker-more" class="picker-more" hidden>
+    <button type="button" class="btn" id="picker-more-btn">Mehr laden</button>
+    <button type="button" class="btn ghost" id="picker-all-btn">Alle laden</button>
+  </div>
 </dialog>
 
 <dialog id="compare" class="dialog compare-dialog">
@@ -800,8 +807,15 @@
     <h2 id="prints-title">Artwork wählen</h2>
     <button type="button" class="icon-btn" id="prints-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
   </div>
-  <p id="prints-hint" class="muted small"></p>
+  <div class="picker-bar">
+    <input type="search" id="prints-filter" placeholder="Filtern: Set, Nummer oder Jahr …" aria-label="Drucke filtern">
+    <p id="prints-hint" class="muted small"></p>
+  </div>
   <div id="prints-grid" class="similar-grid"></div>
+  <div id="prints-more" class="picker-more" hidden>
+    <button type="button" class="btn" id="prints-more-btn">Mehr laden</button>
+    <button type="button" class="btn ghost" id="prints-all-btn">Alle laden</button>
+  </div>
 </dialog>
 
 <dialog id="similar" class="dialog">

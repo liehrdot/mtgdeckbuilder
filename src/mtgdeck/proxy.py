@@ -331,28 +331,35 @@ async def _token_entries(deck: dict[str, Any], copies: int, mpc: MpcFill | None,
             for face, t in faces.items()]  # fmt: skip
 
 
-async def alternatives(deck: dict[str, Any], card_name: str, side: str = "front", limit: int = 40, token: bool = False) -> list[dict[str, Any]]:
-    """All image options for one card face: MPC Autofill scans and every Scryfall printing."""
+MPC_ALTERNATIVES = 300  # community scans shown per card (basic lands have hundreds)
+
+
+async def alternatives(deck: dict[str, Any], card_name: str, side: str = "front", token: bool = False,
+                       page: int = 1) -> dict[str, Any]:  # fmt: skip
+    """Image options for one card face: all MPC Autofill scans (page 1) and the Scryfall printings,
+    one Scryfall result page (175) at a time: ``{"options", "has_more", "scryfall_total", "page"}``."""
     cfg = settings_mod.load()
     parts = card_name.split(" // ")
     face = parts[1] if side == "back" and len(parts) > 1 else parts[0]
     options: list[dict[str, Any]] = []
-    mpc = _mpc_client(cfg, "auto")
+    mpc = _mpc_client(cfg, "auto") if page == 1 else None
     if mpc:
         try:
-            ids = (await mpc.search([face], card_type="TOKEN" if token else "CARD")).get(face, [])[:limit]
+            ids = (await mpc.search([face], card_type="TOKEN" if token else "CARD")).get(face, [])[:MPC_ALTERNATIVES]
             details = await mpc.cards(ids)
             options += [mpc.option(i, details.get(i, {}), face) for i in ids]
         except Exception:
             pass
     query = f'!"{parts[0]}" t:token include:extras' if token else f'!"{parts[0]}" game:paper'
-    prints = await scryfall.search(query, order="released", unique="prints", max_results=limit)
+    prints = await scryfall.search_page(query, page=page)
     for raw in prints["cards"]:
         c = scryfall.compact(raw)
         c["set_name"] = raw.get("set_name")
         if opt := _scryfall_option(c, side, face):
+            opt["label"] = f"Scryfall · {raw.get('set_name') or raw.get('set', '').upper()} #{raw.get('collector_number', '')}"
+            opt["released"] = raw.get("released_at")
             options.append(opt)
-    return options
+    return {"options": options, "has_more": prints["has_more"], "scryfall_total": prints["total"], "page": page}
 
 
 # --- prepare: download, process, write XML ----------------------------------------------------

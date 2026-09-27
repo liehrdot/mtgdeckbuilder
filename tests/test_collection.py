@@ -118,7 +118,7 @@ async def test_collection_routes_print_only_missing_and_add_printed():
     assert client.patch(f"/api/collection/{sol['id']}", json={"qty": 5}).json()["entry"]["qty"] == 5
     assert client.patch("/api/collection/nope", json={"qty": 1}).status_code == 404
     assert client.get("/api/collection/export").text.startswith("Count,Name")
-    assert client.get("/api/cards/prints", params={"name": "Sol Ring"}).json()[0]["set_name"] == "Set 0"
+    assert client.get("/api/cards/prints", params={"name": "Sol Ring"}).json()["prints"][0]["set_name"] == "Set 0"
     own = client.get("/api/decks/print-me/ownership").json()
     assert own["cards"]["Sol Ring"]["real"] == 5 and own["missing"] == 100 - 36 - 3
 
@@ -147,3 +147,15 @@ async def test_collection_mcp_tools():
         "cards": [{"name": l.split(" ", 1)[1], "qty": int(l.split(" ", 1)[0])} for l in deck_lines()]})  # fmt: skip
     st = json.loads((await mcp.call_tool("collection_status", {"slug": "status"})).content[0].text)
     assert st["have_proxy"] == 2 and "cards" not in st
+
+
+async def test_prints_are_paginated_not_capped():
+    from fastapi.testclient import TestClient
+
+    from mtgdeck.gui.app import app
+
+    client = TestClient(app)
+    p1 = client.get("/api/cards/prints", params={"name": "Forest"}).json()
+    p2 = client.get("/api/cards/prints", params={"name": "Forest", "page": 2}).json()
+    assert (len(p1["prints"]), p1["total"], p1["has_more"]) == (175, 250, True)
+    assert (len(p2["prints"]), p2["has_more"], p2["prints"][0]["set_name"]) == (75, False, "Set 175")

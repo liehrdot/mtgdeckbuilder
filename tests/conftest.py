@@ -98,6 +98,8 @@ PRINTINGS = {
     "d3e4-cult": _printing("Cultivate", "d3e4-cult", "m21", "177", "de"),
 }
 
+PRINT_COUNTS = {"Forest": 250}
+
 MPC_SERVER = "https://mpc.test"
 MPC_HITS = {"sol ring": ["drive-sol-1", "drive-sol-2"], "insectile aberration": ["drive-insect"], "treasure": ["drive-treasure"]}
 
@@ -152,9 +154,12 @@ def handler(request: httpx.Request) -> httpx.Response:
                 base = lookup_card(name)
                 if not base:
                     return httpx.Response(404, json={"details": "no cards"})
-                data = [{**base, "set_name": f"Set {i}", "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/p{i}.jpg"}}
-                        for i in range(3)]  # fmt: skip
-                return httpx.Response(200, json={"total_cards": 3, "has_more": False, "data": data})
+                total = PRINT_COUNTS.get(base["name"], 3)  # basic lands have hundreds of printings
+                page = int(url.params.get("page", 1))
+                ids = range((page - 1) * 175, min(page * 175, total))
+                data = [{**base, "set_name": f"Set {i}", "collector_number": str(i),
+                         "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/p{i}.jpg"}} for i in ids]  # fmt: skip
+                return httpx.Response(200, json={"total_cards": total, "has_more": page * 175 < total, "data": data})
             if "otag:" in q or q.startswith("t:"):  # role search for replacement suggestions
                 data = [lookup_card("Filler Ramp Rock"), CARDS["Cultivate"], CARDS["Sol Ring"]]
                 return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})

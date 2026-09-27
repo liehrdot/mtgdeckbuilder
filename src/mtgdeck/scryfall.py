@@ -99,6 +99,17 @@ async def search(query: str, *, order: str = "edhrec", unique: str = "cards", ma
     return {"total": total, "cards": cards[:max_results]}
 
 
+async def search_page(query: str, *, page: int = 1, order: str = "released", unique: str = "prints") -> dict[str, Any]:
+    """One result page of a Scryfall search (up to 175 cards): ``{"total", "cards", "has_more"}``."""
+    try:
+        data = await get_json(f"{BASE}/cards/search", {"q": query, "order": order, "unique": unique, "page": page})
+    except HttpError as exc:
+        if exc.status == 404:
+            return {"total": 0, "cards": [], "has_more": False}
+        raise
+    return {"total": data.get("total_cards", 0), "cards": data.get("data", []), "has_more": bool(data.get("has_more"))}
+
+
 async def named(name: str, *, fuzzy: bool = True) -> dict[str, Any]:
     return await get_json(f"{BASE}/cards/named", {"fuzzy" if fuzzy else "exact": name})
 
@@ -192,10 +203,11 @@ async def by_identifiers(idents: list[dict[str, str]]) -> tuple[list[dict[str, A
     return out, sum(1 for c in out if c is None)
 
 
-async def prints(name: str, *, limit: int = 60) -> list[dict[str, Any]]:
-    """All paper printings of a card (newest first) as ``printing()`` dicts."""
-    result = await search(f'!"{name}" game:paper', order="released", unique="prints", max_results=limit)
-    return [printing(c) for c in result["cards"]]
+async def prints(name: str, *, page: int = 1) -> dict[str, Any]:
+    """Paper printings of a card, newest first, one Scryfall page (175) at a time:
+    ``{"prints": [printing()...], "total", "has_more", "page"}``."""
+    result = await search_page(f'!"{name}" game:paper', page=page)
+    return {"prints": [printing(c) for c in result["cards"]], "total": result["total"], "has_more": result["has_more"], "page": page}
 
 
 async def game_changers() -> list[str]:

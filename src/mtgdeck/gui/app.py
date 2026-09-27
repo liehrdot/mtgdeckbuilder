@@ -958,9 +958,9 @@ async def api_collection_export() -> Response:
 
 
 @app.get("/api/cards/prints")
-async def api_prints(name: str) -> list[dict[str, Any]]:
+async def api_prints(name: str, page: int = 1) -> dict[str, Any]:
     try:
-        return await scryfall.prints(name)
+        return await scryfall.prints(name, page=max(1, page))
     except HttpError as exc:
         raise HTTPException(502, f"Scryfall nicht erreichbar: {exc}") from exc
 
@@ -1087,9 +1087,9 @@ async def api_add_printed(slug: str, req: PrintRequest) -> dict[str, Any]:
 
 
 @app.get("/api/decks/{slug}/print/alternatives")
-async def api_print_alternatives(slug: str, card: str, side: str = "front", token: bool = False) -> list[dict[str, Any]]:
+async def api_print_alternatives(slug: str, card: str, side: str = "front", token: bool = False, page: int = 1) -> dict[str, Any]:
     try:
-        return await proxy.alternatives(_print_deck(slug), card, "back" if side == "back" else "front", token=token)
+        return await proxy.alternatives(_print_deck(slug), card, "back" if side == "back" else "front", token=token, page=max(1, page))
     except HttpError as exc:
         raise HTTPException(502, str(exc)) from exc
 
