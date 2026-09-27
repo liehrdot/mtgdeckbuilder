@@ -4,392 +4,608 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Commander Deckbuilder</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%273%27 y=%271%27 width=%2710%27 height=%2714%27 rx=%272%27 fill=%27%237a4fd6%27/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%273%27 y=%271%27 width=%2710%27 height=%2714%27 rx=%272%27 fill=%27%236d4bd8%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-  <h1>Commander Deckbuilder</h1>
-  <span class="sub">Claude Code · Scryfall · EDHREC · Commander Spellbook</span>
-</header>
+<!-- icons: 24px stroke icons, used via <svg class="icon"><use href="#i-…"/></svg> -->
+<svg xmlns="http://www.w3.org/2000/svg" hidden>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+  <symbol id="i-cards" viewBox="0 0 24 24"><rect x="8" y="3" width="12" height="16" rx="2"/><path d="M4 7v11a3 3 0 0 0 3 3h8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
+</svg>
 
-<main>
-  <aside id="sidebar">
-    <details class="panel" id="finder-panel">
-      <summary><h2>Keine Idee? Commander finden</h2></summary>
-      <form id="finder-form" autocomplete="off">
-        <label>Was willst du spielen?
-          <textarea name="prompt" rows="4" required placeholder="z. B. Ich mag Drachen und große Zauber, gerne Rot-Grün, nicht zu kompetitiv. Oder: Vampire mit Lebensentzug, Budget-freundlich."></textarea>
-        </label>
-        <label>Anzahl Vorschläge
-          <select name="count"><option>3</option><option selected>5</option><option>8</option></select>
-        </label>
-        <p class="hint">Bracket, Budget/Proxy und Modell werden aus „Neues Deck“ übernommen.</p>
-        <button type="submit" id="finder-btn">Commander vorschlagen</button>
-      </form>
-    </details>
+<a class="skip-link" href="#main">Zum Inhalt springen</a>
 
-    <section class="panel">
-      <h2>Neues Deck</h2>
-      <form id="build-form" autocomplete="off">
-        <label>Commander
-          <input id="commander" name="commander" list="ac-commander" placeholder="z. B. Atraxa, Praetors' Voice" required>
-          <datalist id="ac-commander"></datalist>
-        </label>
-        <label>Partner / Background <span class="opt">(optional)</span>
-          <input id="partner" name="partner" list="ac-partner" placeholder="">
-          <datalist id="ac-partner"></datalist>
-        </label>
-        <div id="commander-preview"></div>
+<div class="app">
+  <header class="topbar">
+    <button type="button" class="icon-btn" id="nav-toggle" aria-label="Menü öffnen" aria-expanded="false" aria-controls="sidebar">
+      <svg class="icon"><use href="#i-menu"/></svg></button>
+    <a class="brand" href="#/new"><span class="logo" aria-hidden="true"></span>Commander Deckbuilder</a>
+    <a id="job-indicator-top" class="job-indicator top" href="#/job" hidden aria-label="Laufender Auftrag"><span class="spinner" aria-hidden="true"></span>läuft</a>
+  </header>
 
-        <fieldset>
-          <legend>Bracket</legend>
-          <div id="bracket-options" class="brackets"></div>
-          <p id="bracket-desc" class="hint"></p>
-        </fieldset>
+  <aside id="sidebar" class="sidebar" aria-label="Navigation">
+    <a class="brand" href="#/new"><span class="logo" aria-hidden="true"></span>Commander Deckbuilder</a>
+    <a class="btn primary block" href="#/new" data-nav="new"><svg class="icon"><use href="#i-plus"/></svg>Neues Deck</a>
+    <a id="job-indicator" class="job-indicator" href="#/job" hidden>
+      <span class="spinner" aria-hidden="true"></span><span id="job-indicator-text">Claude arbeitet …</span></a>
 
-        <div class="row budget-row">
-          <label>Budget
-            <input id="budget" name="budget" type="number" min="0" step="10" placeholder="unbegrenzt">
-          </label>
-          <label>Währung
-            <select name="currency"><option value="eur">EUR</option><option value="usd">USD</option></select>
-          </label>
-        </div>
-        <label class="switch" title="Das Deck wird geproxt: Preise spielen keine Rolle, das Budget wird ignoriert.">
-          <input type="checkbox" id="proxy" name="proxy">
-          <span class="slider" aria-hidden="true"></span>
-          <span>Proxy-Deck <span class="opt">– Preise egal, beste Karten fürs Bracket</span></span>
-        </label>
-        <details class="sub" id="build-profile">
-          <summary>Feinabstimmung <span class="opt">(Stufe, Hausregeln, Stil)</span></summary>
-          <div class="profile-fields"></div>
-        </details>
-        <label>Strategie / Thema <span class="opt">(optional)</span>
-          <input name="strategy" placeholder="z. B. +1/+1 Counter, Superfriends, Tokens">
-        </label>
-        <label>Weitere Wünsche <span class="opt">(optional)</span>
-          <textarea name="notes" rows="3" placeholder="z. B. keine Infinite-Combos, Karten aus meiner Sammlung bevorzugen …"></textarea>
-        </label>
-        <label>Modell
-          <select name="model">
-            <option value="">Standard (Claude Code Einstellung)</option>
-            <option value="opus">Opus</option>
-            <option value="sonnet">Sonnet</option>
-            <option value="haiku">Haiku</option>
-          </select>
-        </label>
-        <button type="submit" id="build-btn">Deck bauen lassen</button>
-      </form>
-    </section>
-
-    <section class="panel">
-      <h2>Gespeicherte Decks</h2>
+    <div class="nav-section">
+      <h2 class="nav-title">Meine Decks <span id="deck-count" class="count"></span></h2>
+      <input id="deck-filter" type="search" class="filter" placeholder="Decks filtern …" aria-label="Decks filtern" hidden>
       <ul id="deck-list" class="deck-list"></ul>
+    </div>
+
+    <nav class="nav-bottom" aria-label="Weitere Bereiche">
+      <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
+      <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
+    </nav>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <main id="main" class="main" tabindex="-1">
+
+    <!-- ============ new deck / commander finder ============ -->
+    <section id="view-new" class="view" data-view="new" hidden>
+      <header class="page-head">
+        <div>
+          <h1>Neues Deck</h1>
+          <p class="lead">Claude recherchiert auf EDHREC, Scryfall und Commander Spellbook und baut dir ein legales
+            100-Karten-Deck, geprüft gegen Bracket-Regeln, Budget und deine Blacklist.</p>
+        </div>
+      </header>
+
+      <form id="build-form" class="panel form-card" data-mode="build" autocomplete="off">
+        <div class="segmented" role="radiogroup" aria-label="Wie willst du starten?">
+          <label><input type="radio" name="mode" value="build" checked><span>Ich habe einen Commander</span></label>
+          <label><input type="radio" name="mode" value="find"><span><svg class="icon"><use href="#i-spark"/></svg>Commander vorschlagen lassen</span></label>
+        </div>
+
+        <section class="step">
+          <span class="step-num" aria-hidden="true">1</span>
+          <div class="step-body">
+            <h2 class="step-title mode-build">Commander</h2>
+            <h2 class="step-title mode-find">Was willst du spielen?</h2>
+            <div class="mode-build commander-row">
+              <div class="grow">
+                <label class="field">Name
+                  <input id="commander" name="commander" list="ac-commander" placeholder="z. B. Atraxa, Praetors' Voice" required>
+                  <datalist id="ac-commander"></datalist>
+                </label>
+                <button type="button" class="link-btn" id="partner-toggle"><svg class="icon"><use href="#i-plus"/></svg>Partner oder Background</button>
+                <label class="field" id="partner-field" hidden>Partner / Background
+                  <input id="partner" name="partner" list="ac-partner" placeholder="optional">
+                  <datalist id="ac-partner"></datalist>
+                </label>
+              </div>
+              <div id="commander-preview" class="commander-preview" aria-live="polite"></div>
+            </div>
+            <div class="mode-find">
+              <label class="field">Beschreibe deinen Wunsch
+                <textarea name="prompt" rows="4" required placeholder="z. B. Ich mag Drachen und große Zauber, gerne Rot-Grün, nicht zu kompetitiv. Oder: Vampire mit Lebensentzug, budgetfreundlich."></textarea>
+              </label>
+              <label class="field inline">Anzahl Vorschläge
+                <select name="count"><option>3</option><option selected>5</option><option>8</option></select>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="step">
+          <span class="step-num" aria-hidden="true">2</span>
+          <div class="step-body">
+            <h2 class="step-title">Stärke (Bracket)</h2>
+            <div id="bracket-options" class="brackets" role="radiogroup" aria-label="Bracket"></div>
+            <p id="bracket-desc" class="muted small"></p>
+            <details class="more" id="build-profile">
+              <summary>Feinabstimmung <span class="muted">– Stufe im Bracket, Hausregeln, Stil</span></summary>
+              <div class="profile-fields"></div>
+            </details>
+          </div>
+        </section>
+
+        <section class="step">
+          <span class="step-num" aria-hidden="true">3</span>
+          <div class="step-body">
+            <h2 class="step-title">Budget</h2>
+            <label class="switch">
+              <input type="checkbox" id="proxy" name="proxy">
+              <span class="slider" aria-hidden="true"></span>
+              <span>Proxy-Deck <span class="muted">– Preise egal, beste Karten fürs Bracket</span></span>
+            </label>
+            <div class="budget-row" id="budget-row">
+              <label class="field">Maximal
+                <input id="budget" name="budget" type="number" min="0" step="10" placeholder="unbegrenzt" inputmode="numeric">
+              </label>
+              <label class="field">Währung
+                <select name="currency"><option value="eur">EUR</option><option value="usd">USD</option></select>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="step mode-build">
+          <span class="step-num" aria-hidden="true">4</span>
+          <div class="step-body">
+            <h2 class="step-title">Wünsche <span class="muted">(optional)</span></h2>
+            <label class="field">Strategie / Thema
+              <input name="strategy" placeholder="z. B. +1/+1 Counter, Superfriends, Tokens">
+            </label>
+            <label class="field">Weitere Wünsche
+              <textarea name="notes" rows="2" placeholder="z. B. keine Infinite-Combos, viel Interaktion, Lieblingskarte XY rein …"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <details class="more advanced">
+          <summary>Erweitert</summary>
+          <label class="field">KI-Modell
+            <select name="model">
+              <option value="">Standard (Claude-Code-Einstellung)</option>
+              <option value="opus">Opus</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="haiku">Haiku</option>
+            </select>
+          </label>
+        </details>
+
+        <div class="form-actions">
+          <button type="submit" id="build-btn" class="btn primary lg">
+            <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span></button>
+          <p class="muted small"><span class="mode-build">Dauert ein paar Minuten – du kannst währenddessen andere Decks ansehen.</span>
+            <span class="mode-find">Bracket und Budget fließen in die Vorschläge ein.</span></p>
+        </div>
+      </form>
+
+      <div id="finder-job-slot" class="job-slot"></div>
+      <section id="suggestions" class="suggestions-wrap" hidden>
+        <h2 class="section-title">Vorschläge</h2>
+        <div id="suggestion-list" class="suggestions"></div>
+      </section>
     </section>
 
-    <details class="panel" id="blacklist-panel">
-      <summary><h2>Blacklist <span id="bl-count" class="opt"></span></h2></summary>
-      <p class="hint">Diese Karten kommen nie in ein Deck (auch deutsche Namen möglich).</p>
-      <form id="bl-form" class="bl-form" autocomplete="off">
-        <input id="bl-input" list="ac-bl" placeholder="Karte hinzufügen …">
-        <datalist id="ac-bl"></datalist>
-        <button type="submit" class="secondary">+</button>
-      </form>
-      <p id="bl-msg" class="hint"></p>
-      <ul id="bl-list" class="chips"></ul>
-    </details>
+    <!-- ============ running build ============ -->
+    <section id="view-job" class="view" data-view="job" hidden>
+      <div id="job-slot-main" class="job-slot"></div>
+      <div class="empty" id="job-empty">
+        <p>Gerade läuft nichts.</p>
+        <a class="btn" href="#/new">Neues Deck</a>
+      </div>
+    </section>
 
-    <details class="panel" id="settings-panel">
-      <summary><h2>Einstellungen <span class="opt">(Proxy-Druck)</span></h2></summary>
+    <!-- ============ deck ============ -->
+    <section id="view-deck" class="view" data-view="deck" hidden>
+      <header class="page-head deck-head">
+        <img id="deck-thumb" class="deck-thumb" alt="" hidden>
+        <div class="deck-title">
+          <h1 id="deck-name"></h1>
+          <div id="deck-meta" class="meta-row"></div>
+          <p id="deck-desc" class="lead"></p>
+        </div>
+        <div class="page-actions">
+          <button type="button" id="copy-btn" class="btn"><svg class="icon"><use href="#i-copy"/></svg><span>Liste kopieren</span></button>
+          <details class="menu" id="deck-menu">
+            <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
+            <div class="menu-list" role="menu">
+              <button type="button" id="duplicate-btn" role="menuitem">Als neues Deck kopieren</button>
+              <button type="button" id="validate-btn" role="menuitem">Neu prüfen</button>
+              <hr>
+              <button type="button" id="delete-btn" role="menuitem" class="danger">Deck löschen …</button>
+            </div>
+          </details>
+        </div>
+      </header>
+
+      <div class="tabs" role="tablist" id="deck-tabs" aria-label="Deckbereiche">
+        <button type="button" role="tab" id="tab-karten" aria-controls="panel-karten" data-tab="karten">Karten</button>
+        <button type="button" role="tab" id="tab-anpassen" aria-controls="panel-anpassen" data-tab="anpassen">Anpassen</button>
+        <button type="button" role="tab" id="tab-fragen" aria-controls="panel-fragen" data-tab="fragen">Fragen <span class="count" id="qa-count"></span></button>
+        <button type="button" role="tab" id="tab-verlauf" aria-controls="panel-verlauf" data-tab="verlauf">Verlauf <span class="count" id="version-count"></span></button>
+        <button type="button" role="tab" id="tab-drucken" aria-controls="panel-drucken" data-tab="drucken">Drucken</button>
+      </div>
+
+      <!-- cards -->
+      <div role="tabpanel" id="panel-karten" aria-labelledby="tab-karten" class="tabpanel">
+        <div class="deck-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Karten <span id="card-total" class="count"></span></h2>
+              <div class="segmented small" role="radiogroup" aria-label="Darstellung">
+                <label title="Liste"><input type="radio" name="cardview" value="list" checked><span><svg class="icon"><use href="#i-list"/></svg>Liste</span></label>
+                <label title="Bilder"><input type="radio" name="cardview" value="grid"><span><svg class="icon"><use href="#i-grid"/></svg>Bilder</span></label>
+              </div>
+            </div>
+            <div id="cards" class="cards"></div>
+          </section>
+          <aside class="deck-side">
+            <section class="panel"><h2>Prüfung</h2><div id="validation"></div></section>
+            <section class="panel"><h2>Statistik</h2><div id="stats"></div></section>
+          </aside>
+        </div>
+      </div>
+
+      <!-- tune -->
+      <div role="tabpanel" id="panel-anpassen" aria-labelledby="tab-anpassen" class="tabpanel" hidden>
+        <div id="tune-job-slot" class="job-slot"></div>
+        <section class="panel">
+          <h2>Mit eigenen Worten ändern</h2>
+          <p class="muted">Claude tauscht gezielt Karten aus, prüft das Deck und speichert eine neue Version – rückgängig machen geht im Verlauf.</p>
+          <form id="refine-form" class="inline-form">
+            <input name="request" aria-label="Änderungswunsch" placeholder="z. B. Mehr Kartenzug, unter 150 €, tausche die Board-Wipes …" required>
+            <button type="submit" class="btn primary">Überarbeiten lassen</button>
+          </form>
+          <div class="chips-row" id="refine-chips">
+            <button type="button" class="chip" data-q="Mehr Kartenzug">Mehr Kartenzug</button>
+            <button type="button" class="chip" data-q="Mehr Interaktion (Removal, Counter)">Mehr Interaktion</button>
+            <button type="button" class="chip" data-q="Günstiger machen, ohne an Stärke zu verlieren">Günstiger</button>
+            <button type="button" class="chip" data-q="Manabasis verbessern">Manabasis</button>
+          </div>
+        </section>
+
+        <section class="panel" id="power-panel">
+          <div class="panel-head">
+            <h2>Stärke ändern</h2>
+            <div class="btn-group">
+              <button type="button" class="btn" id="step-down">▼ Schwächer</button>
+              <button type="button" class="btn" id="step-up">▲ Stärker</button>
+            </div>
+          </div>
+          <div id="power-scale" class="scale"></div>
+          <div id="power-text" class="muted small"></div>
+          <form id="retune-form" autocomplete="off">
+            <div class="field-block">
+              <span class="field-label">Ziel-Bracket</span>
+              <div id="retune-brackets" class="brackets" role="radiogroup" aria-label="Ziel-Bracket"></div>
+            </div>
+            <div class="profile-fields"></div>
+            <label class="field"><span>Wunsch / Notiz <span class="muted">(optional)</span></span>
+              <input name="request" placeholder="z. B. mehr Interaktion statt Combos, Lieblingskarten behalten …">
+            </label>
+            <button type="submit" id="retune-btn" class="btn primary">Deck umbauen</button>
+          </form>
+        </section>
+      </div>
+
+      <!-- questions -->
+      <div role="tabpanel" id="panel-fragen" aria-labelledby="tab-fragen" class="tabpanel" hidden>
+        <section class="panel" id="qa-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Fragen zum Deck</h2>
+              <p class="muted small">Claude analysiert nur – das Deck bleibt unverändert.</p>
+            </div>
+            <button type="button" class="btn ghost" id="qa-clear" hidden>Verlauf löschen</button>
+          </div>
+          <div id="qa-list" class="qa-list"></div>
+          <div id="qa-live" class="qa-live" aria-live="polite" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="qa-question" class="qa-pending"></span>
+            <span id="qa-status" class="muted small"></span>
+            <button type="button" class="btn small" id="qa-cancel">Abbrechen</button>
+          </div>
+          <form id="qa-form" class="qa-form" autocomplete="off">
+            <textarea name="question" rows="2" required aria-label="Deine Frage"
+              placeholder="z. B. Wie gewinnt das Deck? Ist es zu stark für eine Bracket-2-Runde? Wie schlägt es sich gegen Atraxa?"></textarea>
+            <button type="submit" id="qa-btn" class="btn primary">Fragen</button>
+          </form>
+          <div class="chips-row" id="qa-chips">
+            <button type="button" class="chip" data-q="Was ist die Strategie des Decks und wie gewinnt es?">Strategie</button>
+            <button type="button" class="chip" data-q="Wie spiele ich das Deck: worauf achte ich beim Mulligan, in den ersten Zügen, im Mid- und Late-Game?">So spielt man es</button>
+            <button type="button" class="chip" data-q="Ist das Deck zu stark oder zu schwach für sein Bracket? Welche Karten treiben die Power?">Zu stark?</button>
+            <button type="button" class="chip" data-q="Wie schlägt sich das Deck gegen " data-open="1">Gegen …</button>
+            <button type="button" class="chip" data-q="Was sind die größten Schwächen des Decks und wie gleiche ich sie aus?">Schwächen</button>
+            <button type="button" class="chip" data-q="Welche Karten sind die wichtigsten, und welche sind leicht austauschbar?">Schlüsselkarten</button>
+          </div>
+          <p class="muted small">Enter schickt ab, Umschalt+Enter macht eine neue Zeile. Anschlussfragen („und gegen Kinnan?“) kennen den bisherigen Verlauf.</p>
+        </section>
+      </div>
+
+      <!-- history -->
+      <div role="tabpanel" id="panel-verlauf" aria-labelledby="tab-verlauf" class="tabpanel" hidden>
+        <section class="panel" id="history-panel">
+          <div class="panel-head">
+            <h2>Versionen</h2>
+            <form id="compare-form" class="compare">
+              <select name="a" aria-label="Version A"></select>
+              <span aria-hidden="true">→</span>
+              <select name="b" aria-label="Version B"></select>
+              <button type="submit" class="btn">Vergleichen</button>
+            </form>
+          </div>
+          <div id="compare-result" class="compare-result" hidden></div>
+          <ol id="history" class="history" reversed></ol>
+        </section>
+      </div>
+
+      <!-- print studio -->
+      <div role="tabpanel" id="panel-drucken" aria-labelledby="tab-drucken" class="tabpanel" hidden>
+        <div id="print-job-slot" class="job-slot"></div>
+        <section class="panel" id="print-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Bilder prüfen</h2>
+              <p class="muted small">Klick auf eine Karte, um ein anderes Bild zu wählen.</p>
+            </div>
+          </div>
+          <form id="print-form" class="toolbar" autocomplete="off">
+            <label class="field">Bilder
+              <select name="source">
+                <option value="auto">Automatisch (eigene Wahl › MPC Autofill › Scryfall)</option>
+                <option value="mpcfill">MPC Autofill</option>
+                <option value="scryfall">nur Scryfall</option>
+              </select>
+            </label>
+            <label class="field">Kartenstärke <select name="stock"></select></label>
+            <label class="check"><input type="checkbox" name="foil"> Foil</label>
+            <label class="check" title="Opt-in: Scryfall-Scans mit Real-ESRGAN auf 600 DPI hochrechnen (braucht das Zusatzprogramm, kostet Rechenzeit)">
+              <input type="checkbox" name="upscale"> KI-Hochskalierung <span class="muted">(600 DPI)</span></label>
+            <button type="submit" class="btn">Vorschau aktualisieren</button>
+          </form>
+          <p id="print-summary" class="muted small"></p>
+          <div id="print-grid" class="print-grid"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Drucken</h2>
+          <ol class="print-steps">
+            <li>
+              <div>
+                <h3>Druckdateien vorbereiten</h3>
+                <p class="muted small">Lädt die Bilder, ergänzt den Beschnitt-Rand und schreibt die order.xml.</p>
+                <p id="prepared-info" class="muted small" hidden></p>
+              </div>
+              <div class="step-actions">
+                <button type="button" id="prepare-btn" class="btn primary">Vorbereiten</button>
+                <button type="button" class="btn ghost" id="open-folder-btn" hidden title="Druckbilder im Explorer/Finder öffnen">Ordner öffnen</button>
+                <a id="xml-link" class="link" href="#" hidden>order.xml</a>
+              </div>
+            </li>
+            <li>
+              <div>
+                <h3>Selbst drucken</h3>
+                <p class="muted small">PDF mit 9 Karten pro Seite (63 × 88 mm) und Schnittmarken.</p>
+              </div>
+              <div class="step-actions">
+                <select id="pdf-paper" aria-label="Papier"><option>A4</option><option>Letter</option></select>
+                <label class="check"><input type="checkbox" id="pdf-backs" checked> DFC-Rückseiten</label>
+                <button type="button" class="btn" id="pdf-btn">PDF erstellen</button>
+                <a id="pdf-link" class="link" href="#" hidden>PDF öffnen</a>
+              </div>
+            </li>
+            <li>
+              <div>
+                <h3>Bei MakePlayingCards bestellen</h3>
+                <p class="muted small">Das MPC-Autofill-Programm lädt alles hoch – Login und Bestellung machst du dort.
+                  Die order.xml geht auch auf mpcfill.com.</p>
+              </div>
+              <div class="step-actions">
+                <button type="button" id="mpc-btn" class="btn">An MakePlayingCards senden</button>
+                <label class="check" title="Statt im eingebetteten Terminal in einem separaten Konsolenfenster starten"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
+              </div>
+            </li>
+          </ol>
+        </section>
+      </div>
+    </section>
+
+    <!-- ============ blacklist ============ -->
+    <section id="view-blacklist" class="view narrow" data-view="blacklist" hidden>
+      <header class="page-head">
+        <div>
+          <h1>Blacklist</h1>
+          <p class="lead">Diese Karten kommen nie in ein Deck – auch nicht beim Überarbeiten. Deutsche Namen gehen auch.</p>
+        </div>
+      </header>
+      <section class="panel">
+        <form id="bl-form" class="inline-form" autocomplete="off">
+          <input id="bl-input" list="ac-bl" placeholder="Karte hinzufügen, mehrere mit ; trennen" aria-label="Karte hinzufügen">
+          <datalist id="ac-bl"></datalist>
+          <button type="submit" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Hinzufügen</button>
+        </form>
+        <p id="bl-msg" class="muted small" aria-live="polite"></p>
+        <ul id="bl-list" class="chips"></ul>
+        <p id="bl-empty" class="empty-inline" hidden>Noch keine Karten auf der Blacklist.</p>
+      </section>
+    </section>
+
+    <!-- ============ settings ============ -->
+    <section id="view-settings" class="view narrow" data-view="settings" hidden>
+      <header class="page-head">
+        <div>
+          <h1>Einstellungen</h1>
+          <p class="lead">Kartendatenbank und Proxy-Druck.</p>
+        </div>
+      </header>
+
+      <section class="panel">
+        <h2>Kartendatenbank</h2>
+        <p class="muted small">Lokale Kopie der Scryfall-Daten: schneller, mit deutschen Namen und Tags.</p>
+        <p id="db-status">…</p>
+        <button type="button" id="db-btn" class="btn">Scryfall-Bulk-Daten laden</button>
+      </section>
+
       <form id="settings-form" autocomplete="off">
-        <label>MPC-Autofill-Programm
-          <input name="autofill_path" placeholder="C:\Tools\autofill-windows.exe (oder in tools/ ablegen)">
-        </label>
-        <p id="autofill-status" class="hint"></p>
-        <label>MPC-Autofill-Server <span class="opt">(für Community-Scans)</span>
-          <input name="mpcfill_server" placeholder="Server-URL wie auf mpcfill.com eingestellt">
-        </label>
-        <label>Eigener Kartenrücken <span class="opt">(Bilddatei)</span>
-          <input name="cardback_path" placeholder="C:\Bilder\cardback.png">
-        </label>
-        <fieldset>
-          <legend>KI-Hochskalierung (optional)</legend>
-          <label>Real-ESRGAN-Programm
+        <section class="panel">
+          <h2>Proxy-Druck</h2>
+          <label class="field">MPC-Autofill-Programm
+            <input name="autofill_path" placeholder="C:\Tools\autofill-windows.exe (oder in tools/ ablegen)">
+          </label>
+          <p id="autofill-status" class="muted small"></p>
+          <label class="field"><span>MPC-Autofill-Server <span class="muted">(für Community-Scans)</span></span>
+            <input name="mpcfill_server" placeholder="Server-URL wie auf mpcfill.com eingestellt">
+          </label>
+          <label class="field"><span>Eigener Kartenrücken <span class="muted">(Bilddatei)</span></span>
+            <input name="cardback_path" placeholder="C:\Bilder\cardback.png">
+          </label>
+          <div class="row2">
+            <label class="field">Browser
+              <select name="browser"><option>chrome</option><option>edge</option><option>brave</option></select>
+            </label>
+            <label class="field">Druckerei
+              <select name="site"><option>MakePlayingCards</option><option>PrinterStudio</option></select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>KI-Hochskalierung <span class="muted">(optional)</span></h2>
+          <p class="muted small">Rechnet Scryfall-Scans mit Real-ESRGAN auf 600 DPI hoch. Braucht eine Vulkan-fähige Grafikkarte.</p>
+          <label class="field">Real-ESRGAN-Programm
             <input name="upscaler_path" placeholder="realesrgan-ncnn-vulkan.exe (oder nach tools/realesrgan/ entpacken)">
           </label>
-          <p id="upscaler-status" class="hint"></p>
-          <label>Modell
-            <select name="upscale_model"></select>
-          </label>
-          <label>Druckraster entfernen <span class="opt">(vor dem Hochskalieren)</span>
-            <select name="descreen">
-              <option value="off">aus</option>
-              <option value="light">leicht</option>
-              <option value="normal">normal (empfohlen)</option>
-              <option value="strong">stark</option>
-            </select>
-          </label>
-          <p class="hint">Scryfall-Bilder sind Scans gedruckter Karten – ohne diesen Filter macht die KI das Druckraster als Linien sichtbar.</p>
-          <label class="check"><input type="checkbox" name="upscale"> standardmäßig im Druckstudio aktivieren</label>
-        </fieldset>
-        <div class="row2">
-          <label>Browser
-            <select name="browser"><option>chrome</option><option>edge</option><option>brave</option></select>
-          </label>
-          <label>Druckerei
-            <select name="site"><option>MakePlayingCards</option><option>PrinterStudio</option></select>
-          </label>
-        </div>
-        <button type="submit" class="secondary">Speichern</button>
-        <span id="settings-msg" class="hint"></span>
-      </form>
-    </details>
-
-    <section class="panel">
-      <h2>Kartendatenbank</h2>
-      <p id="db-status" class="hint">…</p>
-      <button id="db-btn" class="secondary">Scryfall-Bulk-Daten laden</button>
-    </section>
-  </aside>
-
-  <section id="content">
-    <section id="job" class="panel hidden">
-      <div class="job-head">
-        <h2 id="job-title">Claude baut …</h2>
-        <button id="cancel-btn" class="secondary">Abbrechen</button>
-      </div>
-      <div id="progress" class="progressbar hidden"><div></div><span></span></div>
-      <div id="log" class="log"></div>
-      <div id="terminal-wrap" class="terminal-wrap hidden">
-        <div id="terminal" class="terminal" tabindex="0" aria-label="MPC-Autofill-Terminal"></div>
-        <div class="term-keys">
-          <span class="hint">Ins Terminal klicken und mit Tastatur bedienen – oder:</span>
-          <button type="button" class="secondary" data-key="up">↑</button>
-          <button type="button" class="secondary" data-key="down">↓</button>
-          <button type="button" class="secondary" data-key="enter">Enter ⏎</button>
-        </div>
-      </div>
-      <form id="console-form" class="console hidden" autocomplete="off">
-        <input name="text" placeholder="Antwort an MPC Autofill (leer = Enter)">
-        <button type="submit" class="secondary">Senden ⏎</button>
-      </form>
-    </section>
-
-    <section id="suggestions" class="panel hidden">
-      <h2>Commander-Vorschläge</h2>
-      <div id="suggestion-list" class="suggestions"></div>
-    </section>
-
-    <section id="deck-view" class="hidden">
-      <div class="panel deck-head">
-        <div>
-          <h2 id="deck-name"></h2>
-          <p id="deck-meta" class="hint"></p>
-          <p id="deck-desc"></p>
-        </div>
-        <div class="deck-actions">
-          <button id="copy-btn" class="secondary">Liste kopieren</button>
-          <button id="duplicate-btn" class="secondary">Als neues Deck kopieren</button>
-          <button id="print-btn">Proxies drucken</button>
-          <button id="validate-btn" class="secondary">Neu prüfen</button>
-          <button id="delete-btn" class="danger">Löschen</button>
-        </div>
-      </div>
-
-      <div class="grid2">
-        <div class="panel"><h3>Prüfung</h3><div id="validation"></div></div>
-        <div class="panel"><h3>Statistik</h3><div id="stats"></div></div>
-      </div>
-
-      <div class="panel hidden" id="print-panel">
-        <div class="power-head">
-          <h3>Druckstudio <span class="opt">– Proxies mit MPC Autofill</span></h3>
-          <button type="button" class="secondary" id="print-close">Schließen</button>
-        </div>
-        <form id="print-form" class="print-toolbar" autocomplete="off">
-          <label>Bilder
-            <select name="source">
-              <option value="auto">Automatisch (eigene Wahl › MPC Autofill › Scryfall)</option>
-              <option value="mpcfill">MPC Autofill</option>
-              <option value="scryfall">nur Scryfall</option>
-            </select>
-          </label>
-          <label>Kartenstärke <select name="stock"></select></label>
-          <label class="check"><input type="checkbox" name="foil"> Foil</label>
-          <label class="check" title="Opt-in: Scryfall-Scans mit Real-ESRGAN auf 600 DPI hochrechnen (braucht das Zusatzprogramm, kostet Rechenzeit)">
-            <input type="checkbox" name="upscale"> KI-Hochskalierung <span class="opt">(Scryfall → 600 DPI)</span></label>
-          <button type="submit" class="secondary">Vorschau laden</button>
-        </form>
-        <p id="print-summary" class="hint"></p>
-        <div id="print-grid" class="print-grid"></div>
-        <div class="print-actions">
-          <button type="button" id="prepare-btn">1. Druckdateien vorbereiten</button>
-          <span class="group">
-            <select id="pdf-paper" aria-label="Papier"><option>A4</option><option>Letter</option></select>
-            <label class="check"><input type="checkbox" id="pdf-backs" checked> DFC-Rückseiten</label>
-            <button type="button" class="secondary" id="pdf-btn">PDF zum Selbstdrucken</button>
-          </span>
-          <span class="group">
-            <button type="button" id="mpc-btn">An MakePlayingCards senden</button>
-            <label class="check" title="Statt im Terminal hier in einem separaten Konsolenfenster starten"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
-          </span>
-          <span class="group downloads">
-            <button type="button" class="secondary hidden" id="open-folder-btn" title="Druckbilder im Explorer/Finder öffnen">Ordner öffnen</button>
-            <a id="xml-link" class="hidden" href="#">order.xml</a>
-            <a id="pdf-link" class="hidden" href="#">PDF</a>
-          </span>
-        </div>
-        <p id="prepared-info" class="hint hidden"></p>
-        <p class="hint">Die order.xml lässt sich auch auf mpcfill.com importieren. Upload & Login bei MakePlayingCards
-          übernimmt das MPC-Autofill-Programm (Windows: <code>autofill-windows.exe</code>, siehe Einstellungen).</p>
-      </div>
-
-      <div class="panel" id="power-panel">
-        <div class="power-head">
-          <h3>Power &amp; Bracket</h3>
-          <div class="deck-actions">
-            <button type="button" class="secondary" id="step-down">▼ Eine Stufe schwächer</button>
-            <button type="button" class="secondary" id="step-up">▲ Eine Stufe stärker</button>
+          <p id="upscaler-status" class="muted small"></p>
+          <div class="row2">
+            <label class="field">Modell
+              <select name="upscale_model"></select>
+            </label>
+            <label class="field">Druckraster entfernen
+              <select name="descreen">
+                <option value="off">aus</option>
+                <option value="light">leicht</option>
+                <option value="normal">normal (empfohlen)</option>
+                <option value="strong">stark</option>
+              </select>
+            </label>
           </div>
-        </div>
-        <div id="power-scale" class="scale"></div>
-        <p id="power-text" class="hint"></p>
-        <form id="retune-form" autocomplete="off">
-          <fieldset>
-            <legend>Ziel-Bracket</legend>
-            <div id="retune-brackets" class="brackets"></div>
-          </fieldset>
-          <div class="profile-fields"></div>
-          <label>Wunsch / Notiz <span class="opt">(optional)</span>
-            <input name="request" placeholder="z. B. mehr Interaktion statt Combos, Lieblingskarten behalten …">
-          </label>
-          <button type="submit" id="retune-btn">Deck umbauen</button>
-        </form>
-      </div>
+          <p class="muted small">Scryfall-Bilder sind Scans gedruckter Karten – ohne Entrastern macht die KI das Druckraster als Linien sichtbar.</p>
+          <label class="check"><input type="checkbox" name="upscale"> im Druckstudio standardmäßig aktivieren</label>
+        </section>
 
-      <div class="panel">
-        <h3>Anpassen</h3>
-        <form id="refine-form" class="refine">
-          <input name="request" placeholder="z. B. Mehr Kartenzug, Budget unter 150 €, tausche die Board-Wipes …" required>
-          <button type="submit">Überarbeiten lassen</button>
-        </form>
-      </div>
-
-      <div class="panel" id="qa-panel">
-        <div class="power-head">
-          <h3>Fragen zum Deck <span class="opt">– Claude analysiert, das Deck bleibt unverändert</span></h3>
-          <button type="button" class="secondary hidden" id="qa-clear">Verlauf löschen</button>
+        <div class="form-actions">
+          <button type="submit" class="btn primary">Speichern</button>
+          <span id="settings-msg" class="muted small" aria-live="polite"></span>
         </div>
-        <div id="qa-list" class="qa-list"></div>
-        <div id="qa-live" class="qa-live hidden" aria-live="polite">
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="qa-question" class="qa-pending"></span>
-          <span id="qa-status" class="hint"></span>
-          <button type="button" class="secondary" id="qa-cancel">Abbrechen</button>
-        </div>
-        <form id="qa-form" class="qa-form" autocomplete="off">
-          <textarea name="question" rows="2" required
-            placeholder="z. B. Wie gewinnt das Deck? Ist es zu stark für eine Bracket-2-Runde? Wie schlägt es sich gegen Atraxa?"></textarea>
-          <button type="submit" id="qa-btn">Fragen</button>
-        </form>
-        <div class="qa-chips" id="qa-chips">
-          <button type="button" class="chip" data-q="Was ist die Strategie des Decks und wie gewinnt es?">Strategie</button>
-          <button type="button" class="chip" data-q="Wie spiele ich das Deck: worauf achte ich beim Mulligan, in den ersten Zügen, im Mid- und Late-Game?">So spielt man es</button>
-          <button type="button" class="chip" data-q="Ist das Deck zu stark oder zu schwach für sein Bracket? Welche Karten treiben die Power?">Zu stark?</button>
-          <button type="button" class="chip" data-q="Wie schlägt sich das Deck gegen " data-open="1">Gegen …</button>
-          <button type="button" class="chip" data-q="Was sind die größten Schwächen des Decks und wie gleiche ich sie aus?">Schwächen</button>
-          <button type="button" class="chip" data-q="Welche Karten sind die wichtigsten, und welche sind leicht austauschbar?">Schlüsselkarten</button>
-        </div>
-        <p class="hint">Enter schickt die Frage ab, Umschalt+Enter macht eine neue Zeile. Anschlussfragen („und gegen Kinnan?“) verstehen den bisherigen Verlauf.</p>
-      </div>
-
-      <div class="panel hidden" id="history-panel">
-        <div class="power-head">
-          <h3>Verlauf &amp; Versionen</h3>
-          <form id="compare-form" class="compare">
-            <select name="a" aria-label="Version A"></select>
-            <span>→</span>
-            <select name="b" aria-label="Version B"></select>
-            <button type="submit" class="secondary">Vergleichen</button>
-          </form>
-        </div>
-        <div id="compare-result" class="compare-result hidden"></div>
-        <ol id="history" class="history" reversed></ol>
-      </div>
-
-      <div class="panel">
-        <h3>Karten</h3>
-        <div id="cards" class="cards"></div>
-      </div>
+      </form>
     </section>
+  </main>
+</div>
 
-    <section id="welcome" class="panel">
-      <h2>So funktioniert's</h2>
-      <ol>
-        <li>Commander eingeben (Autovervollständigung über Scryfall) – oder unter „Keine Idee? Commander finden“
-            beschreiben, was du spielen willst, und dir Vorschläge machen lassen.</li>
-        <li>Bracket wählen, Budget setzen oder „Proxy-Deck“ aktivieren, wenn du das Deck proxen willst.</li>
-        <li>„Deck bauen lassen“ startet Claude Code mit dem Skill <code>commander-deckbuilder</code>.
-            Claude recherchiert über den MCP-Server auf Scryfall, EDHREC und Commander Spellbook.</li>
-        <li>Das fertige Deck wird geprüft (Legalität, Farbidentität, Bracket-Regeln, Budget, deine Blacklist)
-            und in <code>decks/</code> gespeichert.</li>
-        <li>Mit „Überarbeiten lassen“ kannst du Änderungen in natürlicher Sprache anfordern.</li>
-      </ol>
-    </section>
-  </section>
-</main>
-
-<dialog id="picker" class="picker">
-  <div class="picker-head">
-    <h3 id="picker-title"></h3>
-    <div class="deck-actions">
-      <button type="button" class="secondary" id="picker-auto">Automatisch wählen</button>
-      <button type="button" class="secondary" id="picker-close">Schließen</button>
+<!-- job panel: moved into the slot of the view that started it -->
+<section id="job" class="panel job" hidden aria-live="polite">
+  <div class="job-head">
+    <span class="spinner lg" id="job-spinner" aria-hidden="true"></span>
+    <div class="job-text">
+      <h2 id="job-title">Claude arbeitet …</h2>
+      <p id="job-status" class="job-status">Starte …</p>
+    </div>
+    <div class="job-buttons">
+      <span id="job-elapsed" class="muted small" aria-hidden="true"></span>
+      <button type="button" id="cancel-btn" class="btn">Abbrechen</button>
     </div>
   </div>
-  <p id="picker-hint" class="hint"></p>
+  <div id="progress" class="progressbar" hidden><div></div><span></span></div>
+  <div id="terminal-wrap" class="terminal-wrap" hidden>
+    <div id="terminal" class="terminal" tabindex="0" aria-label="MPC-Autofill-Terminal"></div>
+    <div class="term-keys">
+      <span class="muted small">Ins Terminal klicken und mit der Tastatur bedienen – oder:</span>
+      <button type="button" class="btn small" data-key="up">↑</button>
+      <button type="button" class="btn small" data-key="down">↓</button>
+      <button type="button" class="btn small" data-key="enter">Enter ⏎</button>
+    </div>
+  </div>
+  <form id="console-form" class="inline-form console" autocomplete="off" hidden>
+    <input name="text" placeholder="Antwort an MPC Autofill (leer = Enter)" aria-label="Antwort an MPC Autofill">
+    <button type="submit" class="btn">Senden ⏎</button>
+  </form>
+  <details class="job-details" id="job-details">
+    <summary>Details</summary>
+    <div id="log" class="log" role="log"></div>
+  </details>
+</section>
+
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+<dialog id="ask-dialog" class="dialog small-dialog">
+  <form method="dialog" id="ask-form">
+    <h2 id="ask-title"></h2>
+    <p id="ask-text" class="muted"></p>
+    <input id="ask-input" hidden>
+    <div class="dialog-actions">
+      <button type="button" class="btn" value="cancel" id="ask-cancel">Abbrechen</button>
+      <button type="submit" class="btn primary" value="ok" id="ask-ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="picker" class="dialog">
+  <div class="dialog-head">
+    <h2 id="picker-title"></h2>
+    <div class="btn-group">
+      <button type="button" class="btn" id="picker-auto">Automatisch wählen</button>
+      <button type="button" class="icon-btn" id="picker-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+  </div>
+  <p id="picker-hint" class="muted small"></p>
   <div id="picker-grid" class="picker-grid"></div>
 </dialog>
 
-<dialog id="compare" class="picker compare-dialog">
-  <div class="picker-head">
-    <h3 id="compare-title"></h3>
-    <div class="deck-actions">
+<dialog id="compare" class="dialog compare-dialog">
+  <div class="dialog-head">
+    <h2 id="compare-title"></h2>
+    <div class="btn-group">
       <label class="check">Zoom
         <select id="compare-zoom"><option value="1" selected>Einpassen</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
       </label>
       <label class="check"><input type="checkbox" id="compare-bleed"> mit Beschnitt-Rand</label>
-      <button type="button" class="secondary" id="compare-close">Schließen</button>
+      <button type="button" class="icon-btn" id="compare-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
     </div>
   </div>
-  <p class="hint">Beide Seiten scrollen gemeinsam – ideal, um Regeltext und Symbole zu vergleichen.</p>
+  <p class="muted small">Beide Seiten scrollen gemeinsam – ideal, um Regeltext und Symbole zu vergleichen.</p>
   <div class="compare-panes">
     <figure><figcaption id="compare-cap-a"></figcaption><div class="pane" id="pane-a"><img id="compare-a" alt="Original"></div></figure>
     <figure><figcaption id="compare-cap-b"></figcaption><div class="pane" id="pane-b"><img id="compare-b" alt="Druckdatei"></div></figure>
   </div>
 </dialog>
 
+<dialog id="card-view" class="dialog card-view">
+  <div class="dialog-head">
+    <h2 id="card-view-title"></h2>
+    <div class="btn-group">
+      <a id="card-view-link" class="link" href="#" target="_blank" rel="noopener">Auf Scryfall öffnen</a>
+      <button type="button" class="icon-btn" id="card-view-close" aria-label="Schließen" autofocus><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+  </div>
+  <div id="card-view-faces" class="card-view-faces"></div>
+</dialog>
+
 <template id="profile-template">
-  <div class="tiers" role="radiogroup" aria-label="Feinstufe">
-    <label><input type="radio" name="tier" value="" checked><span>Egal</span></label>
-    <label><input type="radio" name="tier" value="low"><span>unteres</span></label>
-    <label><input type="radio" name="tier" value="mid"><span>mittleres</span></label>
-    <label><input type="radio" name="tier" value="high"><span>oberes</span></label>
+  <div class="field-block">
+    <span class="field-label">Stufe im Bracket</span>
+    <div class="tiers" role="radiogroup" aria-label="Stufe im Bracket">
+      <label><input type="radio" name="tier" value="" checked><span>egal</span></label>
+      <label><input type="radio" name="tier" value="low"><span>unteres</span></label>
+      <label><input type="radio" name="tier" value="mid"><span>mittleres</span></label>
+      <label><input type="radio" name="tier" value="high"><span>oberes</span></label>
+    </div>
   </div>
   <div class="row2">
-    <label>Max. Game Changer
+    <label class="field">Max. Game Changer
       <input name="max_game_changers" type="number" min="0" max="20" placeholder="lt. Bracket">
     </label>
-    <label>Max. Tutoren
+    <label class="field">Max. Tutoren
       <input name="max_tutors" type="number" min="0" max="20" placeholder="egal">
     </label>
   </div>
-  <label class="check"><input type="checkbox" name="no_combos"> keine 2-Karten-Combos</label>
-  <label class="check"><input type="checkbox" name="no_extra_turns"> keine Extra Turns</label>
-  <label class="check"><input type="checkbox" name="no_mld"> kein Mass Land Denial</label>
-  <label>Stil / Vibe
+  <div class="checks">
+    <label class="check"><input type="checkbox" name="no_combos"> keine 2-Karten-Combos</label>
+    <label class="check"><input type="checkbox" name="no_extra_turns"> keine Extra Turns</label>
+    <label class="check"><input type="checkbox" name="no_mld"> kein Mass Land Denial</label>
+  </div>
+  <label class="field">Stil / Vibe
     <input name="style" list="style-options" placeholder="z. B. witzig, politisch, thematisch">
   </label>
 </template>
@@ -398,18 +614,8 @@
   <option value="Casual / Kitchen Table"><option value="kompetitiv angehaucht"><option value="Group Hug">
 </datalist>
 
-<div id="preview" class="card-preview hidden"><img alt=""><img alt="" class="back hidden"></div>
+<div id="preview" class="card-preview" hidden><img alt=""><img alt="" class="back" hidden></div>
 
-<dialog id="card-view" class="picker card-view">
-  <div class="picker-head">
-    <h3 id="card-view-title"></h3>
-    <div class="deck-actions">
-      <a id="card-view-link" href="#" target="_blank" rel="noopener">Auf Scryfall öffnen</a>
-      <button type="button" class="secondary" id="card-view-close" autofocus>Schließen</button>
-    </div>
-  </div>
-  <div id="card-view-faces" class="card-view-faces"></div>
-</dialog>
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/app.js"></script>
 </body>

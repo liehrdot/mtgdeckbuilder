@@ -1,14 +1,12 @@
 "use strict";
 
+// ============================================================================================
+// helpers
+// ============================================================================================
 const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-let brackets = [];
-const ROLE_LABELS = { ramp: "Ramp", card_draw: "Kartenzug", removal: "Removal", board_wipe: "Board Wipes",
-  tutor: "Tutoren", extra_turn: "Extra Turns", counterspell: "Counter", protection: "Schutz" };
-let currentDeck = null;
-let currentJob = null;
-let eventSource = null;
+const enc = encodeURIComponent;
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -21,25 +19,300 @@ async function api(path, opts = {}) {
   return data;
 }
 
-// ---------- form: brackets, autocomplete, preview ----------
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+const store = {  // per-browser conveniences only (view mode); failures are harmless
+  get(k) { try { return localStorage.getItem("mtgdeck." + k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem("mtgdeck." + k, v); } catch { /* ignore */ } },
+};
+
+const fmtNum = (v, suffix = "", digits = null) =>
+  v === null || v === undefined ? "–" : `${digits === null ? v : Number(v).toFixed(digits)}${suffix}`;
+const fmtPower = (v) => fmtNum(v, "", 1);
+const fmtPrice = (v, cur = "") => fmtNum(v, cur ? " " + cur : "", 2);
+const fmtDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso.replace("T", " ").slice(0, 16) : d.toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" });
+};
+const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+// non-blocking notifications (success, hints, errors)
+function toast(text, kind = "info", ms = 4500) {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.innerHTML = `${icon(kind === "error" ? "alert" : "check")}<span>${esc(text)}</span>`;
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), kind === "error" ? ms + 3000 : ms);
+}
+const fail = (err) => toast(err.message || String(err), "error");
+
+// confirm / prompt as a proper dialog. Returns true (confirm), the entered text (prompt) or null.
+function ask({ title, text = "", value = null, ok = "OK", danger = false }) {
+  const dlg = $("#ask-dialog"), input = $("#ask-input");
+  $("#ask-title").textContent = title;
+  $("#ask-text").textContent = text;
+  $("#ask-text").hidden = !text;
+  input.hidden = value === null;
+  input.value = value ?? "";
+  $("#ask-ok").textContent = ok;
+  $("#ask-ok").classList.toggle("danger-fill", danger);
+  return new Promise((resolve) => {
+    const done = (result) => { resolve(result); if (dlg.open) dlg.close(); };
+    $("#ask-cancel").onclick = () => done(null);
+    $("#ask-form").onsubmit = (e) => { e.preventDefault(); done(value === null ? true : input.value.trim() || null); };
+    dlg.onclose = () => resolve(null);
+    dlg.showModal();
+    if (value !== null) { input.focus(); input.select(); } else $("#ask-ok").focus();
+  });
+}
+
+// dialogs close on a click outside their box (Esc works natively)
+for (const dlg of $$("dialog")) {
+  dlg.addEventListener("click", (e) => {
+    if (e.target !== dlg) return;
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+  });
+}
+
+// ============================================================================================
+// state + routing  (#/new · #/job · #/deck/<slug>/<tab> · #/blacklist · #/settings)
+// ============================================================================================
+let brackets = [];
+let currentDeck = null;
+let deckIndex = [];
+const VIEWS = ["new", "job", "deck", "blacklist", "settings"];
+const TABS = ["karten", "anpassen", "fragen", "verlauf", "drucken"];
+let lastView = null;
+
+function parseHash() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").map((p) => { try { return decodeURIComponent(p); } catch { return p; } });
+  const view = VIEWS.includes(parts[0]) ? parts[0] : "new";
+  return { view, slug: parts[1] || null, tab: parts[2] || null };
+}
+
+function go(hash) {
+  if (location.hash === hash) route();
+  else location.hash = hash;
+}
+
+async function route() {
+  const r = parseHash();
+  if (r.view === "deck" && !r.slug) return go("#/new");
+  if (r.view === "deck" && (!currentDeck || currentDeck.slug !== r.slug)) {
+    if (!(await openDeck(r.slug))) return;
+  }
+  for (const v of $$(".view")) v.hidden = v.dataset.view !== r.view;
+  if (r.view === "deck") selectTab(r.tab || "karten", false);
+  if (r.view === "settings") refreshDbStatus();
+  if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
+  placeJobPanel();
+  setNavOpen(false);
+  markNav(r);
+  const key = r.view + (r.slug || "");
+  if (key !== lastView) {
+    window.scrollTo(0, 0);
+    if (lastView !== null) $("#main").focus({ preventScroll: true });  // screen readers start at the new content
+    lastView = key;
+  }
+  document.title = (r.view === "deck" && currentDeck ? currentDeck.name
+    : { new: "Neues Deck", job: "Claude arbeitet", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+}
+window.addEventListener("hashchange", route);
+
+function markNav(r = parseHash()) {
+  for (const a of $$("#deck-list a")) {
+    if (r.view === "deck" && a.dataset.slug === r.slug) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  for (const a of $$(".nav-bottom a")) {
+    if (a.dataset.nav === r.view) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+}
+
+// mobile: the sidebar becomes a drawer
+function setNavOpen(open) {
+  document.body.classList.toggle("nav-open", open);
+  $("#scrim").hidden = !open;
+  $("#nav-toggle").setAttribute("aria-expanded", String(open));
+  $("#nav-toggle").setAttribute("aria-label", open ? "Menü schließen" : "Menü öffnen");
+}
+$("#nav-toggle").addEventListener("click", () => setNavOpen(!document.body.classList.contains("nav-open")));
+$("#scrim").addEventListener("click", () => setNavOpen(false));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("nav-open")) setNavOpen(false); });
+
+// ============================================================================================
+// sidebar: saved decks
+// ============================================================================================
+async function refreshDeckList() {
+  deckIndex = await api("/api/decks").catch(() => []);
+  $("#deck-count").textContent = deckIndex.length || "";
+  $("#deck-filter").hidden = deckIndex.length < 8;
+  renderDeckList();
+}
+
+function renderDeckList() {
+  const q = $("#deck-filter").value.trim().toLowerCase();
+  const list = deckIndex.filter((d) => !q || `${d.name} ${d.commanders.join(" ")}`.toLowerCase().includes(q));
+  $("#deck-list").innerHTML = list.length ? list.map((d) => `<li>
+      <a href="#/deck/${enc(d.slug)}" data-slug="${esc(d.slug)}">
+        <span class="name">${d.valid === false ? '<span class="dot bad" title="nicht legal"></span><span class="sr-only">nicht legal:</span>' : ""}<span>${esc(d.name)}</span></span>
+        <span class="meta">${esc(d.commanders.join(" + "))} · ${esc(d.level || `Bracket ${d.bracket ?? "?"}`)}${d.proxy ? " · Proxy" : ""}</span>
+      </a></li>`).join("")
+    : `<li class="empty-inline">${deckIndex.length ? "Kein Treffer." : "Noch keine Decks – starte mit „Neues Deck“."}</li>`;
+  markNav();
+}
+$("#deck-filter").addEventListener("input", renderDeckList);
+
+// ============================================================================================
+// new deck / commander finder
+// ============================================================================================
+const buildForm = $("#build-form");
+
 async function initBrackets() {
   brackets = await api("/api/brackets");
-  const box = $("#bracket-options");
-  box.innerHTML = brackets.map((b) => `
-    <label title="${esc(b.name)}"><input type="radio" name="bracket" value="${b.number}" ${b.number === 3 ? "checked" : ""}>
-    <span>${b.number}</span></label>`).join("");
-  box.addEventListener("change", showBracketDesc);
+  const options = (name, checked) => brackets.map((b) => `
+    <label title="${esc(b.summary)}"><input type="radio" name="${name}" value="${b.number}" ${b.number === checked ? "checked" : ""}>
+    <span><b>${b.number}</b><small>${esc(b.name)}</small></span></label>`).join("");
+  $("#bracket-options").innerHTML = options("bracket", 3);
+  $("#retune-brackets").innerHTML = options("rbracket", 0);
+  $("#bracket-options").addEventListener("change", showBracketDesc);
   showBracketDesc();
-  $("#retune-brackets").innerHTML = brackets.map((b) => `
-    <label title="${esc(b.name)}"><input type="radio" name="rbracket" value="${b.number}"><span>${b.number}</span></label>`).join("");
 }
+
+function showBracketDesc() {
+  const n = Number(new FormData(buildForm).get("bracket"));
+  const b = brackets.find((x) => x.number === n);
+  $("#bracket-desc").innerHTML = b ? `<b>${esc(b.name)}:</b> ${esc(b.summary)}` : "";
+}
+
+function setMode(mode) {
+  buildForm.dataset.mode = mode;
+  buildForm.elements.mode.value = mode;
+  // only the fields of the active mode take part in validation and submission
+  for (const el of buildForm.querySelectorAll(".mode-build :is(input, textarea, select)")) el.disabled = mode !== "build";
+  for (const el of buildForm.querySelectorAll(".mode-find :is(input, textarea, select)")) el.disabled = mode !== "find";
+}
+buildForm.addEventListener("change", (e) => { if (e.target.name === "mode") setMode(e.target.value); });
+
+$("#partner-toggle").addEventListener("click", () => {
+  $("#partner-field").hidden = false;
+  $("#partner-toggle").hidden = true;
+  $("#partner").focus();
+});
+
+$("#proxy").addEventListener("change", () => {
+  const on = $("#proxy").checked;
+  $("#budget-row").classList.toggle("off", on);
+  $("#budget").disabled = on;
+  buildForm.elements.currency.disabled = on;
+  $("#budget").placeholder = on ? "egal (Proxy)" : "unbegrenzt";
+});
+
+function wireAutocomplete(input, list, onPick) {
+  input.addEventListener("input", debounce(async () => {
+    const q = input.value.trim();
+    if (q.length < 2) return;
+    try {
+      const names = await api(`/api/autocomplete?q=${enc(q)}`);
+      list.innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
+    } catch { /* ignore */ }
+  }, 200));
+  input.addEventListener("change", () => onPick && onPick(input.value));
+}
+
+async function previewCommander(name) {
+  const box = $("#commander-preview");
+  if (!name) { box.innerHTML = ""; return; }
+  try {
+    const c = await api(`/api/card?name=${enc(name)}`);
+    box.innerHTML = c.image ? `<img src="${esc(c.image)}" alt="${esc(c.name)}">` : "";
+    if (c.name && c.name !== name) $("#commander").value = c.name;
+  } catch { box.innerHTML = ""; }
+}
+
+function buildSettings() {
+  const f = Object.fromEntries(new FormData(buildForm));
+  const proxy = $("#proxy").checked;
+  return {
+    bracket: Number(f.bracket), currency: buildForm.elements.currency.value, proxy,
+    budget: !proxy && f.budget ? Number(f.budget) : null, model: f.model || null,
+  };
+}
+
+buildForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (currentJob) { toast("Es läuft schon ein Auftrag – warte kurz oder brich ihn ab.", "error"); return; }
+  const f = Object.fromEntries(new FormData(buildForm));
+  try {
+    if (buildForm.dataset.mode === "find") {
+      const body = { ...buildSettings(), prompt: f.prompt, count: Number(f.count) };
+      const { job } = await api("/api/find-commander", { method: "POST", body });
+      $("#suggestions").hidden = true;
+      startJob(job, "Claude sucht passende Commander", { kind: "finder", slot: "#finder-job-slot", route: "#/new" });
+      $("#finder-job-slot").scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      const body = {
+        ...buildSettings(), commander: f.commander, partner: f.partner || null,
+        strategy: f.strategy || null, notes: f.notes || null,
+        profile: readProfile($("#build-profile .profile-fields")),
+      };
+      const { job } = await api("/api/build", { method: "POST", body });
+      startJob(job, `Claude baut ${body.commander}${body.partner ? " + " + body.partner : ""}`, { kind: "build", slot: "#job-slot-main", route: "#/job" });
+      go("#/job");
+    }
+  } catch (err) { fail(err); }
+});
+
+const COLOR_NAMES = { W: "Weiß", U: "Blau", B: "Schwarz", R: "Rot", G: "Grün" };
+let suggestions = [];
+
+function renderSuggestions(items) {
+  suggestions = items || [];
+  $("#suggestions").hidden = !suggestions.length;
+  const priceKey = buildForm.elements.currency.value === "usd" ? "price_usd" : "price_eur";
+  $("#suggestion-list").innerHTML = suggestions.map((s, i) => {
+    const colors = (s.color_identity || []).map((c) => COLOR_NAMES[c] || c).join(", ") || "Farblos";
+    return `<article class="suggestion">
+      ${s.image ? `<img src="${esc(s.image)}" alt="${esc(s.name)}" loading="lazy">` : ""}
+      <h3>${esc(s.name)}${s.partner ? " + " + esc(s.partner) : ""}</h3>
+      <p class="muted small">${esc(s.archetype || "")} · ${esc(colors)}${s[priceKey] ? " · " + esc(s[priceKey]) : ""}</p>
+      <p>${esc(s.why || "")}</p>
+      ${s.bracket_fit ? `<p class="muted small">${esc(s.bracket_fit)}</p>` : ""}
+      <div class="actions">
+        <button type="button" class="btn" data-use="${i}">Übernehmen</button>
+        <button type="button" class="btn primary" data-build="${i}">Deck bauen</button>
+      </div>
+    </article>`;
+  }).join("");
+  if (suggestions.length) $("#suggestions").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("#suggestion-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-use], button[data-build]");
+  if (!btn) return;
+  const s = suggestions[Number(btn.dataset.use ?? btn.dataset.build)];
+  setMode("build");
+  $("#commander").value = s.name;
+  $("#partner").value = s.partner || "";
+  if (s.partner) { $("#partner-field").hidden = false; $("#partner-toggle").hidden = true; }
+  const strategy = buildForm.elements.strategy;
+  if (s.strategy && !strategy.value) strategy.value = s.strategy;
+  previewCommander(s.name);
+  if (btn.dataset.build !== undefined) buildForm.requestSubmit();
+  else {
+    buildForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast(`${s.name} übernommen – prüf noch Bracket und Budget.`);
+  }
+});
 
 // ---------- power profile (sub-tier, house rules, style) ----------
 const TIER_LABELS = { low: "unteres", mid: "mittleres", high: "oberes" };
 const TIER_ORDER = ["low", "mid", "high"];
 const TIER_CENTER = { low: 0.17, mid: 0.5, high: 0.83 };
 
-document.querySelectorAll(".profile-fields").forEach((el) => el.appendChild($("#profile-template").content.cloneNode(true)));
+$$(".profile-fields").forEach((el) => el.appendChild($("#profile-template").content.cloneNode(true)));
 
 function readProfile(root) {
   const q = (n) => root.querySelector(`[name="${n}"]`);
@@ -71,6 +344,456 @@ function setProfile(root, p = {}) {
 function levelText(bracket, tier) {
   return tier ? `${TIER_LABELS[tier]} Bracket ${bracket}` : `Bracket ${bracket}`;
 }
+
+// ============================================================================================
+// jobs: one Claude Code run (or print/autofill runner) at a time, streamed via SSE
+// ============================================================================================
+let currentJob = null;   // id of the running job
+let jobInfo = null;      // { id, kind, slot, route, slug, title, started, error, dismissed }
+let eventSource = null;
+let elapsedTimer = null;
+
+const TOOL_LABELS = {
+  Skill: "lädt die Deckbau-Anleitung", Read: "liest eine Referenz", Glob: "sieht in den Anleitungen nach",
+  Grep: "sieht in den Anleitungen nach", ToolSearch: "bereitet die Werkzeuge vor",
+  edhrec_recommendations: "prüft EDHREC-Empfehlungen", edhrec_average_deck: "lädt ein EDHREC-Durchschnittsdeck",
+  search_cards: "sucht Karten auf Scryfall", local_card_search: "durchsucht die Kartendatenbank",
+  get_cards: "liest Kartentexte", find_commanders: "sucht Commander", find_combos: "sucht Combos",
+  validate_deck: "prüft das Deck (Legalität, Bracket, Budget)", save_deck: "speichert das Deck",
+  load_deck: "lädt das Deck", bracket_rules: "liest die Bracket-Regeln", game_changers: "prüft Game Changer",
+  get_blacklist: "liest deine Blacklist", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
+  list_deck_versions: "liest den Verlauf", compare_deck_versions: "vergleicht Versionen",
+};
+const toolText = (name) => `Claude ${TOOL_LABELS[name] || `nutzt ${name}`} …`;
+
+function startJob(jobId, title, { kind = "build", slot = "#job-slot-main", route: home = "#/job", slug = null } = {}) {
+  currentJob = jobId;
+  jobInfo = { id: jobId, kind, slot, route: home, slug, title, started: Date.now(), error: null, dismissed: false };
+  const panel = $("#job");
+  panel.classList.remove("finished", "failed");
+  $("#job-title").textContent = title;
+  setJobStatus("Starte …");
+  $("#log").innerHTML = "";
+  $("#progress").hidden = true;
+  $("#console-form").hidden = true;
+  $("#job-details").open = false;
+  $("#cancel-btn").textContent = "Abbrechen";
+  resetTerminal();
+  placeJobPanel();
+  setBusy(true);
+  tickElapsed();
+  clearInterval(elapsedTimer);
+  elapsedTimer = setInterval(tickElapsed, 1000);
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/jobs/${jobId}/events`);
+  eventSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
+  eventSource.onerror = () => { /* the browser reconnects; the server resumes via Last-Event-ID */ };
+}
+
+// the job panel lives in the slot of the view that started it (build page, deck tab, finder)
+function placeJobPanel() {
+  const panel = $("#job");
+  const visible = jobInfo && !jobInfo.dismissed && (!jobInfo.slug || (currentDeck && currentDeck.slug === jobInfo.slug));
+  if (visible) { $(jobInfo.slot).appendChild(panel); panel.hidden = false; }
+  else { document.body.appendChild(panel); panel.hidden = true; }
+  for (const ind of [$("#job-indicator"), $("#job-indicator-top")]) {
+    ind.hidden = !currentJob;
+    if (currentJob) { ind.href = jobInfo.route; ind.title = jobInfo.title; }
+  }
+  if (currentJob) $("#job-indicator-text").textContent = jobInfo.title;
+}
+
+function setJobStatus(text) { $("#job-status").textContent = text; }
+
+function tickElapsed() {
+  if (!jobInfo) return;
+  const s = Math.round((Date.now() - jobInfo.started) / 1000);
+  $("#job-elapsed").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function setBusy(busy) {
+  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn"]) {
+    const b = $(sel);
+    b.disabled = busy;
+    b.title = busy ? "Es läuft gerade ein Auftrag" : "";
+  }
+}
+
+function logLine(cls, text) {
+  const log = $("#log");
+  const div = document.createElement("div");
+  div.className = cls;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function handleEvent(ev) {
+  switch (ev.type) {
+    case "text": logLine("text", ev.text); setJobStatus(ev.text); break;
+    case "tool": logLine("tool", `→ ${ev.name} ${ev.summary || ""}`); setJobStatus(toolText(ev.name)); break;
+    case "status": logLine("tool", ev.text); setJobStatus(ev.text); break;
+    case "error": logLine("error", "Fehler: " + ev.text); if (jobInfo) jobInfo.error = ev.text; break;
+    case "result": logLine("result", ev.text); break;
+    case "suggestions": renderSuggestions(ev.items); break;
+    case "progress": {
+      const bar = $("#progress");
+      bar.hidden = false;
+      bar.querySelector("div").style.width = `${(ev.done / Math.max(ev.total, 1)) * 100}%`;
+      bar.querySelector("span").textContent = `${ev.done} / ${ev.total} · ${ev.text || ""}`;
+      setJobStatus(`Bild ${ev.done} von ${ev.total}`);
+      break;
+    }
+    case "print": onPrepared(ev.result); break;
+    case "console":
+      if (ev.running) { openTerminal(); setJobStatus("MPC Autofill läuft – bediene es im Terminal."); }
+      else if (term) term.options.disableStdin = true;
+      break;
+    case "term":
+      if (term) term.write(ev.data);
+      else logLine("text", ev.data.replace(ANSI_RE, "").trimEnd());
+      break;
+    case "done": finishJob(ev); break;
+  }
+}
+
+async function finishJob(ev) {
+  eventSource.close();
+  clearInterval(elapsedTimer);
+  const info = jobInfo;
+  currentJob = null;
+  setBusy(false);
+  $("#job").classList.add(ev.ok ? "finished" : "failed");
+  $("#cancel-btn").textContent = "Schließen";
+  if (!ev.ok) {
+    setJobStatus(info.error || "Beendet, ohne Ergebnis. Details unten.");
+    placeJobPanel();
+    return;
+  }
+  switch (info.kind) {
+    case "build":
+      info.dismissed = true;
+      await refreshDeckList();
+      toast("Dein Deck ist fertig.");
+      go(`#/deck/${enc(ev.deck)}`);
+      break;
+    case "deck":
+      info.dismissed = true;
+      await refreshDeckList();
+      if (currentDeck?.slug === info.slug) currentDeck = null;  // reload on the next route
+      toast("Deck aktualisiert – die Änderungen stehen im Verlauf.");
+      go(`#/deck/${enc(info.slug)}/verlauf`);
+      break;
+    case "finder":
+      info.dismissed = true;
+      break;
+    case "print":
+      info.dismissed = true;
+      toast("Druckdateien sind fertig.");
+      break;
+    default:  // autofill: keep the terminal output visible until closed
+      setJobStatus("MPC Autofill ist beendet.");
+  }
+  placeJobPanel();
+}
+
+$("#cancel-btn").addEventListener("click", async () => {
+  if (currentJob) {
+    await api(`/api/jobs/${currentJob}/cancel`, { method: "POST" }).catch(() => {});
+    return;
+  }
+  if (jobInfo) jobInfo.dismissed = true;
+  placeJobPanel();
+  if (parseHash().view === "job") $("#job-empty").hidden = false;
+});
+
+// ============================================================================================
+// deck view
+// ============================================================================================
+let printLoadedFor = null;
+
+async function openDeck(slug) {
+  let d;
+  try { d = await api(`/api/decks/${enc(slug)}`); }
+  catch (err) { toast(`Deck „${slug}“ nicht gefunden.`, "error"); go("#/new"); return false; }
+  currentDeck = d;
+  printLoadedFor = null;
+  renderDeckHead(d);
+  renderValidation(d.validation);
+  renderStats(d.validation?.stats, d.validation);
+  renderCards(d);
+  $("#retune-form").querySelector(`[name="rbracket"][value="${d.bracket || 3}"]`).checked = true;
+  setProfile($("#retune-form .profile-fields"), d.power_profile);
+  $("#retune-form").elements.request.value = "";
+  renderPower(d);
+  renderHistory(d);
+  renderQuestions(d);
+  $("#deck-menu").open = false;
+  return true;
+}
+
+function renderDeckHead(d) {
+  const v = d.validation || {};
+  const cur = (d.currency || "eur").toUpperCase();
+  $("#deck-name").textContent = d.name;
+  const thumb = d.card_data?.[d.commanders[0]]?.image;
+  $("#deck-thumb").hidden = !thumb;
+  if (thumb) $("#deck-thumb").src = thumb;
+  const pills = [
+    `<span class="pill">${esc(d.commanders.join(" + "))}</span>`,
+    `<span class="pill accent">${esc(levelText(d.bracket ?? "?", d.power_profile?.tier))}</span>`,
+  ];
+  if (v.legal === true) pills.push(`<span class="pill ok">${icon("check")}legal</span>`);
+  if (v.legal === false) pills.push(`<span class="pill bad">${icon("alert")}nicht legal</span>`);
+  if (d.proxy) pills.push('<span class="pill">Proxy-Deck</span>');
+  else if (v.price_total != null) pills.push(`<span class="pill">${esc(fmtPrice(v.price_total, cur))}${d.budget ? ` / ${esc(d.budget)} ${cur}` : ""}</span>`);
+  if (d.power_profile?.style) pills.push(`<span class="pill">Stil: ${esc(d.power_profile.style)}</span>`);
+  pills.push(`<span class="muted small">${d.version ? `v${d.version} · ` : ""}${esc(fmtDate(d.updated))}</span>`);
+  $("#deck-meta").innerHTML = pills.join("");
+  $("#deck-desc").textContent = d.description || "";
+  $("#deck-desc").hidden = !d.description;
+}
+
+// tabs (WAI-ARIA APG pattern: arrow keys move between tabs)
+function selectTab(tab, updateHash = true, focus = false) {
+  if (!TABS.includes(tab)) tab = "karten";
+  for (const t of $$("#deck-tabs [role=tab]")) {
+    const on = t.dataset.tab === tab;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+    if (on && focus) t.focus();
+  }
+  for (const p of $$("#view-deck [role=tabpanel]")) p.hidden = p.id !== `panel-${tab}`;
+  if (updateHash && currentDeck) history.replaceState(null, "", `#/deck/${enc(currentDeck.slug)}/${tab}`);
+  if (tab === "drucken" && currentDeck && printLoadedFor !== currentDeck.slug) {
+    printLoadedFor = currentDeck.slug;
+    loadPlan();
+  }
+}
+$("#deck-tabs").addEventListener("click", (e) => {
+  const t = e.target.closest("[role=tab]");
+  if (t) selectTab(t.dataset.tab);
+});
+$("#deck-tabs").addEventListener("keydown", (e) => {
+  const i = TABS.indexOf(document.activeElement?.dataset?.tab);
+  if (i < 0) return;
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  selectTab(TABS[(next + TABS.length) % TABS.length], true, true);
+});
+
+// overflow menu: closes on outside click, item click and Esc
+document.addEventListener("click", (e) => {
+  for (const m of $$("details.menu[open]")) if (!m.contains(e.target)) m.open = false;
+});
+$("#deck-menu").addEventListener("click", (e) => { if (e.target.closest(".menu-list button")) $("#deck-menu").open = false; });
+$("#deck-menu").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { $("#deck-menu").open = false; $("#deck-menu summary").focus(); }
+});
+
+function renderValidation(v) {
+  const box = $("#validation");
+  if (!v) { box.innerHTML = '<p class="muted">Noch nicht geprüft – „⋯ → Neu prüfen“.</p>'; return; }
+  const br = v.bracket || {};
+  const goal = br.target_text || `Bracket ${br.target}`;
+  const status = [
+    v.legal ? `<span class="pill ok">${icon("check")}legal</span>` : `<span class="pill bad">${icon("alert")}nicht legal</span>`,
+    br.compliant ? `<span class="pill ok">passt zu ${esc(goal)}</span>` : `<span class="pill warn">${esc(goal)} verletzt</span>`,
+  ];
+  const issues = [...(v.errors || []).map((t) => ["bad", t]), ...(br.violations || []).map((t) => ["warn", t]), ...(v.warnings || []).map((t) => ["warn", t])];
+  const li = ([cls, t]) => `<li class="${cls}">${esc(t)}</li>`;
+  const shown = issues.slice(0, 4), rest = issues.slice(4);
+  const list = (items) => (items.length ? `<ul class="issues">${items.map(li).join("")}</ul>` : "");
+  const kv = (label, items) => `<dt>${label}</dt><dd>${esc(items.length ? items.join(", ") : "–")}</dd>`;
+  box.innerHTML = `
+    <div class="status-line">${status.join("")}</div>
+    ${br.estimated ? `<p class="muted small">Commander Spellbook schätzt Bracket ${esc(br.estimated)}.</p>` : ""}
+    ${list(shown)}
+    ${rest.length ? `<details class="more"><summary>${rest.length} weitere Hinweise</summary>${list(rest)}</details>` : ""}
+    <details class="more"><summary>Bracket-Details</summary>
+      <dl class="kv">
+        ${kv("Game Changer", br.game_changers || [])}
+        ${kv("2-Karten-Combos", (br.two_card_combos || []).map((c) => c.cards.join(" + ")))}
+        ${kv("Extra Turns", br.extra_turns || [])}
+        ${kv("Mass Land Denial", br.mass_land_denial || [])}
+        ${kv("Tutoren", br.tutors || [])}
+      </dl>
+    </details>`;
+}
+
+const ROLE_LABELS = { ramp: "Ramp", card_draw: "Kartenzug", removal: "Removal", board_wipe: "Board Wipes",
+  tutor: "Tutoren", extra_turn: "Extra Turns", counterspell: "Counter", protection: "Schutz" };
+
+function renderStats(s, v = {}) {
+  const box = $("#stats");
+  if (!s) { box.innerHTML = '<p class="muted">Keine Statistik.</p>'; return; }
+  const curve = s.mana_curve || {};
+  const max = Math.max(1, ...Object.values(curve));
+  const keys = ["0", "1", "2", "3", "4", "5", "6", "7+"];
+  const priceKey = Object.keys(s).find((k) => k.startsWith("total_price_"));
+  const cur = priceKey ? priceKey.replace("total_price_", "").toUpperCase() : "";
+  box.innerHTML = `
+    <div class="curve" role="img" aria-label="Manakurve: ${keys.map((k) => `${k}: ${curve[k] || 0}`).join(", ")}">
+      ${keys.map((k) => `<div><span>${curve[k] || 0}</span><div class="bar" style="height:${((curve[k] || 0) / max) * 78}%"></div><span>${k}</span></div>`).join("")}</div>
+    <dl class="kv">
+      <dt>Karten</dt><dd>${s.card_count}</dd>
+      <dt>Ø Manawert</dt><dd>${s.avg_cmc_nonland}</dd>
+      <dt>Typen</dt><dd>${esc(Object.entries(s.types || {}).map(([k, n]) => `${k} ${n}`).join(" · "))}</dd>
+      <dt>Rollen</dt><dd>${esc(Object.entries(s.role_counts || {}).map(([k, n]) => `${ROLE_LABELS[k] || k} ${n}`).join(" · "))}</dd>
+      <dt>Preis</dt><dd>${priceKey ? `${esc(v.price_total ?? s[priceKey])} ${cur}` : "–"}${v.proxy ? " · Proxy" : v.budget ? ` <span class="muted">/ Budget ${esc(v.budget)}</span>` : ""}</dd>
+    </dl>`;
+}
+
+// ---------- card list: grouped by category, as text list or image grid ----------
+let cardView = store.get("cardview") === "grid" ? "grid" : "list";
+document.querySelector(`[name="cardview"][value="${cardView}"]`).checked = true;
+$$('[name="cardview"]').forEach((r) => r.addEventListener("change", () => {
+  cardView = r.value;
+  store.set("cardview", cardView);
+  if (currentDeck) renderCards(currentDeck);
+}));
+
+function renderCards(d) {
+  const data = d.card_data || {};
+  const groups = {};
+  const typeOf = (name) => {
+    const t = (data[name]?.type_line || "").split("//")[0];
+    for (const k of ["Land", "Creature", "Planeswalker", "Battle", "Artifact", "Enchantment", "Instant", "Sorcery"]) if (t.includes(k)) return k;
+    return "Sonstiges";
+  };
+  groups["Commander"] = d.commanders.map((n) => ({ name: n, qty: 1 }));
+  for (const c of d.cards) (groups[c.category || typeOf(c.name)] ||= []).push(c);
+  const grid = cardView === "grid";
+  const priceKey = d.currency === "usd" ? "price_usd" : "price_eur";
+  const total = Object.values(groups).flat().reduce((a, c) => a + (c.qty || 1), 0);
+  $("#card-total").textContent = total;
+  $("#cards").classList.toggle("grid", grid);
+  $("#cards").innerHTML = Object.entries(groups).map(([g, cards]) => {
+    const items = cards.sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
+      const cd = data[c.name] || {};
+      const attrs = `class="card" role="button" tabindex="0" data-img="${esc(cd.image || "")}" data-img-back="${esc(cd.image_back || "")}"
+        data-name="${esc(c.name)}" aria-label="${esc(`${c.qty > 1 ? c.qty + "× " : ""}${c.name}`)} – große Ansicht"`;
+      if (grid) {
+        return `<div ${attrs}>${cd.image ? `<img src="${esc(cd.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(c.name)}</div>`}
+          ${c.qty > 1 ? `<span class="qty-badge">${c.qty}×</span>` : ""}</div>`;
+      }
+      return `<div ${attrs}><span>${c.qty > 1 ? `<span class="qty">${c.qty}× </span>` : ""}${esc(c.name)}${cd.image_back ? '<span class="dfc" title="doppelseitig">⇄</span>' : ""}${cd.game_changer ? '<span class="gc" title="Game Changer">GC</span>' : ""}</span>
+        <span class="price">${cd[priceKey] ? esc(cd[priceKey]) : ""}</span></div>`;
+    }).join("");
+    const n = cards.reduce((a, c) => a + (c.qty || 1), 0);
+    return `<section class="group${!grid && cards.length > 16 ? " long" : ""}"><h3>${esc(g)} <span class="count">${n}</span></h3>${grid ? `<div class="group-cards">${items}</div>` : items}</section>`;
+  }).join("");
+}
+
+// hover preview of card images (list view and card references in answers)
+const preview = $("#preview");
+document.addEventListener("mouseover", (e) => {
+  const el = e.target.closest(".card[data-img]");
+  if (!el || !el.dataset.img || el.closest(".cards.grid")) return;
+  const [front, back] = preview.querySelectorAll("img");
+  front.src = el.dataset.img;
+  back.hidden = !el.dataset.imgBack;  // double-faced: both sides side by side
+  if (el.dataset.imgBack) back.src = el.dataset.imgBack;
+  preview.hidden = false;
+});
+document.addEventListener("mouseout", (e) => { if (e.target.closest(".card[data-img]")) preview.hidden = true; });
+document.addEventListener("mousemove", (e) => {
+  if (preview.hidden) return;
+  const w = preview.querySelector("img.back:not([hidden])") ? 500 : 260;
+  const x = e.clientX + w > window.innerWidth ? e.clientX - w : e.clientX + 20;
+  const y = Math.min(e.clientY - 40, window.innerHeight - 350);
+  preview.style.left = x + "px"; preview.style.top = Math.max(8, y) + "px";
+});
+
+// click (or Enter) on a card: large view, both faces for double-faced cards
+function openCardFromEvent(e) {
+  const el = e.target.closest(".card[data-name]");
+  if (!el || !currentDeck) return;
+  showCardView(el.dataset.name, currentDeck.card_data?.[el.dataset.name] || {});
+}
+$("#cards").addEventListener("click", openCardFromEvent);
+$("#cards").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCardFromEvent(e); } });
+
+function showCardView(name, cd) {
+  const faces = name.split(" // ");
+  const imgs = [[cd.image, faces[0]], ...(cd.image_back ? [[cd.image_back, faces[1] || "Rückseite"]] : [])];
+  $("#card-view-title").textContent = name + (cd.image_back ? " – doppelseitig" : "");
+  $("#card-view-faces").innerHTML = imgs.filter(([u]) => u).map(([u, label], i) =>
+    `<figure><img src="${esc(u.replace("/normal/", "/large/"))}" alt="${esc(label)}"><figcaption>${i ? "Rückseite" : "Vorderseite"}: ${esc(label)}</figcaption></figure>`).join("")
+    || '<p class="muted">Kein Bild verfügbar.</p>';
+  $("#card-view-link").href = cd.scryfall_uri || `https://scryfall.com/search?q=${enc('!"' + name + '"')}`;
+  preview.hidden = true;
+  $("#card-view").showModal();
+}
+$("#card-view-close").addEventListener("click", () => $("#card-view").close());
+
+// ---------- deck actions ----------
+$("#copy-btn").addEventListener("click", async () => {
+  if (!currentDeck) return;
+  try {
+    await navigator.clipboard.writeText(currentDeck.export_text);
+    toast("Liste kopiert – z. B. in Moxfield oder Archidekt einfügen.");
+  } catch { toast("Kopieren nicht erlaubt – der Browser blockiert die Zwischenablage.", "error"); }
+});
+
+async function copyAsDeck(version) {
+  const name = await ask({
+    title: "Als neues Deck kopieren", text: "Die Kopie bekommt einen eigenen Verlauf.",
+    value: `${currentDeck.name} (Kopie${version ? " v" + version : ""})`, ok: "Kopieren",
+  });
+  if (!name) return;
+  const r = await api(`/api/decks/${enc(currentDeck.slug)}/copy`, { method: "POST", body: { name, version: version || null } });
+  await refreshDeckList();
+  toast(`„${name}“ angelegt.`);
+  go(`#/deck/${enc(r.slug)}`);
+}
+$("#duplicate-btn").addEventListener("click", () => currentDeck && copyAsDeck(null).catch(fail));
+
+$("#validate-btn").addEventListener("click", async () => {
+  if (!currentDeck) return;
+  const slug = currentDeck.slug;
+  try {
+    await api(`/api/decks/${enc(slug)}/validate`, { method: "POST" });
+    currentDeck = null;
+    await refreshDeckList();
+    await route();
+    toast("Deck neu geprüft.");
+  } catch (err) { fail(err); }
+});
+
+$("#delete-btn").addEventListener("click", async () => {
+  if (!currentDeck) return;
+  const ok = await ask({ title: `„${currentDeck.name}“ löschen?`, text: "Das Deck, alle Versionen und Fragen werden gelöscht.", ok: "Löschen", danger: true });
+  if (!ok) return;
+  await api(`/api/decks/${enc(currentDeck.slug)}`, { method: "DELETE" }).catch(fail);
+  toast(`„${currentDeck.name}“ gelöscht.`);
+  currentDeck = null;
+  await refreshDeckList();
+  go("#/new");
+});
+
+// ============================================================================================
+// tab "Anpassen": refine in own words, re-tune power
+// ============================================================================================
+$("#refine-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentDeck || currentJob) return;
+  const request = new FormData(e.target).get("request");
+  const { slug, name } = currentDeck;
+  try {
+    const { job } = await api("/api/refine", { method: "POST", body: { slug, request } });
+    e.target.reset();
+    startJob(job, `Claude überarbeitet ${name}`, { kind: "deck", slug, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
+  } catch (err) { fail(err); }
+});
+$("#refine-chips").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const input = $("#refine-form").elements.request;
+  input.value = chip.dataset.q;
+  input.focus();
+});
 
 function retuneTarget() {
   const form = $("#retune-form");
@@ -108,648 +831,29 @@ function renderPower(d) {
   const changed = bracket !== d.bracket || (tier || null) !== (d.power_profile?.tier || null);
   $("#power-text").innerHTML = (power
     ? `<span class="legend-bar"></span> Aktuell: <b>${esc(fmtPower(power.value))}</b> · ${esc(power.text)}
-       <span class="hint">(${esc(power.components.map((c) => `${c.reason} ${c.points > 0 ? "+" : ""}${c.points}`).join(", "))}${power.floor_from_rules ? ` – durch die Regeln mindestens Bracket ${power.floor_from_rules}` : ""})</span><br>`
-    : "Noch keine Power-Einschätzung – „Neu prüfen“ drücken.<br>")
+       <details class="more"><summary>Wie kommt der Wert zustande?</summary>${esc(power.components.map((c) => `${c.reason} ${c.points > 0 ? "+" : ""}${c.points}`).join(", "))}${power.floor_from_rules ? ` – durch die Regeln mindestens Bracket ${power.floor_from_rules}` : ""}</details>`
+    : "Noch keine Power-Einschätzung – „⋯ → Neu prüfen“.<br>")
     + `<span class="legend-dot"></span> Ziel: <b>${esc(levelText(bracket, tier))}</b>${changed ? " – mit „Deck umbauen“ übernehmen" : ""}`;
 }
 
 $("#retune-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!currentDeck) return;
+  if (!currentDeck || currentJob) return;
   const { bracket } = retuneTarget();
   const profile = readProfile($("#retune-form .profile-fields")) || {};
   const request = new FormData(e.target).get("request") || null;
+  const { slug, name } = currentDeck;
   try {
-    const { job } = await api("/api/retune", { method: "POST", body: { slug: currentDeck.slug, bracket, profile, request } });
-    startJob(job, `Claude stimmt ${currentDeck.name} ab: ${levelText(bracket, profile.tier)} …`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  } catch (err) { alert(err.message); }
+    const { job } = await api("/api/retune", { method: "POST", body: { slug, bracket, profile, request } });
+    startJob(job, `Claude stimmt ${name} ab: ${levelText(bracket, profile.tier)}`, { kind: "deck", slug, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
+    $("#tune-job-slot").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) { fail(err); }
 });
 
-const fmtDate = (iso) => (iso || "").replace("T", " ").slice(0, 16);
-const fmtNum = (v, suffix = "", digits = null) =>
-  v === null || v === undefined ? "–" : `${digits === null ? v : Number(v).toFixed(digits)}${suffix}`;
-const fmtPower = (v) => fmtNum(v, "", 1);
-const fmtPrice = (v, cur = "") => fmtNum(v, cur ? " " + cur : "", 2);
-let versions = [];
-
-async function renderHistory(d) {
-  versions = await api(`/api/decks/${encodeURIComponent(d.slug)}/versions`).catch(() => []);
-  $("#history-panel").classList.toggle("hidden", !versions.length);
-  $("#compare-result").classList.add("hidden");
-  const cur = (d.currency || "eur").toUpperCase();
-  $("#history").innerHTML = versions.slice().reverse().map((h) => `<li>
-    <div class="vhead">
-      <span class="vnum">${h.version ? "v" + h.version : "–"}</span>
-      ${h.current ? '<span class="badge ok">aktuell</span>' : ""}
-      <span class="when">${esc(fmtDate(h.at))}</span>
-      <span class="hint">${h.from && h.from !== h.to ? `${esc(h.from)} → ` : ""}${esc(h.to || "")}
-        · ${esc(fmtPrice(h.price, cur))} · Power ${esc(fmtPower(h.power))}</span>
-    </div>
-    ${h.note ? `<div>${esc(h.note)}</div>` : ""}
-    ${h.added?.length ? `<div class="plus">+ ${esc(h.added.join(", "))}</div>` : ""}
-    ${h.removed?.length ? `<div class="minus">− ${esc(h.removed.join(", "))}</div>` : ""}
-    ${h.version ? `<div class="vactions">
-      ${!h.current ? `<button class="secondary" data-act="diff" data-v="${h.version}">Diff zu aktuell</button>` : ""}
-      ${h.restorable && !h.current ? `<button class="secondary" data-act="restore" data-v="${h.version}">Wiederherstellen</button>` : ""}
-      ${h.restorable ? `<button class="secondary" data-act="copy" data-v="${h.version}">Als neues Deck</button>` : ""}
-      ${h.restorable ? `<button class="secondary" data-act="text" data-v="${h.version}">Liste kopieren</button>` : ""}
-    </div>` : ""}
-  </li>`).join("");
-  const opts = versions.filter((h) => h.restorable).map((h) => `<option value="${h.version}">v${h.version}${h.current ? " (aktuell)" : ""}</option>`).join("");
-  $("#compare-form").elements.a.innerHTML = opts;
-  $("#compare-form").elements.b.innerHTML = opts;
-  const n = versions.filter((h) => h.restorable).length;
-  if (n > 1) $("#compare-form").elements.a.selectedIndex = n - 2;
-  $("#compare-form").elements.b.selectedIndex = n - 1;
-  $("#compare-form").classList.toggle("hidden", n < 2);
-}
-
-async function showDiff(a, b) {
-  const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/diff?a=${a}${b ? `&b=${b}` : ""}`);
-  const box = $("#compare-result");
-  const delta = (x, f) => (x.from === x.to || x.from == null || x.to == null ? esc(f(x.to)) : `${esc(f(x.from))} → <b>${esc(f(x.to))}</b>`);
-  box.innerHTML = `<b>v${r.from_version} → v${r.to_version}</b>
-    <dl class="kv">
-      <dt>Stufe</dt><dd>${r.level.from === r.level.to ? esc(r.level.to) : `${esc(r.level.from)} → <b>${esc(r.level.to)}</b>`}</dd>
-      <dt>Power</dt><dd>${delta(r.power, fmtPower)}</dd>
-      <dt>Preis</dt><dd>${delta(r.price, (v) => fmtPrice(v, (currentDeck.currency || "eur").toUpperCase()))}</dd>
-      <dt>Rein (${r.added.length})</dt><dd class="plus">${esc(r.added.join(", ") || "–")}</dd>
-      <dt>Raus (${r.removed.length})</dt><dd class="minus">${esc(r.removed.join(", ") || "–")}</dd>
-    </dl>`;
-  box.classList.remove("hidden");
-  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-
-$("#compare-form").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const f = e.target.elements;
-  showDiff(f.a.value, f.b.value).catch((err) => alert(err.message));
-});
-
-async function copyAsDeck(version) {
-  const suggestion = `${currentDeck.name} (Kopie${version ? " v" + version : ""})`;
-  const name = prompt("Name des neuen Decks:", suggestion);
-  if (!name) return;
-  const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/copy`, { method: "POST", body: { name, version: version || null } });
-  await refreshDeckList();
-  openDeck(r.slug);
-}
-
-$("#history").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-act]");
-  if (!btn || !currentDeck) return;
-  const v = Number(btn.dataset.v);
-  try {
-    if (btn.dataset.act === "diff") await showDiff(v);
-    if (btn.dataset.act === "copy") await copyAsDeck(v);
-    if (btn.dataset.act === "text") {
-      const snap = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/versions/${v}`);
-      await navigator.clipboard.writeText(snap.export_text);
-      btn.textContent = "Kopiert ✓";
-    }
-    if (btn.dataset.act === "restore" && confirm(`Version ${v} wiederherstellen? Sie wird als neue Version gespeichert – nichts geht verloren.`)) {
-      await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/versions/${v}/restore`, { method: "POST" });
-      await openDeck(currentDeck.slug);
-    }
-  } catch (err) { alert(err.message); }
-});
-
-// ---------- settings (proxy printing) ----------
-let appSettings = {};
-async function loadSettings() {
-  appSettings = await api("/api/settings");
-  const f = $("#settings-form").elements;
-  const MODEL_HINTS = { "realesrgan-x4plus": " (empfohlen)", "realesrgan-x4plus-anime": " (für Zeichnungen, glättet stärker)" };
-  f.upscale_model.innerHTML = appSettings.upscale_models.map((m) => `<option value="${esc(m)}">${esc(m + (MODEL_HINTS[m] || ""))}</option>`).join("");
-  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model", "descreen"]) if (f[k]) f[k].value = appSettings[k] ?? "";
-  f.upscale.checked = !!appSettings.upscale;
-  $("#upscaler-status").innerHTML = appSettings.upscaler_found
-    ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.upscaler_found)}`
-    : 'nicht installiert – nur nötig, wenn du hochskalieren willst (<a href="https://github.com/xinntao/Real-ESRGAN/releases" target="_blank" rel="noopener">Download</a>, benötigt eine Vulkan-fähige Grafikkarte).';
-  $("#print-form").elements.upscale.checked = !!appSettings.upscale;
-  $("#autofill-status").innerHTML = appSettings.autofill_found
-    ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.autofill_found)}`
-    : '<span class="warn">nicht gefunden</span> – Pfad eintragen oder die exe in den Ordner <code>tools/</code> legen.';
-  const stock = $("#print-form").elements.stock;
-  stock.innerHTML = appSettings.stocks.map((s) => `<option ${s === appSettings.stock ? "selected" : ""}>${esc(s)}</option>`).join("");
-  $("#print-form").elements.foil.checked = !!appSettings.foil;
-  $("#pdf-paper").value = appSettings.paper || "A4";
-}
-$("#settings-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const body = Object.fromEntries(new FormData(e.target));
-  body.upscale = e.target.elements.upscale.checked;
-  try {
-    await api("/api/settings", { method: "POST", body });
-    await loadSettings();
-    $("#settings-msg").textContent = "Gespeichert ✓";
-    setTimeout(() => ($("#settings-msg").textContent = ""), 1500);
-  } catch (err) { $("#settings-msg").textContent = err.message; }
-});
-
-// ---------- print studio ----------
-let printPlan = null;
-const printOpts = () => {
-  const f = $("#print-form").elements;
-  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked, upscale: f.upscale.checked };
-};
-
-async function openPrintStudio() {
-  $("#print-panel").classList.remove("hidden");
-  $("#print-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-  await loadPlan();
-}
-$("#print-btn").addEventListener("click", () => currentDeck && openPrintStudio());
-$("#print-close").addEventListener("click", () => $("#print-panel").classList.add("hidden"));
-$("#print-form").addEventListener("submit", (e) => { e.preventDefault(); loadPlan(); });
-
-let prepared = { faces: {} };
-
-async function loadPlan() {
-  $("#print-summary").textContent = "Lade Vorschau …";
-  $("#print-grid").innerHTML = "";
-  try {
-    [printPlan, prepared] = await Promise.all([
-      api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/plan?source=${printOpts().source}`),
-      api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/prepared`),
-    ]);
-  } catch (err) { $("#print-summary").textContent = err.message; return; }
-  renderPlan();
-  renderPreparedInfo();
-  updateDownloadLinks();
-}
-
-function renderPreparedInfo() {
-  const faces = Object.values(prepared.faces || {});
-  const has = faces.length > 0;
-  $("#open-folder-btn").classList.toggle("hidden", !has);
-  $("#prepared-info").classList.toggle("hidden", !has);
-  if (!has) return;
-  const ai = faces.filter((f) => f.upscaled).length;
-  $("#prepared-info").innerHTML = `Druckbilder: <code>${esc(prepared.images_dir)}</code> · ${faces.length} Bilder`
-    + (ai ? ` · ${ai} KI-hochskaliert (${esc(prepared.upscale_model)}${prepared.descreen && prepared.descreen !== "off" ? ", Druckraster entfernt: " + esc(prepared.descreen) : ""})` : "")
-    + " · 🔍 auf einer Karte zeigt Vorher/Nachher.";
-}
-
-function originTag(img) {
-  if (!img) return "";
-  if (img.custom) return '<span class="tag own">eigene Wahl</span>';
-  return img.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>';
-}
-
-function renderPlan() {
-  const p = printPlan;
-  const imgs = p.cards.flatMap((c) => [c.front?.image, c.back?.image]).filter(Boolean);
-  const mpc = imgs.filter((i) => i.origin === "mpcfill").length;
-  $("#print-summary").innerHTML = `${p.quantity} Karten · MPC-Staffel ${p.mpc_bracket} · ${mpc} MPC-Autofill-Scans, ${imgs.length - mpc} Scryfall`
-    + ` · ${p.cards.filter((c) => c.back).length} doppelseitig`
-    + (p.server ? "" : ' · <span class="warn">kein MPC-Autofill-Server eingestellt (nur Scryfall)</span>')
-    + (p.missing.length ? ` · <span class="bad">ohne Bild: ${esc(p.missing.join(", "))}</span>` : "")
-    + (p.warnings.length ? `<br><span class="warn">${esc(p.warnings.join(" "))}</span>` : "")
-    + "<br>Klick auf eine Karte, um ein anderes Bild zu wählen.";
-  $("#print-grid").innerHTML = p.cards.map((c, i) => cardTile(c, i, "front")).join("");
-}
-
-function cardTile(c, i, side) {
-  const f = c[side];
-  const img = f?.image;
-  return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
-    ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
-    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
-    ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}" aria-label="Karte umdrehen">↻</span>` : ""}
-    ${f && prepared.faces?.[f.face] ? `<span class="zoom" data-compare="${esc(f.face)}" title="Vorher/Nachher vergleichen">🔍 ${prepared.faces[f.face].dpi ? esc(prepared.faces[f.face].dpi) + " DPI" : ""}</span>` : ""}
-    <div class="cap">${esc(f?.face || c.name)}${c.back ? `<span class="hint"> · ${side === "front" ? "Vorderseite" : "Rückseite"}</span>` : ""}</div>
-  </button>`;
-}
-
-$("#print-grid").addEventListener("click", (e) => {
-  const cmp = e.target.closest("[data-compare]");
-  if (cmp) { openCompare(cmp.dataset.compare); return; }
-  const flip = e.target.closest("[data-flip]");
-  const tile = e.target.closest(".pcard");
-  if (!tile) return;
-  const i = Number(tile.dataset.i);
-  if (flip) {
-    const side = tile.dataset.side === "front" ? "back" : "front";
-    tile.outerHTML = cardTile(printPlan.cards[i], i, side);
-    return;
-  }
-  openPicker(i, tile.dataset.side);
-});
-
-let pickerCtx = null;
-async function openPicker(i, side) {
-  const c = printPlan.cards[i];
-  pickerCtx = { card: c, side, face: c[side].face };
-  $("#picker-title").textContent = `${c[side].face}${side === "back" ? " (Rückseite)" : ""}`;
-  $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und alle Scryfall-Drucke …";
-  $("#picker-grid").innerHTML = "";
-  $("#picker").showModal();
-  try {
-    const opts = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/alternatives?card=${encodeURIComponent(c.name)}&side=${side}`);
-    pickerCtx.options = opts;
-    const current = c[side].image?.id;
-    $("#picker-hint").textContent = `${opts.length} Bilder · MPC-Autofill-Scans sind druckoptimiert (mit Beschnitt-Rand)`;
-    $("#picker-grid").innerHTML = opts.map((o, k) => `<button type="button" class="pcard ${o.id === current ? "selected" : ""}" data-k="${k}">
-      <img src="${esc(o.thumb)}" alt="" loading="lazy">
-      <div class="tags">${o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
-      <div class="cap">${esc(o.label || "")}</div></button>`).join("") || '<p class="hint">Keine Alternativen gefunden.</p>';
-  } catch (err) { $("#picker-hint").textContent = err.message; }
-}
-async function pick(option) {
-  await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/choose`, { method: "POST", body: { face: pickerCtx.face, option } });
-  $("#picker").close();
-  loadPlan();
-}
-$("#picker-grid").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-k]");
-  if (t) pick(pickerCtx.options[Number(t.dataset.k)]).catch((err) => alert(err.message));
-});
-$("#picker-auto").addEventListener("click", () => pick(null).catch((err) => alert(err.message)));
-$("#picker-close").addEventListener("click", () => $("#picker").close());
-
-$("#prepare-btn").addEventListener("click", async () => {
-  try {
-    const { job } = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/prepare`, { method: "POST", body: printOpts() });
-    startJob(job, `Druckdateien für ${currentDeck.name} …`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  } catch (err) { alert(err.message); }
-});
-
-// ---------- before/after comparison ----------
-let compareFace = null;
-function imageUrl(face, kind) {
-  return `/api/decks/${encodeURIComponent(currentDeck.slug)}/print/image?face=${encodeURIComponent(face)}&kind=${kind}&t=${Date.now()}`;
-}
-function openCompare(face) {
-  compareFace = face;
-  const info = prepared.faces[face];
-  $("#compare-title").textContent = `${face} – Vorher / Nachher`;
-  const originLabel = { scryfall: "Scryfall-Scan", mpcfill: "MPC-Autofill-Scan", local: "eigene Datei" }[info.origin] || info.origin;
-  $("#compare-cap-a").textContent = `Original: ${originLabel}`;
-  $("#compare-cap-b").textContent = `Druckdatei: ${info.dpi ? info.dpi + " DPI" : ""}${info.upscaled ? " · KI-hochskaliert" : info.origin === "scryfall" ? " · nicht hochskaliert" : ""}`;
-  loadCompareImages();
-  $("#compare").showModal();
-}
-function loadCompareImages() {
-  const bleed = $("#compare-bleed").checked;
-  const a = $("#compare-a"), b = $("#compare-b");
-  a.onload = b.onload = applyZoom;
-  a.src = imageUrl(compareFace, "original");
-  b.src = imageUrl(compareFace, bleed ? "file" : "trim");
-  b.onload = () => {
-    $("#compare-cap-b").dataset.size = `${b.naturalWidth} × ${b.naturalHeight} px`;
-    $("#compare-cap-b").title = $("#compare-cap-b").dataset.size;
-    applyZoom();
-  };
-}
-function applyZoom() {
-  const z = Number($("#compare-zoom").value);
-  const pane = $("#pane-a");
-  // keep the visible centre when zooming
-  const cx = (pane.scrollLeft + pane.clientWidth / 2) / Math.max(pane.scrollWidth, 1);
-  const cy = (pane.scrollTop + pane.clientHeight / 2) / Math.max(pane.scrollHeight, 1);
-  const img = $("#compare-b").naturalWidth ? $("#compare-b") : $("#compare-a");
-  const aspect = img.naturalWidth ? img.naturalWidth / img.naturalHeight : 63 / 88;
-  const fit = Math.min(pane.clientWidth, pane.clientHeight * aspect);  // whole card visible at "Einpassen"
-  const width = fit * z;
-  for (const img of [$("#compare-a"), $("#compare-b")]) img.style.width = `${width}px`;
-  for (const p of [$("#pane-a"), $("#pane-b")]) {
-    p.scrollLeft = cx * p.scrollWidth - p.clientWidth / 2;
-    p.scrollTop = cy * p.scrollHeight - p.clientHeight / 2;
-  }
-  const a = $("#compare-a");
-  if (a.naturalWidth) $("#compare-cap-a").title = `${a.naturalWidth} × ${a.naturalHeight} px`;
-}
-let syncLock = null;  // the pane the user is scrolling; the other one follows
-for (const [src, dst] of [["#pane-a", "#pane-b"], ["#pane-b", "#pane-a"]]) {
-  $(src).addEventListener("scroll", () => {
-    if (syncLock && syncLock !== src) return;
-    syncLock = src;
-    const s = $(src), d = $(dst);
-    d.scrollLeft = s.scrollLeft * (d.scrollWidth / Math.max(s.scrollWidth, 1));
-    d.scrollTop = s.scrollTop * (d.scrollHeight / Math.max(s.scrollHeight, 1));
-    clearTimeout(window._syncTimer);
-    window._syncTimer = setTimeout(() => { syncLock = null; }, 120);
-  });
-}
-$("#compare-zoom").addEventListener("change", applyZoom);
-$("#compare-bleed").addEventListener("change", loadCompareImages);
-$("#compare-close").addEventListener("click", () => $("#compare").close());
-
-$("#open-folder-btn").addEventListener("click", async () => {
-  try {
-    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/open-folder`, { method: "POST" });
-    if (!r.opened) alert(`Ordner: ${r.path}`);
-  } catch (err) { alert(err.message); }
-});
-
-async function onPrepared(result) {
-  logLine("result", `Druckbilder: ${result.images_dir}`);
-  if (result.missing.length) logLine("error", `Ohne Bild: ${result.missing.join(", ")}`);
-  updateDownloadLinks();
-  if (currentDeck && !$("#print-panel").classList.contains("hidden")) {
-    prepared = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/prepared`).catch(() => prepared);
-    renderPlan();
-    renderPreparedInfo();
-  }
-}
-
-async function updateDownloadLinks() {
-  const base = `/api/decks/${encodeURIComponent(currentDeck.slug)}/print/files`;
-  for (const [id, kind] of [["#xml-link", "xml"], ["#pdf-link", "pdf"]]) {
-    const ok = (await fetch(`${base}/${kind}`, { method: "HEAD" }).catch(() => null))?.ok;
-    $(id).href = `${base}/${kind}`;
-    $(id).classList.toggle("hidden", !ok);
-  }
-}
-
-$("#pdf-btn").addEventListener("click", async () => {
-  $("#pdf-btn").disabled = true;
-  $("#pdf-btn").textContent = "Erstelle PDF …";
-  try {
-    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/pdf`, { method: "POST", body: { paper: $("#pdf-paper").value, include_backs: $("#pdf-backs").checked } });
-    await updateDownloadLinks();
-    window.open($("#pdf-link").href, "_blank");
-    $("#pdf-btn").textContent = `PDF: ${r.cards} Karten, ${r.pages} Seiten ✓`;
-  } catch (err) { alert(err.message); $("#pdf-btn").textContent = "PDF zum Selbstdrucken"; }
-  finally { $("#pdf-btn").disabled = false; }
-});
-
-$("#mpc-btn").addEventListener("click", async () => {
-  try {
-    const r = await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/print/autofill`, { method: "POST", body: { mode: "mpc", window: $("#mpc-window").checked, ...TERM_SIZE } });
-    if (r.job) { startJob(r.job, `MPC Autofill: ${currentDeck.name}`); window.scrollTo({ top: 0, behavior: "smooth" }); }
-    else alert("MPC Autofill wurde in einem eigenen Konsolenfenster gestartet – dort weiter bedienen.");
-  } catch (err) { alert(err.message); }
-});
-
-// ---------- terminal (MPC Autofill runs in a pseudo-terminal; its menus need arrow keys) ----------
-const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\r/g;
-const TERM_SIZE = { rows: 32, cols: 110 };
-const KEYS = { up: "\x1b[A", down: "\x1b[B", enter: "\r" };
-let term = null;
-let keyQueue = Promise.resolve();
-
-function sendKeys(data, raw = true) {
-  const job = currentJob;
-  keyQueue = keyQueue.then(() => api(`/api/jobs/${job}/input`, { method: "POST", body: { text: data, raw } })
-    .catch((err) => logLine("error", err.message)));
-}
-
-function resetTerminal() {
-  if (term) { term.dispose(); term = null; }
-  $("#terminal").innerHTML = "";
-  $("#terminal-wrap").classList.add("hidden");
-}
-
-function openTerminal() {
-  if (term) return;
-  if (!window.Terminal) {  // xterm.js missing -> simple line input as fallback
-    $("#console-form").classList.remove("hidden");
-    return;
-  }
-  $("#terminal-wrap").classList.remove("hidden");
-  term = new window.Terminal({ ...TERM_SIZE, fontSize: 13, cursorBlink: true, convertEol: false,
-    theme: { background: "#111111" }, fontFamily: "ui-monospace, Consolas, monospace" });
-  term.open($("#terminal"));
-  term.onData((d) => sendKeys(d));
-  term.focus();
-}
-
-document.querySelector(".term-keys").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-key]");
-  if (b && currentJob) { sendKeys(KEYS[b.dataset.key]); term?.focus(); }
-});
-
-$("#console-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const input = e.target.elements.text;
-  sendKeys(input.value, false);
-  input.value = "";
-});
-
-$("#duplicate-btn").addEventListener("click", () => currentDeck && copyAsDeck(null).catch((err) => alert(err.message)));
-function showBracketDesc() {
-  const n = Number(new FormData($("#build-form")).get("bracket"));
-  const b = brackets.find((x) => x.number === n);
-  $("#bracket-desc").innerHTML = b ? `<b>${esc(b.name)}</b> – ${esc(b.summary)}` : "";
-}
-
-function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-
-function wireAutocomplete(input, list, onPick) {
-  input.addEventListener("input", debounce(async () => {
-    const q = input.value.trim();
-    if (q.length < 2) return;
-    try {
-      const names = await api(`/api/autocomplete?q=${encodeURIComponent(q)}`);
-      list.innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
-    } catch { /* ignore */ }
-  }, 200));
-  input.addEventListener("change", () => onPick && onPick(input.value));
-}
-
-async function previewCommander(name) {
-  const box = $("#commander-preview");
-  if (!name) { box.innerHTML = ""; return; }
-  try {
-    const c = await api(`/api/card?name=${encodeURIComponent(name)}`);
-    box.innerHTML = c.image ? `<img src="${esc(c.image)}" alt="${esc(c.name)}">` : "";
-    if (c.name && c.name !== name) $("#commander").value = c.name;
-  } catch { box.innerHTML = ""; }
-}
-
-// ---------- jobs ----------
-function startJob(jobId, title) {
-  currentJob = jobId;
-  $("#welcome").classList.add("hidden");
-  $("#job").classList.remove("hidden");
-  $("#job-title").textContent = title;
-  $("#log").innerHTML = "";
-  $("#progress").classList.add("hidden");
-  $("#console-form").classList.add("hidden");
-  resetTerminal();
-  $("#build-btn").disabled = true;
-  $("#cancel-btn").disabled = false;
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource(`/api/jobs/${jobId}/events`);
-  eventSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
-  eventSource.onerror = () => { /* browser retries automatically; server replays from start */ };
-}
-
-function logLine(cls, text) {
-  const log = $("#log");
-  const div = document.createElement("div");
-  div.className = cls;
-  div.textContent = text;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
-}
-
-function handleEvent(ev) {
-  switch (ev.type) {
-    case "text": logLine("text", ev.text); break;
-    case "tool": logLine("tool", `→ ${ev.name} ${ev.summary || ""}`); break;
-    case "status": logLine("tool", ev.text); break;
-    case "error": logLine("error", "Fehler: " + ev.text); break;
-    case "result": logLine("result", ev.text); break;
-    case "suggestions": renderSuggestions(ev.items); break;
-    case "progress": {
-      const bar = $("#progress");
-      bar.classList.remove("hidden");
-      bar.querySelector("div").style.width = `${(ev.done / Math.max(ev.total, 1)) * 100}%`;
-      bar.querySelector("span").textContent = `${ev.done} / ${ev.total} · ${ev.text || ""}`;
-      break;
-    }
-    case "print": onPrepared(ev.result); break;
-    case "console":
-      if (ev.running) openTerminal();
-      else if (term) term.options.disableStdin = true;
-      break;
-    case "term":
-      if (term) term.write(ev.data);
-      else logLine("text", ev.data.replace(ANSI_RE, "").trimEnd());
-      break;
-    case "done":
-      eventSource.close();
-      $("#build-btn").disabled = false;
-      $("#finder-btn").disabled = false;
-      $("#cancel-btn").disabled = true;
-      $("#job-title").textContent = ev.ok ? "Fertig" : "Beendet";
-      refreshDeckList().then(() => { if (ev.deck) openDeck(ev.deck); });
-      break;
-  }
-}
-
-function buildSettings() {
-  const f = Object.fromEntries(new FormData($("#build-form")));
-  const proxy = $("#proxy").checked;
-  return {
-    bracket: Number(f.bracket), currency: f.currency, proxy,
-    budget: !proxy && f.budget ? Number(f.budget) : null, model: f.model || null,
-  };
-}
-
-$("#proxy").addEventListener("change", () => {
-  const on = $("#proxy").checked;
-  $("#budget").disabled = on;
-  $("#budget").placeholder = on ? "egal (Proxy)" : "unbegrenzt";
-});
-
-$("#build-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = Object.fromEntries(new FormData(e.target));
-  const body = {
-    ...buildSettings(), commander: f.commander, partner: f.partner || null,
-    strategy: f.strategy || null, notes: f.notes || null,
-    profile: readProfile($("#build-profile .profile-fields")),
-  };
-  try {
-    const { job } = await api("/api/build", { method: "POST", body });
-    startJob(job, `Claude baut ${body.commander} (Bracket ${body.bracket}) …`);
-  } catch (err) { alert(err.message); }
-});
-
-// ---------- commander finder ----------
-$("#finder-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const f = Object.fromEntries(new FormData(e.target));
-  const body = { ...buildSettings(), prompt: f.prompt, count: Number(f.count) };
-  try {
-    const { job } = await api("/api/find-commander", { method: "POST", body });
-    $("#finder-btn").disabled = true;
-    $("#suggestions").classList.add("hidden");
-    startJob(job, "Claude sucht passende Commander …");
-  } catch (err) { alert(err.message); }
-});
-
-const COLOR_NAMES = { W: "Weiß", U: "Blau", B: "Schwarz", R: "Rot", G: "Grün" };
-let suggestions = [];
-
-function renderSuggestions(items) {
-  suggestions = items || [];
-  $("#welcome").classList.add("hidden");
-  $("#deck-view").classList.add("hidden");
-  $("#suggestions").classList.remove("hidden");
-  const priceKey = new FormData($("#build-form")).get("currency") === "usd" ? "price_usd" : "price_eur";
-  $("#suggestion-list").innerHTML = suggestions.map((s, i) => {
-    const colors = (s.color_identity || []).map((c) => COLOR_NAMES[c] || c).join(", ") || "Farblos";
-    return `<div class="suggestion">
-      ${s.image ? `<img src="${esc(s.image)}" alt="${esc(s.name)}" loading="lazy">` : ""}
-      <h4>${esc(s.name)}${s.partner ? " + " + esc(s.partner) : ""}</h4>
-      <p class="hint">${esc(s.archetype || "")} · ${esc(colors)}${s[priceKey] ? " · " + esc(s[priceKey]) : ""}</p>
-      <p>${esc(s.why || "")}</p>
-      ${s.bracket_fit ? `<p class="hint">${esc(s.bracket_fit)}</p>` : ""}
-      <div class="actions">
-        <button class="secondary" data-use="${i}">Übernehmen</button>
-        <button data-build="${i}">Deck bauen</button>
-      </div>
-    </div>`;
-  }).join("");
-}
-
-$("#suggestion-list").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-use], button[data-build]");
-  if (!btn) return;
-  const s = suggestions[Number(btn.dataset.use ?? btn.dataset.build)];
-  $("#commander").value = s.name;
-  $("#partner").value = s.partner || "";
-  const strategy = $("#build-form").elements.strategy;
-  if (s.strategy && !strategy.value) strategy.value = s.strategy;
-  previewCommander(s.name);
-  if (btn.dataset.build !== undefined) $("#build-form").requestSubmit();
-  else $("#commander").scrollIntoView({ behavior: "smooth", block: "center" });
-});
-
-// ---------- blacklist ----------
-async function refreshBlacklist() {
-  const names = await api("/api/blacklist");
-  $("#bl-count").textContent = names.length ? `(${names.length})` : "";
-  $("#bl-list").innerHTML = names.map((n) => `<li>${esc(n)}<button title="Entfernen" data-name="${esc(n)}">×</button></li>`).join("");
-}
-$("#bl-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const raw = $("#bl-input").value.trim();
-  if (!raw) return;
-  const add = raw.split(/[;\n]/).map((x) => x.trim()).filter(Boolean);
-  try {
-    const r = await api("/api/blacklist", { method: "POST", body: { add } });
-    $("#bl-input").value = "";
-    $("#bl-msg").textContent = r.not_found.length ? `Nicht gefunden: ${r.not_found.join(", ")}` : "";
-    refreshBlacklist();
-  } catch (err) { $("#bl-msg").textContent = err.message; }
-});
-$("#bl-list").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-name]");
-  if (!btn) return;
-  await api("/api/blacklist", { method: "POST", body: { remove: [btn.dataset.name] } });
-  refreshBlacklist();
-});
-
-$("#refine-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!currentDeck) return;
-  const request = new FormData(e.target).get("request");
-  try {
-    const { job } = await api("/api/refine", { method: "POST", body: { slug: currentDeck.slug, request } });
-    e.target.reset();
-    startJob(job, `Claude überarbeitet ${currentDeck.name} …`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  } catch (err) { alert(err.message); }
-});
-
-// ---------- questions about the deck ----------
-let qaRun = null;  // { job, slug, question, source, error }
-const QA_TOOLS = {
-  load_deck: "lädt das Deck", get_cards: "liest Kartentexte", find_combos: "sucht Combos",
-  edhrec_average_deck: "schaut sich ein Deck auf EDHREC an", edhrec_recommendations: "prüft EDHREC",
-  validate_deck: "prüft Bracket & Legalität", bracket_rules: "liest die Bracket-Regeln",
-  game_changers: "prüft Game Changer", search_cards: "sucht Karten", local_card_search: "sucht Karten",
-  import_deck: "importiert ein Deck", compare_deck_versions: "vergleicht Versionen",
-  list_deck_versions: "liest den Verlauf", Skill: "lädt die Deckbau-Anleitung", Read: "liest eine Referenz",
-};
+// ============================================================================================
+// tab "Fragen": read-only questions about the deck
+// ============================================================================================
+let qaRun = null;  // { job, slug, question, source, error, finished }
 
 function cardRef(name, refs) {
   const r = refs[name] || currentDeck?.card_data?.[name] || {};
@@ -801,20 +905,25 @@ function md(text, refs = {}) {
 }
 
 function qaItem(q) {
-  const when = q.asked ? new Date(q.asked).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "";
   const older = q.version && currentDeck?.version && q.version !== currentDeck.version;
   const ver = q.version ? ` · v${q.version}${older ? " (ältere Version)" : ""}` : "";
   return `<article class="qa-item" data-id="${esc(q.id)}">
     <div class="qa-q"><span>${esc(q.question)}</span>
-      <span class="meta">${esc(when)}${esc(ver)}<button type="button" class="qa-del" title="Frage löschen" aria-label="Frage löschen">✕</button></span></div>
+      <span class="meta">${esc(fmtDate(q.asked))}${esc(ver)}<button type="button" class="qa-del" title="Frage löschen" aria-label="Frage löschen">✕</button></span></div>
     <div class="qa-a">${md(q.answer, q.cards || {})}</div></article>`;
 }
 
+function updateQaCount() {
+  const n = $("#qa-list").children.length;
+  $("#qa-count").textContent = n || "";
+  $("#qa-clear").hidden = !n;
+}
+
 async function renderQuestions(d) {
-  const items = await api(`/api/decks/${encodeURIComponent(d.slug)}/questions`).catch(() => []);
+  const items = await api(`/api/decks/${enc(d.slug)}/questions`).catch(() => []);
   if (currentDeck?.slug !== d.slug) return;
   $("#qa-list").innerHTML = items.map(qaItem).join("");
-  $("#qa-clear").classList.toggle("hidden", !items.length);
+  updateQaCount();
   const list = $("#qa-list");
   list.scrollTop = list.scrollHeight;
   updateQaLive();
@@ -822,11 +931,11 @@ async function renderQuestions(d) {
 
 function updateQaLive() {
   const run = qaRun && currentDeck && qaRun.slug === currentDeck.slug ? qaRun : null;
-  $("#qa-live").classList.toggle("hidden", !run);
+  $("#qa-live").hidden = !run;
   $("#qa-btn").disabled = !!(qaRun && !qaRun.finished);
   if (!run) return;
   $("#qa-question").textContent = run.question;
-  $("#qa-live .spinner").classList.toggle("hidden", !!run.finished);
+  $("#qa-live .spinner").hidden = !!run.finished;
   $("#qa-status").textContent = run.error ? "Fehler: " + run.error : run.status || "Claude denkt nach …";
   $("#qa-status").classList.toggle("bad", !!run.error);
   $("#qa-cancel").textContent = run.finished ? "Schließen" : "Abbrechen";
@@ -834,15 +943,15 @@ function updateQaLive() {
 
 function onQaEvent(run, ev) {
   switch (ev.type) {
-    case "tool": run.status = `Claude ${QA_TOOLS[ev.name] || ev.name} …`; break;
+    case "tool": run.status = toolText(ev.name); break;
     case "status": run.status = ev.text; break;
     case "error": run.error = ev.text; break;
     case "answer":
       if (currentDeck?.slug === run.slug) {
         $("#qa-list").insertAdjacentHTML("beforeend", qaItem(ev.entry));
-        $("#qa-clear").classList.remove("hidden");
+        updateQaCount();
         $("#qa-list").lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      }
+      } else toast(`Antwort zu „${run.question}“ ist da.`);
       break;
     case "done":
       run.source.close();
@@ -861,13 +970,13 @@ $("#qa-form").addEventListener("submit", async (e) => {
   if (!question) return;
   try {
     const slug = currentDeck.slug;
-    const { job } = await api(`/api/decks/${encodeURIComponent(slug)}/ask`, { method: "POST", body: { question } });
+    const { job } = await api(`/api/decks/${enc(slug)}/ask`, { method: "POST", body: { question } });
     const run = { job, slug, question, source: new EventSource(`/api/jobs/${job}/events`) };
     run.source.onmessage = (ev) => onQaEvent(run, JSON.parse(ev.data));
     qaRun = run;
     e.target.reset();
     updateQaLive();
-  } catch (err) { alert(err.message); }
+  } catch (err) { fail(err); }
 });
 $("#qa-form textarea").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#qa-form").requestSubmit(); }
@@ -891,188 +1000,452 @@ $("#qa-list").addEventListener("click", async (e) => {
   const del = e.target.closest(".qa-del");
   if (!del || !currentDeck) return;
   const item = del.closest(".qa-item");
-  await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/questions?id=${encodeURIComponent(item.dataset.id)}`, { method: "DELETE" });
+  await api(`/api/decks/${enc(currentDeck.slug)}/questions?id=${enc(item.dataset.id)}`, { method: "DELETE" }).catch(fail);
   item.remove();
-  $("#qa-clear").classList.toggle("hidden", !$("#qa-list").children.length);
+  updateQaCount();
 });
 $("#qa-clear").addEventListener("click", async () => {
-  if (!currentDeck || !confirm("Alle Fragen und Antworten zu diesem Deck löschen?")) return;
-  await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/questions`, { method: "DELETE" });
+  if (!currentDeck) return;
+  const ok = await ask({ title: "Alle Fragen löschen?", text: "Alle Fragen und Antworten zu diesem Deck werden entfernt.", ok: "Löschen", danger: true });
+  if (!ok) return;
+  await api(`/api/decks/${enc(currentDeck.slug)}/questions`, { method: "DELETE" }).catch(fail);
   renderQuestions(currentDeck);
 });
 
-$("#cancel-btn").addEventListener("click", async () => {
-  if (currentJob) await api(`/api/jobs/${currentJob}/cancel`, { method: "POST" }).catch(() => {});
+// ============================================================================================
+// tab "Verlauf": versions, diffs, restore, copy
+// ============================================================================================
+let versions = [];
+
+async function renderHistory(d) {
+  versions = await api(`/api/decks/${enc(d.slug)}/versions`).catch(() => []);
+  if (currentDeck?.slug !== d.slug) return;
+  $("#version-count").textContent = versions.length > 1 ? versions.length : "";
+  $("#compare-result").hidden = true;
+  const cur = (d.currency || "eur").toUpperCase();
+  $("#history").innerHTML = versions.length ? versions.slice().reverse().map((h) => `<li>
+    <div class="vhead">
+      <span class="vnum">${h.version ? "v" + h.version : "–"}</span>
+      ${h.current ? '<span class="pill ok">aktuell</span>' : ""}
+      <span class="when">${esc(fmtDate(h.at))}</span>
+      <span class="muted small">${h.from && h.from !== h.to ? `${esc(h.from)} → ` : ""}${esc(h.to || "")}
+        · ${esc(fmtPrice(h.price, cur))} · Power ${esc(fmtPower(h.power))}</span>
+    </div>
+    ${h.note ? `<div>${esc(h.note)}</div>` : ""}
+    ${h.added?.length ? `<div class="plus">+ ${esc(h.added.join(", "))}</div>` : ""}
+    ${h.removed?.length ? `<div class="minus">− ${esc(h.removed.join(", "))}</div>` : ""}
+    ${h.version ? `<div class="vactions">
+      ${!h.current ? `<button type="button" class="btn small" data-act="diff" data-v="${h.version}">Mit aktuell vergleichen</button>` : ""}
+      ${h.restorable && !h.current ? `<button type="button" class="btn small" data-act="restore" data-v="${h.version}">Wiederherstellen</button>` : ""}
+      ${h.restorable ? `<button type="button" class="btn small ghost" data-act="copy" data-v="${h.version}">Als neues Deck</button>` : ""}
+      ${h.restorable ? `<button type="button" class="btn small ghost" data-act="text" data-v="${h.version}">Liste kopieren</button>` : ""}
+    </div>` : ""}
+  </li>`).join("") : '<li class="empty-inline">Noch keine Versionen – jede Änderung durch Claude legt eine an.</li>';
+  const opts = versions.filter((h) => h.restorable).map((h) => `<option value="${h.version}">v${h.version}${h.current ? " (aktuell)" : ""}</option>`).join("");
+  const form = $("#compare-form").elements;
+  form.a.innerHTML = opts;
+  form.b.innerHTML = opts;
+  const n = versions.filter((h) => h.restorable).length;
+  if (n > 1) form.a.selectedIndex = n - 2;
+  form.b.selectedIndex = n - 1;
+  $("#compare-form").hidden = n < 2;
+}
+
+async function showDiff(a, b) {
+  const r = await api(`/api/decks/${enc(currentDeck.slug)}/diff?a=${a}${b ? `&b=${b}` : ""}`);
+  const box = $("#compare-result");
+  const delta = (x, f) => (x.from === x.to || x.from == null || x.to == null ? esc(f(x.to)) : `${esc(f(x.from))} → <b>${esc(f(x.to))}</b>`);
+  box.innerHTML = `<b>v${r.from_version} → v${r.to_version}</b>
+    <dl class="kv">
+      <dt>Stufe</dt><dd>${r.level.from === r.level.to ? esc(r.level.to) : `${esc(r.level.from)} → <b>${esc(r.level.to)}</b>`}</dd>
+      <dt>Power</dt><dd>${delta(r.power, fmtPower)}</dd>
+      <dt>Preis</dt><dd>${delta(r.price, (v) => fmtPrice(v, (currentDeck.currency || "eur").toUpperCase()))}</dd>
+      <dt>Rein (${r.added.length})</dt><dd class="plus">${esc(r.added.join(", ") || "–")}</dd>
+      <dt>Raus (${r.removed.length})</dt><dd class="minus">${esc(r.removed.join(", ") || "–")}</dd>
+    </dl>`;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+$("#compare-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  showDiff(f.a.value, f.b.value).catch(fail);
 });
 
-// ---------- decks ----------
-async function refreshDeckList() {
-  const decks = await api("/api/decks");
-  $("#deck-list").innerHTML = decks.length ? decks.map((d) => `
-    <li data-slug="${esc(d.slug)}" class="${currentDeck && currentDeck.slug === d.slug ? "active" : ""}">
-      <div>${esc(d.name)}</div>
-      <div class="meta">${esc(d.commanders.join(" + "))} · ${esc(d.level || `Bracket ${d.bracket ?? "?"}`)}${d.proxy ? " · Proxy" : ""}
-        ${d.valid === true ? '<span class="ok">✓</span>' : d.valid === false ? '<span class="bad">✗</span>' : ""}</div>
-    </li>`).join("") : '<li class="hint">Noch keine Decks.</li>';
-}
-$("#deck-list").addEventListener("click", (e) => {
-  const li = e.target.closest("li[data-slug]");
-  if (li) openDeck(li.dataset.slug);
+$("#history").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn || !currentDeck) return;
+  const v = Number(btn.dataset.v);
+  try {
+    if (btn.dataset.act === "diff") await showDiff(v);
+    if (btn.dataset.act === "copy") await copyAsDeck(v);
+    if (btn.dataset.act === "text") {
+      const snap = await api(`/api/decks/${enc(currentDeck.slug)}/versions/${v}`);
+      await navigator.clipboard.writeText(snap.export_text);
+      toast(`Liste von v${v} kopiert.`);
+    }
+    if (btn.dataset.act === "restore") {
+      const ok = await ask({ title: `Version ${v} wiederherstellen?`, text: "Sie wird als neue Version gespeichert – nichts geht verloren.", ok: "Wiederherstellen" });
+      if (!ok) return;
+      await api(`/api/decks/${enc(currentDeck.slug)}/versions/${v}/restore`, { method: "POST" });
+      currentDeck = null;
+      await refreshDeckList();
+      await route();
+      toast(`Version ${v} wiederhergestellt.`);
+    }
+  } catch (err) { fail(err); }
 });
 
-async function openDeck(slug) {
-  const d = await api(`/api/decks/${encodeURIComponent(slug)}`);
-  currentDeck = d;
-  $("#welcome").classList.add("hidden");
-  $("#deck-view").classList.remove("hidden");
-  $("#deck-name").textContent = d.name;
-  $("#suggestions").classList.add("hidden");
-  $("#print-panel").classList.add("hidden");
-  const money = d.proxy ? " · Proxy-Deck" : d.budget ? ` · Budget ${d.budget} ${(d.currency || "eur").toUpperCase()}` : "";
-  const level = levelText(d.bracket ?? "?", d.power_profile?.tier);
-  const style = d.power_profile?.style ? ` · Stil: ${d.power_profile.style}` : "";
-  $("#deck-meta").textContent = `${d.commanders.join(" + ")} · ${level}${style}${money} · aktualisiert ${d.updated ?? ""}`;
-  $("#deck-desc").textContent = d.description || "";
-  renderValidation(d.validation);
-  renderStats(d.validation?.stats, d.validation);
-  renderCards(d);
-  $("#retune-form").querySelector(`[name="rbracket"][value="${d.bracket || 3}"]`).checked = true;
-  setProfile($("#retune-form .profile-fields"), d.power_profile);
-  $("#retune-form").elements.request.value = "";
-  renderPower(d);
-  renderHistory(d);
-  renderQuestions(d);
-  refreshDeckList();
+// ============================================================================================
+// tab "Drucken": print studio (MPC Autofill, PDF)
+// ============================================================================================
+let printPlan = null;
+let prepared = { faces: {} };
+const printOpts = () => {
+  const f = $("#print-form").elements;
+  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked, upscale: f.upscale.checked };
+};
+$("#print-form").addEventListener("submit", (e) => { e.preventDefault(); loadPlan(); });
+
+async function loadPlan() {
+  $("#print-summary").textContent = "Lade Vorschau …";
+  $("#print-grid").innerHTML = "";
+  const slug = currentDeck.slug;
+  try {
+    [printPlan, prepared] = await Promise.all([
+      api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}`),
+      api(`/api/decks/${enc(slug)}/print/prepared`),
+    ]);
+  } catch (err) { $("#print-summary").textContent = err.message; return; }
+  if (currentDeck?.slug !== slug) return;
+  renderPlan();
+  renderPreparedInfo();
+  updateDownloadLinks();
 }
 
-function renderValidation(v) {
-  const box = $("#validation");
-  if (!v) { box.innerHTML = '<p class="hint">Noch nicht geprüft.</p>'; return; }
-  const status = v.legal ? '<span class="badge ok">legal</span>' : '<span class="badge bad">nicht legal</span>';
-  const br = v.bracket || {};
-  const goal = br.target_text || `Bracket ${br.target}`;
-  const brStatus = br.compliant ? `<span class="badge ok">passt zu ${esc(goal)}</span>`
-    : `<span class="badge warn">${esc(goal)} verletzt</span>`;
-  const list = (items, cls) => items && items.length ? `<ul class="issues ${cls}">${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
-  box.innerHTML = `
-    <p>${status} ${brStatus} ${br.estimated ? `<span class="hint">geschätzt: Bracket ${esc(br.estimated)}</span>` : ""}</p>
-    ${list(v.errors, "bad")}${list(br.violations, "warn")}${list(v.warnings, "warn")}
-    <dl class="kv">
-      <dt>Game Changers</dt><dd>${esc((br.game_changers || []).join(", ") || "–")}</dd>
-      <dt>2-Karten-Combos</dt><dd>${esc((br.two_card_combos || []).map((c) => c.cards.join(" + ")).join("; ") || "–")}</dd>
-      <dt>Extra Turns</dt><dd>${esc((br.extra_turns || []).join(", ") || "–")}</dd>
-      <dt>Mass Land Denial</dt><dd>${esc((br.mass_land_denial || []).join(", ") || "–")}</dd>
-      <dt>Tutoren</dt><dd>${esc((br.tutors || []).join(", ") || "–")}</dd>
-    </dl>`;
+function renderPreparedInfo() {
+  const faces = Object.values(prepared.faces || {});
+  const has = faces.length > 0;
+  $("#open-folder-btn").hidden = !has;
+  $("#prepared-info").hidden = !has;
+  if (!has) return;
+  const ai = faces.filter((f) => f.upscaled).length;
+  $("#prepared-info").innerHTML = `${icon("check")} ${faces.length} Druckbilder in <code>${esc(prepared.images_dir)}</code>`
+    + (ai ? ` · ${ai} KI-hochskaliert (${esc(prepared.upscale_model)}${prepared.descreen && prepared.descreen !== "off" ? ", Druckraster entfernt: " + esc(prepared.descreen) : ""})` : "")
+    + " · 🔍 auf einer Karte zeigt Vorher/Nachher.";
 }
 
-function renderStats(s, v = {}) {
-  const box = $("#stats");
-  if (!s) { box.innerHTML = ""; return; }
-  const curve = s.mana_curve || {};
-  const max = Math.max(1, ...Object.values(curve));
-  const keys = ["0", "1", "2", "3", "4", "5", "6", "7+"];
-  const priceKey = Object.keys(s).find((k) => k.startsWith("total_price_"));
-  const cur = priceKey ? priceKey.replace("total_price_", "").toUpperCase() : "";
-  box.innerHTML = `
-    <div class="curve">${keys.map((k) => `<div><span>${curve[k] || 0}</span><div class="bar" style="height:${((curve[k] || 0) / max) * 80}%"></div><span>${k}</span></div>`).join("")}</div>
-    <dl class="kv">
-      <dt>Karten</dt><dd>${s.card_count}</dd>
-      <dt>Ø Manawert</dt><dd>${s.avg_cmc_nonland}</dd>
-      <dt>Typen</dt><dd>${esc(Object.entries(s.types || {}).map(([k, v]) => `${k} ${v}`).join(" · "))}</dd>
-      <dt>Rollen</dt><dd>${esc(Object.entries(s.role_counts || {}).map(([k, v]) => `${ROLE_LABELS[k] || k} ${v}`).join(" · "))}</dd>
-      <dt>Preis</dt><dd>${priceKey ? `${v.price_total ?? s[priceKey]} ${cur}` : "–"}${v.proxy ? ' <span class="badge proxy">Proxy</span>' : v.budget ? ` <span class="hint">/ Budget ${v.budget}</span>` : ""}</dd>
-    </dl>`;
+function originTag(img) {
+  if (!img) return "";
+  if (img.custom) return '<span class="tag own">eigene Wahl</span>';
+  return img.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>';
 }
 
-function renderCards(d) {
-  const data = d.card_data || {};
-  const groups = {};
-  const typeOf = (name) => {
-    const t = (data[name]?.type_line || "").split("//")[0];
-    for (const k of ["Land", "Creature", "Planeswalker", "Battle", "Artifact", "Enchantment", "Instant", "Sorcery"]) if (t.includes(k)) return k;
-    return "Sonstiges";
-  };
-  groups["Commander"] = d.commanders.map((n) => ({ name: n, qty: 1 }));
-  for (const c of d.cards) {
-    const g = c.category || typeOf(c.name);
-    (groups[g] ||= []).push(c);
+function renderPlan() {
+  const p = printPlan;
+  const imgs = p.cards.flatMap((c) => [c.front?.image, c.back?.image]).filter(Boolean);
+  const mpc = imgs.filter((i) => i.origin === "mpcfill").length;
+  $("#print-summary").innerHTML = `${p.quantity} Karten · MPC-Staffel ${p.mpc_bracket} · ${mpc} MPC-Autofill-Scans, ${imgs.length - mpc} Scryfall`
+    + ` · ${p.cards.filter((c) => c.back).length} doppelseitig`
+    + (p.server ? "" : ' · <span class="warn">kein MPC-Autofill-Server eingestellt (nur Scryfall)</span>')
+    + (p.missing.length ? ` · <span class="bad">ohne Bild: ${esc(p.missing.join(", "))}</span>` : "")
+    + (p.warnings.length ? `<br><span class="warn">${esc(p.warnings.join(" "))}</span>` : "");
+  $("#print-grid").innerHTML = p.cards.map((c, i) => cardTile(c, i, "front")).join("");
+}
+
+function cardTile(c, i, side) {
+  const f = c[side];
+  const img = f?.image;
+  return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
+    ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
+    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
+    ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}" aria-label="Karte umdrehen">↻</span>` : ""}
+    ${f && prepared.faces?.[f.face] ? `<span class="zoom" data-compare="${esc(f.face)}" title="Vorher/Nachher vergleichen">🔍 ${prepared.faces[f.face].dpi ? esc(prepared.faces[f.face].dpi) + " DPI" : ""}</span>` : ""}
+    <div class="cap">${esc(f?.face || c.name)}${c.back ? `<span class="muted"> · ${side === "front" ? "Vorderseite" : "Rückseite"}</span>` : ""}</div>
+  </button>`;
+}
+
+$("#print-grid").addEventListener("click", (e) => {
+  const cmp = e.target.closest("[data-compare]");
+  if (cmp) { openCompare(cmp.dataset.compare); return; }
+  const flip = e.target.closest("[data-flip]");
+  const tile = e.target.closest(".pcard");
+  if (!tile) return;
+  const i = Number(tile.dataset.i);
+  if (flip) {
+    const side = tile.dataset.side === "front" ? "back" : "front";
+    tile.outerHTML = cardTile(printPlan.cards[i], i, side);
+    return;
   }
-  const priceKey = d.currency === "usd" ? "price_usd" : "price_eur";
-  $("#cards").innerHTML = Object.entries(groups).map(([g, cards]) => `
-    <div class="group"><h4>${esc(g)} <span class="count">(${cards.reduce((a, c) => a + (c.qty || 1), 0)})</span></h4>
-    ${cards.sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
-      const cd = data[c.name] || {};
-      return `<div class="card" data-img="${esc(cd.image || "")}" data-img-back="${esc(cd.image_back || "")}" data-name="${esc(c.name)}"
-          title="${cd.image_back ? "Doppelseitige Karte – Klick zeigt beide Seiten" : "Klick für große Ansicht"}">
-        <span>${c.qty > 1 ? c.qty + "× " : ""}${esc(c.name)}${cd.image_back ? '<span class="dfc" aria-label="doppelseitig">⇄</span>' : ""}${cd.game_changer ? '<span class="gc">GC</span>' : ""}</span>
-        <span class="price">${cd[priceKey] ? cd[priceKey] : ""}</span></div>`;
-    }).join("")}</div>`).join("");
+  openPicker(i, tile.dataset.side);
+});
+
+let pickerCtx = null;
+async function openPicker(i, side) {
+  const c = printPlan.cards[i];
+  pickerCtx = { card: c, side, face: c[side].face };
+  $("#picker-title").textContent = `${c[side].face}${side === "back" ? " (Rückseite)" : ""}`;
+  $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und alle Scryfall-Drucke …";
+  $("#picker-grid").innerHTML = "";
+  $("#picker").showModal();
+  try {
+    const opts = await api(`/api/decks/${enc(currentDeck.slug)}/print/alternatives?card=${enc(c.name)}&side=${side}`);
+    pickerCtx.options = opts;
+    const current = c[side].image?.id;
+    $("#picker-hint").textContent = `${opts.length} Bilder · MPC-Autofill-Scans sind druckoptimiert (mit Beschnitt-Rand)`;
+    $("#picker-grid").innerHTML = opts.map((o, k) => `<button type="button" class="pcard ${o.id === current ? "selected" : ""}" data-k="${k}">
+      <img src="${esc(o.thumb)}" alt="" loading="lazy">
+      <div class="tags">${o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
+      <div class="cap">${esc(o.label || "")}</div></button>`).join("") || '<p class="muted">Keine Alternativen gefunden.</p>';
+  } catch (err) { $("#picker-hint").textContent = err.message; }
+}
+async function pick(option) {
+  await api(`/api/decks/${enc(currentDeck.slug)}/print/choose`, { method: "POST", body: { face: pickerCtx.face, option } });
+  $("#picker").close();
+  loadPlan();
+}
+$("#picker-grid").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-k]");
+  if (t) pick(pickerCtx.options[Number(t.dataset.k)]).catch(fail);
+});
+$("#picker-auto").addEventListener("click", () => pick(null).catch(fail));
+$("#picker-close").addEventListener("click", () => $("#picker").close());
+
+$("#prepare-btn").addEventListener("click", async () => {
+  if (!currentDeck || currentJob) return;
+  const { slug, name } = currentDeck;
+  try {
+    const { job } = await api(`/api/decks/${enc(slug)}/print/prepare`, { method: "POST", body: printOpts() });
+    startJob(job, `Druckdateien für ${name}`, { kind: "print", slug, slot: "#print-job-slot", route: `#/deck/${enc(slug)}/drucken` });
+    $("#print-job-slot").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) { fail(err); }
+});
+
+// ---------- before/after comparison ----------
+let compareFace = null;
+function imageUrl(face, kind) {
+  return `/api/decks/${enc(currentDeck.slug)}/print/image?face=${enc(face)}&kind=${kind}&t=${Date.now()}`;
+}
+function openCompare(face) {
+  compareFace = face;
+  const info = prepared.faces[face];
+  $("#compare-title").textContent = `${face} – Vorher / Nachher`;
+  const originLabel = { scryfall: "Scryfall-Scan", mpcfill: "MPC-Autofill-Scan", local: "eigene Datei" }[info.origin] || info.origin;
+  $("#compare-cap-a").textContent = `Original: ${originLabel}`;
+  $("#compare-cap-b").textContent = `Druckdatei: ${info.dpi ? info.dpi + " DPI" : ""}${info.upscaled ? " · KI-hochskaliert" : info.origin === "scryfall" ? " · nicht hochskaliert" : ""}`;
+  loadCompareImages();
+  $("#compare").showModal();
+}
+function loadCompareImages() {
+  const bleed = $("#compare-bleed").checked;
+  const a = $("#compare-a"), b = $("#compare-b");
+  a.onload = applyZoom;
+  a.src = imageUrl(compareFace, "original");
+  b.src = imageUrl(compareFace, bleed ? "file" : "trim");
+  b.onload = () => {
+    $("#compare-cap-b").title = `${b.naturalWidth} × ${b.naturalHeight} px`;
+    applyZoom();
+  };
+}
+function applyZoom() {
+  const z = Number($("#compare-zoom").value);
+  const pane = $("#pane-a");
+  // keep the visible centre when zooming
+  const cx = (pane.scrollLeft + pane.clientWidth / 2) / Math.max(pane.scrollWidth, 1);
+  const cy = (pane.scrollTop + pane.clientHeight / 2) / Math.max(pane.scrollHeight, 1);
+  const img = $("#compare-b").naturalWidth ? $("#compare-b") : $("#compare-a");
+  const aspect = img.naturalWidth ? img.naturalWidth / img.naturalHeight : 63 / 88;
+  const fit = Math.min(pane.clientWidth, pane.clientHeight * aspect);  // whole card visible at "Einpassen"
+  const width = fit * z;
+  for (const im of [$("#compare-a"), $("#compare-b")]) im.style.width = `${width}px`;
+  for (const p of [$("#pane-a"), $("#pane-b")]) {
+    p.scrollLeft = cx * p.scrollWidth - p.clientWidth / 2;
+    p.scrollTop = cy * p.scrollHeight - p.clientHeight / 2;
+  }
+  const a = $("#compare-a");
+  if (a.naturalWidth) $("#compare-cap-a").title = `${a.naturalWidth} × ${a.naturalHeight} px`;
+}
+let syncLock = null;  // the pane the user is scrolling; the other one follows
+let syncTimer = null;
+for (const [src, dst] of [["#pane-a", "#pane-b"], ["#pane-b", "#pane-a"]]) {
+  $(src).addEventListener("scroll", () => {
+    if (syncLock && syncLock !== src) return;
+    syncLock = src;
+    const s = $(src), d = $(dst);
+    d.scrollLeft = s.scrollLeft * (d.scrollWidth / Math.max(s.scrollWidth, 1));
+    d.scrollTop = s.scrollTop * (d.scrollHeight / Math.max(s.scrollHeight, 1));
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => { syncLock = null; }, 120);
+  });
+}
+$("#compare-zoom").addEventListener("change", applyZoom);
+$("#compare-bleed").addEventListener("change", loadCompareImages);
+$("#compare-close").addEventListener("click", () => $("#compare").close());
+
+$("#open-folder-btn").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/decks/${enc(currentDeck.slug)}/print/open-folder`, { method: "POST" });
+    if (!r.opened) toast(`Ordner: ${r.path}`);
+  } catch (err) { fail(err); }
+});
+
+async function onPrepared(result) {
+  logLine("result", `Druckbilder: ${result.images_dir}`);
+  if (result.missing.length) toast(`Ohne Bild: ${result.missing.join(", ")}`, "error");
+  if (currentDeck && printLoadedFor === currentDeck.slug) {
+    prepared = await api(`/api/decks/${enc(currentDeck.slug)}/print/prepared`).catch(() => prepared);
+    renderPlan();
+    renderPreparedInfo();
+    updateDownloadLinks();
+  }
 }
 
-// hover preview of card images
-const preview = $("#preview");
-document.addEventListener("mouseover", (e) => {
-  const el = e.target.closest(".card[data-img]");
-  if (!el || !el.dataset.img) return;
-  const [front, back] = preview.querySelectorAll("img");
-  front.src = el.dataset.img;
-  back.classList.toggle("hidden", !el.dataset.imgBack);  // double-faced: both sides side by side
-  if (el.dataset.imgBack) back.src = el.dataset.imgBack;
-  preview.classList.remove("hidden");
-});
-document.addEventListener("mouseout", (e) => { if (e.target.closest(".card[data-img]")) preview.classList.add("hidden"); });
-document.addEventListener("mousemove", (e) => {
-  const w = preview.querySelector("img.back:not(.hidden)") ? 500 : 260;
-  const x = e.clientX + w > window.innerWidth ? e.clientX - w : e.clientX + 20;
-  const y = Math.min(e.clientY - 40, window.innerHeight - 350);
-  preview.style.left = x + "px"; preview.style.top = Math.max(8, y) + "px";
-});
-
-// click on a card: large view, both faces for double-faced cards (works on touch devices too)
-$("#cards").addEventListener("click", (e) => {
-  const el = e.target.closest(".card[data-name]");
-  if (!el || !currentDeck) return;
-  showCardView(el.dataset.name, currentDeck.card_data?.[el.dataset.name] || {});
-});
-function showCardView(name, cd) {
-  const faces = name.split(" // ");
-  const imgs = [[cd.image, faces[0]], ...(cd.image_back ? [[cd.image_back, faces[1] || "Rückseite"]] : [])];
-  $("#card-view-title").textContent = name + (cd.image_back ? " – doppelseitig" : "");
-  $("#card-view-faces").innerHTML = imgs.filter(([u]) => u).map(([u, label], i) =>
-    `<figure><img src="${esc(u.replace("/normal/", "/large/"))}" alt="${esc(label)}"><figcaption>${i ? "Rückseite" : "Vorderseite"}: ${esc(label)}</figcaption></figure>`).join("")
-    || '<p class="hint">Kein Bild verfügbar.</p>';
-  $("#card-view-link").href = cd.scryfall_uri || `https://scryfall.com/search?q=${encodeURIComponent('!"' + name + '"')}`;
-  preview.classList.add("hidden");
-  $("#card-view").showModal();
+async function updateDownloadLinks() {
+  const base = `/api/decks/${enc(currentDeck.slug)}/print/files`;
+  for (const [id, kind] of [["#xml-link", "xml"], ["#pdf-link", "pdf"]]) {
+    const ok = (await fetch(`${base}/${kind}`, { method: "HEAD" }).catch(() => null))?.ok;
+    $(id).href = `${base}/${kind}`;
+    $(id).hidden = !ok;
+  }
 }
-$("#card-view-close").addEventListener("click", () => $("#card-view").close());
 
-$("#copy-btn").addEventListener("click", async () => {
-  if (!currentDeck) return;
-  await navigator.clipboard.writeText(currentDeck.export_text);
-  $("#copy-btn").textContent = "Kopiert ✓";
-  setTimeout(() => ($("#copy-btn").textContent = "Liste kopieren"), 1500);
-});
-$("#validate-btn").addEventListener("click", async () => {
-  if (!currentDeck) return;
-  $("#validate-btn").disabled = true;
-  try { await api(`/api/decks/${currentDeck.slug}/validate`, { method: "POST" }); await openDeck(currentDeck.slug); }
-  catch (err) { alert(err.message); }
-  finally { $("#validate-btn").disabled = false; }
-});
-$("#delete-btn").addEventListener("click", async () => {
-  if (!currentDeck || !confirm(`Deck „${currentDeck.name}“ löschen?`)) return;
-  await api(`/api/decks/${currentDeck.slug}`, { method: "DELETE" });
-  currentDeck = null;
-  $("#deck-view").classList.add("hidden");
-  $("#welcome").classList.remove("hidden");
-  refreshDeckList();
+$("#pdf-btn").addEventListener("click", async () => {
+  const btn = $("#pdf-btn");
+  btn.disabled = true;
+  btn.textContent = "Erstelle PDF …";
+  try {
+    const r = await api(`/api/decks/${enc(currentDeck.slug)}/print/pdf`, { method: "POST", body: { paper: $("#pdf-paper").value, include_backs: $("#pdf-backs").checked } });
+    await updateDownloadLinks();
+    window.open($("#pdf-link").href, "_blank");
+    toast(`PDF erstellt: ${r.cards} Karten auf ${r.pages} Seiten.`);
+  } catch (err) { fail(err); }
+  finally { btn.disabled = false; btn.textContent = "PDF erstellen"; }
 });
 
-// ---------- local card DB (Scryfall bulk data) ----------
+$("#mpc-btn").addEventListener("click", async () => {
+  if (!currentDeck || currentJob) return;
+  const { slug, name } = currentDeck;
+  try {
+    const r = await api(`/api/decks/${enc(slug)}/print/autofill`, { method: "POST", body: { mode: "mpc", window: $("#mpc-window").checked, ...TERM_SIZE } });
+    if (r.job) {
+      startJob(r.job, `MPC Autofill: ${name}`, { kind: "autofill", slug, slot: "#print-job-slot", route: `#/deck/${enc(slug)}/drucken` });
+      $("#print-job-slot").scrollIntoView({ behavior: "smooth", block: "start" });
+    } else toast("MPC Autofill läuft in einem eigenen Konsolenfenster – dort weiter bedienen.");
+  } catch (err) { fail(err); }
+});
+
+// ---------- terminal (MPC Autofill runs in a pseudo-terminal; its menus need arrow keys) ----------
+const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07|\r/g;
+const TERM_SIZE = { rows: 32, cols: 110 };
+const KEYS = { up: "\x1b[A", down: "\x1b[B", enter: "\r" };
+let term = null;
+let keyQueue = Promise.resolve();
+
+function sendKeys(data, raw = true) {
+  const job = currentJob;
+  if (!job) return;
+  keyQueue = keyQueue.then(() => api(`/api/jobs/${job}/input`, { method: "POST", body: { text: data, raw } })
+    .catch((err) => logLine("error", err.message)));
+}
+
+function resetTerminal() {
+  if (term) { term.dispose(); term = null; }
+  $("#terminal").innerHTML = "";
+  $("#terminal-wrap").hidden = true;
+}
+
+function openTerminal() {
+  if (term) return;
+  if (!window.Terminal) {  // xterm.js missing -> simple line input as fallback
+    $("#console-form").hidden = false;
+    return;
+  }
+  $("#terminal-wrap").hidden = false;
+  term = new window.Terminal({ ...TERM_SIZE, fontSize: 13, cursorBlink: true, convertEol: false,
+    theme: { background: "#111111" }, fontFamily: "ui-monospace, Consolas, monospace" });
+  term.open($("#terminal"));
+  term.onData((d) => sendKeys(d));
+  term.focus();
+}
+
+document.querySelector(".term-keys").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-key]");
+  if (b && currentJob) { sendKeys(KEYS[b.dataset.key]); term?.focus(); }
+});
+
+$("#console-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = e.target.elements.text;
+  sendKeys(input.value, false);
+  input.value = "";
+});
+
+// ============================================================================================
+// blacklist
+// ============================================================================================
+async function refreshBlacklist() {
+  const names = await api("/api/blacklist").catch(() => []);
+  $("#bl-count").textContent = names.length || "";
+  $("#bl-empty").hidden = names.length > 0;
+  $("#bl-list").innerHTML = names.map((n) => `<li>${esc(n)}<button type="button" title="Entfernen" aria-label="${esc(n)} entfernen" data-name="${esc(n)}">×</button></li>`).join("");
+}
+$("#bl-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const raw = $("#bl-input").value.trim();
+  if (!raw) return;
+  const add = raw.split(/[;\n]/).map((x) => x.trim()).filter(Boolean);
+  try {
+    const r = await api("/api/blacklist", { method: "POST", body: { add } });
+    $("#bl-input").value = "";
+    $("#bl-msg").textContent = r.not_found.length ? `Nicht gefunden: ${r.not_found.join(", ")}` : "";
+    refreshBlacklist();
+  } catch (err) { $("#bl-msg").textContent = err.message; }
+});
+$("#bl-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-name]");
+  if (!btn) return;
+  await api("/api/blacklist", { method: "POST", body: { remove: [btn.dataset.name] } }).catch(fail);
+  refreshBlacklist();
+});
+
+// ============================================================================================
+// settings: proxy printing, AI upscaling, local card DB
+// ============================================================================================
+let appSettings = {};
+async function loadSettings() {
+  appSettings = await api("/api/settings");
+  const f = $("#settings-form").elements;
+  const MODEL_HINTS = { "realesrgan-x4plus": " (empfohlen)", "realesrgan-x4plus-anime": " (für Zeichnungen, glättet stärker)" };
+  f.upscale_model.innerHTML = appSettings.upscale_models.map((m) => `<option value="${esc(m)}">${esc(m + (MODEL_HINTS[m] || ""))}</option>`).join("")
+    || '<option value="">– Programm nicht gefunden –</option>';
+  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model", "descreen"]) if (f[k]) f[k].value = appSettings[k] ?? "";
+  f.upscale.checked = !!appSettings.upscale;
+  $("#upscaler-status").innerHTML = appSettings.upscaler_found
+    ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.upscaler_found)}`
+    : 'Nicht installiert – nur nötig, wenn du hochskalieren willst (<a href="https://github.com/xinntao/Real-ESRGAN/releases" target="_blank" rel="noopener">Download</a>).';
+  $("#print-form").elements.upscale.checked = !!appSettings.upscale;
+  $("#autofill-status").innerHTML = appSettings.autofill_found
+    ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.autofill_found)}`
+    : '<span class="warn">Nicht gefunden</span> – Pfad eintragen oder die exe in den Ordner <code>tools/</code> legen.';
+  const stock = $("#print-form").elements.stock;
+  stock.innerHTML = appSettings.stocks.map((s) => `<option ${s === appSettings.stock ? "selected" : ""}>${esc(s)}</option>`).join("");
+  $("#print-form").elements.foil.checked = !!appSettings.foil;
+  $("#pdf-paper").value = appSettings.paper || "A4";
+}
+$("#settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  body.upscale = e.target.elements.upscale.checked;
+  try {
+    await api("/api/settings", { method: "POST", body });
+    await loadSettings();
+    toast("Einstellungen gespeichert.");
+  } catch (err) { $("#settings-msg").textContent = err.message; }
+});
+
 async function refreshDbStatus() {
-  const [st, run] = await Promise.all([api("/api/carddb"), api("/api/carddb/refresh")]);
+  const [st, run] = await Promise.all([api("/api/carddb"), api("/api/carddb/refresh")]).catch(() => [{}, {}]);
   const el = $("#db-status");
   if (run.running) {
     el.textContent = "Lade und importiere Bulk-Daten … (All Cards ≈ 375 MB, dauert einige Minuten)";
@@ -1082,21 +1455,24 @@ async function refreshDbStatus() {
   }
   $("#db-btn").disabled = false;
   if (run.error) el.innerHTML = `<span class="bad">Fehler: ${esc(run.error)}</span>`;
-  else if (!st.available) el.textContent = "Nicht vorhanden – ohne lokale DB wird die Scryfall-API live genutzt (langsamer, nur englische Namen).";
-  else el.textContent = `${st.cards} Karten, ${st.tags} Tags, ${st.languages.length} Sprachen · Stand ${st.cards_updated_at?.slice(0, 10) ?? "?"}`
-    + (st.schema_outdated ? " · Update empfohlen: Datenbank kennt noch keine Rückseiten doppelseitiger Karten (werden solange live bei Scryfall nachgeladen)"
-      : st.needs_refresh ? " · Update empfohlen" : "");
+  else if (!st.available) el.innerHTML = '<span class="warn">Nicht vorhanden</span> – ohne lokale Datenbank wird die Scryfall-API live genutzt (langsamer, nur englische Namen).';
+  else el.innerHTML = `<span class="ok">✓</span> ${st.cards} Karten, ${st.tags} Tags, ${st.languages.length} Sprachen · Stand ${esc(st.cards_updated_at?.slice(0, 10) ?? "?")}`
+    + (st.schema_outdated ? ' · <span class="warn">Update empfohlen:</span> die Datenbank kennt noch keine Rückseiten doppelseitiger Karten'
+      : st.needs_refresh ? ' · <span class="warn">Update empfohlen</span>' : "");
+  $("#db-btn").textContent = st.available ? "Jetzt aktualisieren" : "Scryfall-Bulk-Daten laden";
 }
 $("#db-btn").addEventListener("click", async () => {
-  await api("/api/carddb/refresh", { method: "POST" });
+  await api("/api/carddb/refresh", { method: "POST" }).catch(fail);
   refreshDbStatus();
 });
 
+// ============================================================================================
+// start
+// ============================================================================================
 wireAutocomplete($("#commander"), $("#ac-commander"), previewCommander);
 wireAutocomplete($("#partner"), $("#ac-partner"));
 wireAutocomplete($("#bl-input"), $("#ac-bl"));
+setMode("build");
 refreshBlacklist();
 loadSettings().catch((err) => console.error(err));
-initBrackets();
-refreshDeckList();
-refreshDbStatus();
+Promise.all([initBrackets(), refreshDeckList()]).then(route, (err) => { fail(err); route(); });

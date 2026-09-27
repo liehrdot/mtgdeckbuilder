@@ -31,7 +31,7 @@ Beim ersten Start von `claude` in diesem Ordner fragt Claude Code, ob du dem Pro
 MCP-Server `mtg` aus `.mcp.json` vertraust – bestätigen. Kontrolle: `/mcp` in Claude Code.
 
 **Optional, empfohlen:** lokale Kartendatenbank laden (siehe unten). In Claude Code einfach
-„Aktualisiere die Kartendatenbank“ sagen oder in der GUI den Button „Scryfall-Bulk-Daten laden“ drücken.
+„Aktualisiere die Kartendatenbank“ sagen oder in der GUI unter „Einstellungen → Kartendatenbank“ laden.
 
 ## Benutzung in Claude Code
 
@@ -84,8 +84,8 @@ Ein Bracket ist breit – deshalb gibt es pro Deck ein **Power-Profil**:
   transparent mit Einzelposten. Weicht das Deck deutlich von der Ziel-Stufe ab, gibt es eine Warnung.
 
 In Claude Code: „Mach mein Meren-Deck zu einem unteren Bracket 4“, „Bracket 3 mit max. 2 Game
-Changern“, „eine Stufe schwächer und witziger“. In der GUI: Panel „Power & Bracket“ mit Skala
-(aktuell vs. Ziel), ▲/▼ „Eine Stufe stärker/schwächer“, Hausregeln, Stil und „Deck umbauen“.
+Changern“, „eine Stufe schwächer und witziger“. In der GUI: Deck-Tab „Anpassen“ → „Stärke ändern“ mit
+Skala (aktuell vs. Ziel), ▲/▼ „Stärker/Schwächer“, Hausregeln, Stil und „Deck umbauen“.
 Beim Neubau gibt es dieselben Optionen unter „Feinabstimmung“.
 
 ## Versionen: Verlauf, Diff, Wiederherstellen, Kopieren
@@ -109,7 +109,7 @@ Das [MPC Autofill](https://github.com/chilli-axe/mpc-autofill)-Programm (`autofi
 lädt Bestellungen auf MakePlayingCards hoch. Der Deckbuilder erledigt alles davor selbst:
 
 1. **Bildauswahl** – pro Karte automatisch der beste Scan: eigene Wahl › MPC-Autofill-Community-Scan
-   (wenn ein Server eingestellt ist) › Scryfall. Im **Druckstudio** der GUI siehst du alle Karten als
+   (wenn ein Server eingestellt ist) › Scryfall. Im Deck-Tab **Drucken** der GUI siehst du alle Karten als
    Vorschau und kannst per Klick jede Karte gegen einen anderen Scan oder einen anderen Druck tauschen.
    Doppelseitige Karten bekommen ihre Rückseite.
 2. **Druckdateien vorbereiten** – paralleler Download mit Cache (über alle Decks), Scryfall-Scans
@@ -190,22 +190,36 @@ werden überall mit beiden Seiten behandelt:
 uv run mtg-gui              # → http://127.0.0.1:8765
 ```
 
-- „Keine Idee? Commander finden“: Wunsch eingeben → Vorschlagskarten mit Bild und Begründung →
-  „Übernehmen“ (füllt das Formular) oder direkt „Deck bauen“
-- Commander mit Autovervollständigung (Scryfall), Bracket 1–5, Budget/Währung oder Proxy-Schalter,
-  Thema, Wünsche, Modell
-- Blacklist-Panel: Karten hinzufügen (mit Autovervollständigung) oder entfernen
-- „Deck bauen lassen“ startet Claude Code im Hintergrund (Claude Agent SDK); der Fortschritt
-  (Tool-Aufrufe, Zwischentexte) wird live angezeigt
-- Deckansicht: Prüfung (legal, Bracket, Game Changer, Combos …), Manakurve, Rollen, Preis,
-  Kartenbilder beim Hovern, Liste kopieren, „Überarbeiten lassen“ per Freitext
-- „Fragen zum Deck“: Fragen in natürlicher Sprache stellen – Strategie, Mulligan, ist es zu stark
-  für meine Runde, wie schlägt es sich gegen Commander XY (Claude holt sich dessen typisches Deck von
-  EDHREC), Schwächen, warum ist Karte X drin. Schnellwahl-Knöpfe für häufige Fragen; Anschlussfragen
-  („und gegen Kinnan?“) kennen den bisherigen Verlauf. Claude darf dabei nur lesen (kein Speichern) –
-  Tauschvorschläge setzt du bei Bedarf über „Überarbeiten lassen“ um. Fragen und Antworten werden pro
-  Deck in `decks/.questions/<slug>.json` gespeichert; Kartennamen in Antworten zeigen beim Hovern
-  das Bild.
+Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
+
+- **Seitenleiste:** „+ Neues Deck“, deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
+  legale), unten Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
+  in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
+  hinter ☰ weg.
+- **Neues Deck** – ein Formular in vier Schritten: 1 Commander (Autovervollständigung, Kartenbild,
+  optional Partner/Background) · 2 Stärke (Bracket 1–5 mit Erklärung, „Feinabstimmung“ für Stufe,
+  Hausregeln, Stil) · 3 Budget oder Proxy-Deck · 4 Wünsche. Das KI-Modell steckt unter „Erweitert“.
+  Oben umschalten auf **„Commander vorschlagen lassen“**: Wunsch beschreiben → Vorschlagskarten mit
+  Bild und Begründung → „Übernehmen“ oder direkt „Deck bauen“.
+- **Während Claude arbeitet:** Status in Klartext („Claude prüft EDHREC-Empfehlungen …“), Laufzeit,
+  Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich.
+- **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und fünf Tabs –
+  die Adresse merkt sich den Tab, der Zurück-Button des Browsers funktioniert:
+  - **Karten:** nach Kategorie gruppiert als Liste (Bild beim Hovern) oder als Bildraster; daneben
+    Prüfung (Legalität, Bracket, Hinweise, Details zu Game Changern/Combos) und Statistik (Manakurve,
+    Rollen, Preis). Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten beide Seiten.
+  - **Anpassen:** „Mit eigenen Worten ändern“ (Freitext + Schnellwahl) und „Stärke ändern“ (Retune).
+  - **Fragen:** Fragen in natürlicher Sprache – Strategie, Mulligan, ist es zu stark für meine Runde, wie
+    schlägt es sich gegen Commander XY (Claude holt sich dessen typisches Deck von EDHREC), Schwächen,
+    warum ist Karte X drin. Anschlussfragen („und gegen Kinnan?“) kennen den bisherigen Verlauf.
+    Claude darf dabei nur lesen (kein Speichern); Fragen und Antworten liegen pro Deck in
+    `decks/.questions/<slug>.json`, Kartennamen in Antworten zeigen beim Hovern das Bild.
+  - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren.
+  - **Drucken:** Bilder prüfen/tauschen, dann 1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards.
+  - „Liste kopieren“ steht oben rechts; „Als neues Deck kopieren“, „Neu prüfen“ und „Löschen“ im ⋯-Menü.
+- **Blacklist** und **Einstellungen** (Kartendatenbank, Proxy-Druck, KI-Hochskalierung) als eigene Seiten.
+- Hell/Dunkel folgt dem Betriebssystem; bedienbar mit Tastatur (Pfeiltasten in den Tabs, Esc schließt
+  Dialoge und Menüs).
 - Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
 
 ## Datenquellen & Zugänge

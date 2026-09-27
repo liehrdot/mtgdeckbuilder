@@ -105,6 +105,11 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Tools are thin wrappers over the modules above.
   - `save_deck` re-validates before writing and stores the validation result inside the deck JSON.
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
+  - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
+    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anpassen|fragen|verlauf|drucken`) · `#/blacklist` · `#/settings`. Views are `<section class="view" data-view=…>`; tab switches use `history.replaceState`.
+    - One job panel (`#job`) is moved into the slot of the view that started it (`startJob(id, title, {kind, slot, route, slug})`); the sidebar shows `#job-indicator` while it runs. `TOOL_LABELS` turns tool calls into plain-language status.
+    - Use the design tokens in `style.css` (`--space-*`, `--fs-*`, `--radius*`, semantic colours incl. `--input-border` ≥ 3:1) for light and dark. Surfaces are `.panel`; `.card` is reserved for card rows (hover preview uses `.card[data-img]`).
+    - Show and hide with the `hidden` attribute. Report with `toast()` and ask with `ask()` (a `<dialog>`), never `alert`/`prompt`/`confirm`. Keep one primary button per view and put rare options into `<details class="more">` or the ⋯ menu.
   - Each build or refine request becomes a `Job` that runs `claude_agent_sdk.query()`.
   - The job uses `cwd=`repo root and `setting_sources=["project"]` so it gets the skills and this file.
   - It starts the MCP server via `sys.executable -m mtgdeck.mcp_server`, with `permission_mode="dontAsk"`.
