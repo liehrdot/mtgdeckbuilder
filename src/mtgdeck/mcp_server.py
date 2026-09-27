@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, deckedit, edhrec, importers, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, collection, deckedit, edhrec, importers, proxy, scryfall, spellbook, storage
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -325,6 +325,43 @@ async def similar_cards(
     """Replacement candidates for one card of a saved deck: same role/tags, inside the colour
     identity, not in the deck, not blacklisted, most popular first."""
     return [_slim(c) for c in await deckedit.similar_cards(storage.load(slug), card, limit=limit)]
+
+
+# --- collection ------------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def collection_search(
+    color_identity: Annotated[str | None, Field(description="Commander colour identity, e.g. 'BG' – only cards that fit")] = None,
+    text: Annotated[str, Field(description="Substring of the Oracle text")] = "",
+    type_contains: Annotated[str, Field(description="Substring of the type line, e.g. 'Creature'")] = "",
+    limit: int = 300,
+) -> dict[str, Any]:
+    """Cards the user owns (their collection), filtered like a card search. real = physical copies,
+    proxy = printed proxies. Use when the user wants to build from their collection."""
+    cards = await collection.search_owned(color_identity, text=text, type_contains=type_contains, limit=limit)
+    return {"collection_size": len(collection.load()), "count": len(cards), "cards": cards}
+
+
+@mcp.tool()
+async def collection_status(slug: str) -> dict[str, Any]:
+    """Compare a saved deck with the user's collection: how many cards they own (real/proxy),
+    what is missing (shopping list with prices) and cards that several decks share."""
+    o = await collection.deck_ownership(storage.load(slug))
+    o.pop("cards", None)
+    return o
+
+
+@mcp.tool()
+async def update_collection(
+    lines: Annotated[str, Field(description="Card list or CSV, e.g. '2 Sol Ring' per line, '*F*' foil, '[proxy]' proxy")],
+    proxy: Annotated[bool, Field(description="Mark all as proxies")] = False,
+) -> dict[str, Any]:
+    """Add cards to the user's collection (only when the user asks for it)."""
+    try:
+        return await collection.import_text(lines, proxy=proxy)
+    except ValueError as exc:
+        return {"error": str(exc)}
 
 
 # --- blacklist --------------------------------------------------------------------------------

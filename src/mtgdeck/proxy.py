@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
-from . import carddb, imaging, scryfall
+from . import carddb, collection, imaging, scryfall
 from . import settings as settings_mod
 from .cards import resolve
 from .http import download, get_json, post_json
@@ -212,23 +212,29 @@ def choose(slug: str, face: str, option: dict[str, Any] | None) -> dict[str, dic
     return sel
 
 
-def _slot_names(deck: dict[str, Any]) -> list[tuple[str, bool]]:
-    slots = [(c, True) for c in deck.get("commanders", [])]
+def _slot_names(deck: dict[str, Any], only_missing: bool = False) -> list[tuple[str, bool]]:
+    """One entry per printed card; ``only_missing`` skips copies the collection already covers."""
+    missing = collection.missing_counts(deck) if only_missing else None
+    slots = [(c, True) for c in deck.get("commanders", []) if missing is None or missing.get(c, 1) > 0]
     for c in sorted(deck.get("cards", []), key=lambda c: c["name"]):
-        slots += [(c["name"], False)] * int(c.get("qty", 1))
+        qty = int(c.get("qty", 1)) if missing is None else missing.get(c["name"], 0)
+        slots += [(c["name"], False)] * qty
     return slots
 
 
-async def plan(deck: dict[str, Any], *, source: str = "auto") -> dict[str, Any]:
+async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool = False) -> dict[str, Any]:
     """Decide the image for every card face (no downloads).
 
     source: 'auto' (own choices > MPC Autofill > Scryfall), 'mpcfill' (requires a server) or 'scryfall'.
+    only_missing: leave out cards the collection already has (real or proxy).
     """
     cfg = settings_mod.load()
     if source == "mpcfill" and not cfg.get("mpcfill_server"):
         raise ValueError("Kein MPC-Autofill-Server eingestellt (Einstellungen → MPC-Autofill-Server).")
     slug = deck["slug"]
-    slots = _slot_names(deck)
+    slots = _slot_names(deck, only_missing)
+    if not slots:
+        raise ValueError("Nichts zu drucken – deine Sammlung enthält schon alle Karten dieses Decks.")
     unique = list(dict.fromkeys(n for n, _ in slots))
     card_data, _, not_found = await resolve(unique)
 
@@ -286,6 +292,7 @@ async def plan(deck: dict[str, Any], *, source: str = "auto") -> dict[str, Any]:
         "cards": cards,
         "missing": missing,
         "warnings": warnings,
+        "only_missing": only_missing,
     }
 
 
@@ -484,6 +491,7 @@ async def prepare(
     stock: str | None = None,
     foil: bool | None = None,
     upscale: bool | None = None,
+    only_missing: bool = False,
     progress: Progress | None = None,
 ) -> dict[str, Any]:
     """Download + process all images and write proxies/<slug>/<slug>.xml (local files only).
@@ -515,7 +523,7 @@ async def prepare(
     if stock.startswith("(P10)") and foil:
         raise ValueError("Plastik-Karten (P10) gibt es nicht in Foil.")
 
-    p = await plan(deck, source=source)
+    p = await plan(deck, source=source, only_missing=only_missing)
     jobs = {img["id"]: img for c in p["cards"] for side in ("front", "back") if c[side] and (img := c[side]["image"])}
     total, done = len(jobs), 0
     local: dict[str, Path] = {}

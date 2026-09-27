@@ -130,6 +130,57 @@ async def collection(names: list[str]) -> tuple[list[dict[str, Any]], list[str]]
     return found, still_missing
 
 
+def image_url(scryfall_id: str, size: str = "normal") -> str:
+    """Front image of a printing, derived from its Scryfall ID (no API call needed)."""
+    return f"https://cards.scryfall.io/{size}/front/{scryfall_id[0]}/{scryfall_id[1]}/{scryfall_id}.jpg"
+
+
+def printing(card: dict[str, Any], *, foil: bool = False) -> dict[str, Any]:
+    """The facts about one printing that a collection entry keeps (artwork, set, price)."""
+    prices = card.get("prices") or {}
+    eur = (prices.get("eur_foil") or prices.get("eur")) if foil else (prices.get("eur") or prices.get("eur_foil"))
+    usd = (prices.get("usd_foil") or prices.get("usd")) if foil else (prices.get("usd") or prices.get("usd_foil"))
+    return {
+        "name": card.get("name"),
+        "scryfall_id": card.get("id"),
+        "set": card.get("set"),
+        "set_name": card.get("set_name"),
+        "collector_number": card.get("collector_number"),
+        "lang": card.get("lang", "en"),
+        "image": _image(card),
+        "image_back": _back_image(card),
+        "released": card.get("released_at"),
+        "price_eur": eur,
+        "price_usd": usd,
+    }
+
+
+async def by_identifiers(idents: list[dict[str, str]]) -> tuple[list[dict[str, Any] | None], int]:
+    """Look up printings by ``{"id": …}`` or ``{"set": …, "collector_number": …}`` identifiers.
+
+    Returns the raw cards in input order (``None`` where Scryfall has no match) and the miss count.
+    """
+    out: list[dict[str, Any] | None] = []
+    for i in range(0, len(idents), COLLECTION_CHUNK):
+        chunk = idents[i : i + COLLECTION_CHUNK]
+        data = await post_json(f"{BASE}/cards/collection", {"identifiers": chunk})
+        cards = data.get("data", [])
+        by_id = {c.get("id"): c for c in cards}
+        by_set = {(c.get("set", "").lower(), str(c.get("collector_number", "")).lower()): c for c in cards}
+        for ident in chunk:
+            if "id" in ident:
+                out.append(by_id.get(ident["id"]))
+            else:
+                out.append(by_set.get((ident.get("set", "").lower(), str(ident.get("collector_number", "")).lower())))
+    return out, sum(1 for c in out if c is None)
+
+
+async def prints(name: str, *, limit: int = 60) -> list[dict[str, Any]]:
+    """All paper printings of a card (newest first) as ``printing()`` dicts."""
+    result = await search(f'!"{name}" game:paper', order="released", unique="prints", max_results=limit)
+    return [printing(c) for c in result["cards"]]
+
+
 async def game_changers() -> list[str]:
     """Current official Game Changers list, as tagged by Scryfall."""
     result = await search("is:gamechanger", order="name", max_results=200)

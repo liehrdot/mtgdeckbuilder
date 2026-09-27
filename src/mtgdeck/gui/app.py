@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, deckedit, proxy, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, proxy, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import resolve
 from ..deck import DeckEntry, to_text
@@ -100,9 +100,11 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
                    "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck",
-                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck"]  # fmt: skip
+                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck",
+                   "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
-               "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings"]  # fmt: skip
+               "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
+               "edit_deck", "update_collection"]  # fmt: skip
 Finish = Callable[[Job, bool, str], Awaitable[None]]
 
 
@@ -214,7 +216,15 @@ class BuildRequest(BaseModel):
     strategy: str | None = None
     notes: str | None = None
     profile: PowerProfile | None = None
+    prefer_collection: bool = False
     model: str | None = None
+
+
+COLLECTION_LINE = (
+    "- Sammlung: Bevorzuge Karten, die der Nutzer schon besitzt – hol sie mit `collection_search` (Farbidentität "
+    "des Commanders) und nimm sie, wo sie gleich gut passen. Besessene Karten (echt oder Proxy) kosten nichts; beim "
+    "Budget zählen nur fehlende Karten. Nenne am Ende, wie viele Karten aus der Sammlung stammen (`collection_status`)."
+)
 
 
 def profile_lines(bracket: int, profile: PowerProfile | None) -> list[str]:
@@ -281,6 +291,8 @@ def build_prompt(req: BuildRequest) -> str:
         lines.append(f"- Strategie/Thema: {req.strategy}")
     if req.notes:
         lines.append(f"- Weitere Wünsche: {req.notes}")
+    if req.prefer_collection:
+        lines.append(COLLECTION_LINE)
     lines += [
         "",
         "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
@@ -705,6 +717,105 @@ async def api_similar(slug: str, card: str, limit: int = 12) -> list[dict[str, A
         raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
 
 
+@app.get("/api/decks/{slug}/ownership")
+async def api_ownership(slug: str) -> dict[str, Any]:
+    try:
+        deck = storage.load(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return await collection.deck_ownership(deck)
+
+
+# --- my collection -------------------------------------------------------------------------------
+
+
+class CollectionItem(BaseModel):
+    name: str | None = None
+    qty: int = Field(default=1, ge=1, le=9999)
+    proxy: bool = False
+    foil: bool = False
+    lang: str | None = None
+    set: str | None = None
+    collector_number: str | None = None
+    scryfall_id: str | None = None
+    printing: dict[str, Any] | None = None  # a printing from /api/cards/prints (artwork picker)
+
+
+class CollectionAdd(BaseModel):
+    items: list[CollectionItem]
+
+
+class CollectionImport(BaseModel):
+    text: str = Field(max_length=5_000_000)
+    proxy: bool = False
+    replace: bool = False
+
+
+class EntryUpdate(BaseModel):
+    qty: int | None = None
+    proxy: bool | None = None
+    foil: bool | None = None
+    lang: str | None = None
+    note: str | None = None
+    printing: dict[str, Any] | None = None
+
+
+@app.get("/api/collection")
+async def api_collection() -> dict[str, Any]:
+    entries = collection.load()
+    usage = collection.decks_by_card() if entries else {}
+    return {"entries": entries, "summary": collection.summary(entries),
+            "decks": {name: [d["name"] for d in decks] for name, decks in usage.items()}}  # fmt: skip
+
+
+@app.post("/api/collection")
+async def api_collection_add(req: CollectionAdd) -> dict[str, Any]:
+    return await collection.add([i.model_dump() for i in req.items])
+
+
+@app.post("/api/collection/import")
+async def api_collection_import(req: CollectionImport) -> dict[str, Any]:
+    try:
+        return await collection.import_text(req.text, proxy=req.proxy, replace=req.replace)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.patch("/api/collection/{entry_id}")
+async def api_collection_update(entry_id: str, req: EntryUpdate) -> dict[str, Any]:
+    try:
+        entry = collection.update(entry_id, **req.model_dump(exclude_unset=True))
+    except KeyError as exc:
+        raise HTTPException(404, "Eintrag nicht gefunden") from exc
+    return {"entry": entry}
+
+
+@app.delete("/api/collection/{entry_id}")
+async def api_collection_delete(entry_id: str) -> dict[str, int]:
+    return {"deleted": collection.delete(entry_id)}
+
+
+@app.delete("/api/collection")
+async def api_collection_clear(confirm: bool = False) -> dict[str, int]:
+    if not confirm:
+        raise HTTPException(400, "Zum Leeren der ganzen Sammlung confirm=true mitschicken.")
+    return {"deleted": collection.delete()}
+
+
+@app.get("/api/collection/export")
+async def api_collection_export() -> Response:
+    return Response(collection.to_csv(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="sammlung.csv"'})  # fmt: skip
+
+
+@app.get("/api/cards/prints")
+async def api_prints(name: str) -> list[dict[str, Any]]:
+    try:
+        return await scryfall.prints(name)
+    except HttpError as exc:
+        raise HTTPException(502, f"Scryfall nicht erreichbar: {exc}") from exc
+
+
 @app.delete("/api/decks/{slug}")
 async def api_delete(slug: str) -> dict[str, bool]:
     storage.delete(slug)
@@ -796,6 +907,7 @@ class PrintRequest(BaseModel):
     stock: str | None = None
     foil: bool | None = None
     upscale: bool | None = None
+    only_missing: bool = False
     version: int | None = None
 
 
@@ -806,11 +918,21 @@ def _print_deck(slug: str, version: int | None = None) -> dict[str, Any]:
 
 
 @app.get("/api/decks/{slug}/print/plan")
-async def api_print_plan(slug: str, source: str = "auto", version: int | None = None) -> dict[str, Any]:
+async def api_print_plan(slug: str, source: str = "auto", version: int | None = None, only_missing: bool = False) -> dict[str, Any]:
     try:
-        return await proxy.plan(_print_deck(slug, version), source=source)
+        return await proxy.plan(_print_deck(slug, version), source=source, only_missing=only_missing)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/decks/{slug}/collection/add-printed")
+async def api_add_printed(slug: str, req: PrintRequest) -> dict[str, Any]:
+    """Add the printed proxies (with the chosen artwork) to the collection."""
+    try:
+        plan = await proxy.plan(_print_deck(slug, req.version), source=req.source, only_missing=req.only_missing)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return await collection.add_printed(plan)
 
 
 @app.get("/api/decks/{slug}/print/alternatives")
@@ -843,7 +965,8 @@ async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
 
         try:
             result = await proxy.prepare(
-                deck, source=req.source, stock=req.stock, foil=req.foil, upscale=req.upscale, progress=progress
+                deck, source=req.source, stock=req.stock, foil=req.foil, upscale=req.upscale,
+                only_missing=req.only_missing, progress=progress,
             )
         except ValueError as exc:
             job.emit(type="error", text=str(exc))

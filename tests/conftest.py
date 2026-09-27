@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from mtgdeck import blacklist, carddb, http, proxy, settings, storage
+from mtgdeck import blacklist, carddb, collection, http, proxy, settings, storage
 
 
 def card(name: str, *, ci: str = "", type_line: str = "Creature — Human", text: str = "", cmc: float = 2,
@@ -82,6 +82,18 @@ def _image_bytes(fmt: str = "PNG", size: tuple[int, int] = (745, 1040)) -> bytes
     return buf.getvalue()
 
 
+def _printing(name: str, sid: str, set_code: str, cn: str, lang: str = "en") -> dict[str, Any]:
+    return {**CARDS[name], "id": sid, "set": set_code, "set_name": f"Set {set_code.upper()}", "collector_number": cn, "lang": lang,
+            "released_at": "2021-04-23", "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/{sid}.jpg"},
+            "prices": {"eur": "1.50", "eur_foil": "4.00", "usd": "2.00"}}  # fmt: skip
+
+
+PRINTINGS = {
+    "a1b2-sol": _printing("Sol Ring", "a1b2-sol", "c21", "263"),
+    "c21/263": _printing("Sol Ring", "a1b2-sol", "c21", "263"),
+    "d3e4-cult": _printing("Cultivate", "d3e4-cult", "m21", "177", "de"),
+}
+
 MPC_SERVER = "https://mpc.test"
 MPC_HITS = {"sol ring": ["drive-sol-1", "drive-sol-2"], "insectile aberration": ["drive-insect"]}
 
@@ -120,7 +132,10 @@ def handler(request: httpx.Request) -> httpx.Response:
             idents = json.loads(request.content)["identifiers"]
             data, missing = [], []
             for ident in idents:
-                c = lookup_card(ident["name"])
+                if "id" in ident or "set" in ident:  # a specific printing
+                    c = PRINTINGS.get(ident.get("id")) or PRINTINGS.get(f"{ident.get('set')}/{ident.get('collector_number')}")
+                else:
+                    c = lookup_card(ident["name"])
                 (data.append(c) if c else missing.append(ident))
             return httpx.Response(200, json={"data": data, "not_found": missing})
         if url.path == "/cards/named":
@@ -182,6 +197,7 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(carddb, "DB_PATH", tmp_path / "data" / "cards.sqlite")
     monkeypatch.setattr(storage, "DECKS_DIR", tmp_path / "decks")
     monkeypatch.setattr(blacklist, "BLACKLIST_FILE", tmp_path / "blacklist.txt")
+    monkeypatch.setattr(collection, "COLLECTION_FILE", tmp_path / "collection.json")
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(proxy, "PROXIES_DIR", tmp_path / "proxies")
     for env in ("MTG_AUTOFILL_PATH", "MTG_MPCFILL_SERVER", "MTG_CARDBACK"):

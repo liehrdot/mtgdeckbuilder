@@ -27,6 +27,7 @@
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
   <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
 
@@ -53,6 +54,7 @@
     </div>
 
     <nav class="nav-bottom" aria-label="Weitere Bereiche">
+      <a href="#/collection" data-nav="collection"><svg class="icon"><use href="#i-box"/></svg>Meine Sammlung <span id="coll-count" class="count"></span></a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
       <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
     </nav>
@@ -150,6 +152,8 @@
             <label class="field">Weitere Wünsche
               <textarea name="notes" rows="2" placeholder="z. B. keine Infinite-Combos, viel Interaktion, Lieblingskarte XY rein …"></textarea>
             </label>
+            <label class="check needs-collection" hidden><input type="checkbox" name="prefer_collection"> Karten aus meiner Sammlung bevorzugen
+              <span class="muted">– besessene Karten zählen nicht zum Budget</span></label>
           </div>
         </section>
 
@@ -264,6 +268,7 @@
           </section>
           <aside class="deck-side">
             <section class="panel"><h2>Prüfung</h2><div id="validation"></div></section>
+            <section class="panel" id="own-panel" hidden><h2>Sammlung</h2><div id="own-summary"></div></section>
             <section class="panel"><h2>Statistik</h2><div id="stats"></div></section>
           </aside>
         </div>
@@ -382,6 +387,8 @@
             </label>
             <label class="field">Kartenstärke <select name="stock"></select></label>
             <label class="check"><input type="checkbox" name="foil"> Foil</label>
+            <label class="check needs-collection" hidden title="Karten, die du (echt oder als Proxy) schon hast, werden nicht gedruckt">
+              <input type="checkbox" name="only_missing"> Nur fehlende Karten</label>
             <label class="check" title="Opt-in: Scryfall-Scans mit Real-ESRGAN auf 600 DPI hochrechnen (braucht das Zusatzprogramm, kostet Rechenzeit)">
               <input type="checkbox" name="upscale"> KI-Hochskalierung <span class="muted">(600 DPI)</span></label>
             <button type="submit" class="btn">Vorschau aktualisieren</button>
@@ -428,9 +435,71 @@
                 <label class="check" title="Statt im eingebetteten Terminal in einem separaten Konsolenfenster starten"><input type="checkbox" id="mpc-window"> eigenes Fenster</label>
               </div>
             </li>
+            <li>
+              <div>
+                <h3>In die Sammlung übernehmen</h3>
+                <p class="muted small">Wenn die Proxies da sind: alle gedruckten Karten mit ihrem Artwork als Proxy in „Meine Sammlung“ eintragen.</p>
+              </div>
+              <div class="step-actions">
+                <button type="button" id="add-printed-btn" class="btn">Zur Sammlung hinzufügen</button>
+              </div>
+            </li>
           </ol>
         </section>
       </div>
+    </section>
+
+    <!-- ============ collection ============ -->
+    <section id="view-collection" class="view" data-view="collection" hidden>
+      <header class="page-head">
+        <div>
+          <h1>Meine Sammlung</h1>
+          <p class="lead">Welche Karten du besitzt – echt oder als Proxy, mit Anzahl und Artwork. Decks zeigen dann,
+            was du schon hast, was fehlt und was es kostet.</p>
+          <div id="coll-stats" class="meta-row"></div>
+        </div>
+        <div class="page-actions">
+          <button type="button" id="coll-import-btn" class="btn">Importieren</button>
+          <a id="coll-export" class="btn" href="/api/collection/export" download="sammlung.csv">Exportieren</a>
+          <button type="button" id="coll-add-btn" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Karte hinzufügen</button>
+          <details class="menu" id="coll-menu">
+            <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
+            <div class="menu-list" role="menu">
+              <button type="button" id="coll-clear" role="menuitem" class="danger">Sammlung leeren …</button>
+            </div>
+          </details>
+        </div>
+      </header>
+      <section class="panel">
+        <div class="coll-toolbar">
+          <input type="search" id="coll-q" placeholder="Suchen: Name, Set, Notiz …" aria-label="Sammlung durchsuchen">
+          <div class="segmented small" role="radiogroup" aria-label="Filter">
+            <label><input type="radio" name="collfilter" value="all" checked><span>Alle</span></label>
+            <label><input type="radio" name="collfilter" value="real"><span>Echt</span></label>
+            <label><input type="radio" name="collfilter" value="proxy"><span>Proxy</span></label>
+          </div>
+          <select id="coll-sort" aria-label="Sortieren nach">
+            <option value="name">Name</option><option value="qty">Anzahl</option><option value="price">Preis</option>
+            <option value="added">Zuletzt hinzugefügt</option><option value="set">Set</option>
+          </select>
+          <div class="segmented small" role="radiogroup" aria-label="Darstellung">
+            <label title="Liste"><input type="radio" name="collview" value="list" checked><span><svg class="icon"><use href="#i-list"/></svg>Liste</span></label>
+            <label title="Bilder"><input type="radio" name="collview" value="grid"><span><svg class="icon"><use href="#i-grid"/></svg>Bilder</span></label>
+          </div>
+        </div>
+        <p id="coll-result" class="muted small"></p>
+        <div id="coll-list" class="coll-list"></div>
+        <div id="coll-more" class="center" hidden><button type="button" class="btn">Mehr anzeigen</button></div>
+        <div id="coll-empty" class="empty" hidden>
+          <p><b>Deine Sammlung ist noch leer.</b></p>
+          <p class="muted">Importiere eine CSV aus ManaBox, Moxfield oder Archidekt – oder füge Karten einzeln hinzu.
+            Nach dem Proxy-Druck kannst du die gedruckten Karten mit einem Klick übernehmen.</p>
+          <div class="btn-group center">
+            <button type="button" class="btn" data-open="import">Importieren</button>
+            <button type="button" class="btn primary" data-open="add">Karte hinzufügen</button>
+          </div>
+        </div>
+      </section>
     </section>
 
     <!-- ============ blacklist ============ -->
@@ -600,6 +669,69 @@
     <figure><figcaption id="compare-cap-a"></figcaption><div class="pane" id="pane-a"><img id="compare-a" alt="Original"></div></figure>
     <figure><figcaption id="compare-cap-b"></figcaption><div class="pane" id="pane-b"><img id="compare-b" alt="Druckdatei"></div></figure>
   </div>
+</dialog>
+
+<dialog id="coll-add-dialog" class="dialog small-dialog">
+  <form id="coll-add-form" autocomplete="off">
+    <h2>Karte hinzufügen</h2>
+    <label class="field">Karte
+      <input id="coll-add-name" list="ac-coll" required placeholder="Name (auch deutsch)">
+      <datalist id="ac-coll"></datalist>
+    </label>
+    <div class="row2">
+      <label class="field">Anzahl <input id="coll-add-qty" type="number" min="1" max="999" value="1"></label>
+      <label class="field">Sprache
+        <select id="coll-add-lang"><option value="en">Englisch</option><option value="de">Deutsch</option><option value="fr">Französisch</option>
+          <option value="it">Italienisch</option><option value="es">Spanisch</option><option value="pt">Portugiesisch</option>
+          <option value="ja">Japanisch</option><option value="ko">Koreanisch</option><option value="ru">Russisch</option>
+          <option value="zhs">Chinesisch</option></select>
+      </label>
+    </div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="coll-add-proxy"> Proxy</label>
+      <label class="check"><input type="checkbox" id="coll-add-foil"> Foil</label>
+    </div>
+    <div class="art-pick">
+      <img id="coll-add-art" alt="" hidden>
+      <div>
+        <p id="coll-add-art-text" class="muted small">Artwork: Standard-Druck</p>
+        <button type="button" class="btn small" id="coll-add-art-btn">Artwork wählen …</button>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="coll-add-cancel">Abbrechen</button>
+      <button type="submit" class="btn primary">Hinzufügen</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="coll-import-dialog" class="dialog small-dialog">
+  <form id="coll-import-form" autocomplete="off">
+    <h2>Sammlung importieren</h2>
+    <p class="muted small">CSV-Export aus ManaBox, Moxfield oder Archidekt (Anzahl, Set, Nummer, Foil, Sprache und – bei
+      Moxfield – Proxy werden übernommen) oder eine Liste wie „2 Sol Ring (C21) 263 *F*“, „1 Demonic Tutor [proxy]“.</p>
+    <label class="field">Datei <input type="file" id="coll-import-file" accept=".csv,.txt,text/csv,text/plain"></label>
+    <label class="field">… oder Text einfügen
+      <textarea id="coll-import-text" rows="7" placeholder="Name,Quantity,Set code,Collector number …&#10;oder&#10;2 Sol Ring&#10;1 Cultivate (M21) 177 *F*"></textarea>
+    </label>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="coll-import-proxy"> alles als Proxy markieren</label>
+      <label class="check"><input type="checkbox" id="coll-import-replace"> bestehende Sammlung ersetzen</label>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="coll-import-cancel">Abbrechen</button>
+      <button type="submit" class="btn primary" id="coll-import-ok">Importieren</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="prints-dialog" class="dialog">
+  <div class="dialog-head">
+    <h2 id="prints-title">Artwork wählen</h2>
+    <button type="button" class="icon-btn" id="prints-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <p id="prints-hint" class="muted small"></p>
+  <div id="prints-grid" class="similar-grid"></div>
 </dialog>
 
 <dialog id="similar" class="dialog">

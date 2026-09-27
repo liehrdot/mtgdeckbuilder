@@ -81,7 +81,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "blacklist", "settings"];
+const VIEWS = ["new", "job", "deck", "collection", "blacklist", "settings"];
 const TABS = ["karten", "anpassen", "fragen", "verlauf", "drucken"];
 let lastView = null;
 
@@ -105,6 +105,7 @@ async function route() {
   for (const v of $$(".view")) v.hidden = v.dataset.view !== r.view;
   if (r.view === "deck") selectTab(r.tab || "karten", false);
   if (r.view === "settings") refreshDbStatus();
+  if (r.view === "collection") loadCollection();
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -116,7 +117,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -255,7 +256,7 @@ buildForm.addEventListener("submit", async (e) => {
     } else {
       const body = {
         ...buildSettings(), commander: f.commander, partner: f.partner || null,
-        strategy: f.strategy || null, notes: f.notes || null,
+        strategy: f.strategy || null, notes: f.notes || null, prefer_collection: !!f.prefer_collection,
         profile: readProfile($("#build-profile .profile-fields")),
       };
       const { job } = await api("/api/build", { method: "POST", body });
@@ -524,6 +525,7 @@ async function openDeck(slug) {
     $("#add-card-form").hidden = true;
   }
   currentDeck = d;
+  if (ownership && ownership.slug !== d.slug) ownership = null;
   printLoadedFor = null;
   renderDeckHead(d);
   renderValidation(d.validation);
@@ -535,6 +537,7 @@ async function openDeck(slug) {
   renderPower(d);
   renderHistory(d);
   renderQuestions(d);
+  loadOwnership(d);
   $("#deck-menu").open = false;
   return true;
 }
@@ -898,7 +901,7 @@ function ownershipBadge(name, need = 1, commander = false) {
   if (real >= need) return '<span class="own ok" title="In deiner Sammlung">✓</span>';
   if (real + prox >= need) return '<span class="own proxy" title="Als Proxy in deiner Sammlung">P</span>';
   if (real + prox > 0) return `<span class="own part" title="Nur ${real + prox} von ${need} vorhanden">${real + prox}/${need}</span>`;
-  return commander ? "" : '<span class="own miss" title="Nicht in deiner Sammlung">–</span>';
+  return "";  // missing: no badge (the Sammlung panel and "nach Besitz" show them) – keeps the list calm
 }
 
 // ---------- replacement suggestions ----------
@@ -1366,7 +1369,8 @@ let printPlan = null;
 let prepared = { faces: {} };
 const printOpts = () => {
   const f = $("#print-form").elements;
-  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked, upscale: f.upscale.checked };
+  return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked, upscale: f.upscale.checked,
+    only_missing: !f.only_missing.closest("[hidden]") && f.only_missing.checked };
 };
 $("#print-form").addEventListener("submit", (e) => { e.preventDefault(); loadPlan(); });
 
@@ -1376,7 +1380,7 @@ async function loadPlan() {
   const slug = currentDeck.slug;
   try {
     [printPlan, prepared] = await Promise.all([
-      api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}`),
+      api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}&only_missing=${printOpts().only_missing}`),
       api(`/api/decks/${enc(slug)}/print/prepared`),
     ]);
   } catch (err) { $("#print-summary").textContent = err.message; return; }
@@ -1472,7 +1476,7 @@ async function pick(option) {
   await api(`/api/decks/${enc(slug)}/print/choose`, { method: "POST", body: { face, option } });
   $("#picker").close();
   // update just this tile: re-rendering the whole grid would make the page jump to the top
-  const plan = await api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}`);
+  const plan = await api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}&only_missing=${printOpts().only_missing}`);
   if (currentDeck?.slug !== slug) return;
   printPlan = plan;
   renderPlanSummary();
@@ -1659,6 +1663,291 @@ $("#console-form").addEventListener("submit", (e) => {
 });
 
 // ============================================================================================
+// my collection
+// ============================================================================================
+let coll = { entries: [], summary: {}, decks: {} };
+let collSummary = { cards: 0 };
+let collShown = 150;
+const COLL_PAGE = 150;
+const LANG_NAMES = { en: "EN", de: "DE", fr: "FR", it: "IT", es: "ES", pt: "PT", ja: "JA", ko: "KO", ru: "RU", zhs: "ZH", zht: "ZH" };
+let collView = store.get("collview") === "grid" ? "grid" : "list";
+document.querySelector(`[name="collview"][value="${collView}"]`).checked = true;
+
+function applyCollectionPresence() {
+  const has = (collSummary.cards || 0) > 0;
+  $("#coll-count").textContent = has ? collSummary.cards : "";
+  for (const el of $$(".needs-collection")) el.hidden = !has;
+  const opt = $('#card-group option[value="owned"]');
+  opt.hidden = !has;
+  opt.disabled = !has;
+  if (!has && cardGroup === "owned") { cardGroup = "category"; $("#card-group").value = "category"; }
+}
+
+async function refreshCollectionSummary() {
+  try {
+    coll = await api("/api/collection");
+    collSummary = coll.summary;
+  } catch { /* offline: keep the old numbers */ }
+  applyCollectionPresence();
+}
+
+async function loadCollection() {
+  await refreshCollectionSummary();
+  renderCollection();
+}
+
+function collFiltered() {
+  const q = $("#coll-q").value.trim().toLowerCase();
+  const filter = document.querySelector('[name="collfilter"]:checked').value;
+  const sort = $("#coll-sort").value;
+  const list = coll.entries.filter((e) => (filter === "all" || (filter === "proxy") === !!e.proxy)
+    && (!q || `${e.name} ${e.set_name || ""} ${e.set || ""} ${e.note || ""}`.toLowerCase().includes(q)));
+  const price = (e) => Number(e.price_eur) || 0;
+  const cmp = { name: (a, b) => a.name.localeCompare(b.name), qty: (a, b) => b.qty - a.qty || a.name.localeCompare(b.name),
+    price: (a, b) => price(b) - price(a), added: (a, b) => (b.added || "").localeCompare(a.added || ""),
+    set: (a, b) => (a.set_name || "~").localeCompare(b.set_name || "~") || a.name.localeCompare(b.name) }[sort];
+  return list.sort(cmp);
+}
+
+function renderCollection() {
+  const s = coll.summary || {};
+  const empty = !coll.entries.length;
+  $("#coll-empty").hidden = !empty;
+  $("#coll-stats").innerHTML = empty ? "" : [
+    `<span class="pill">${s.cards} Karten</span>`, `<span class="pill">${s.unique} verschiedene</span>`,
+    `<span class="pill ok">${s.real} echt</span>`, `<span class="pill accent">${s.proxy} Proxies</span>`,
+    s.value_eur ? `<span class="pill">Wert ≈ ${fmtPrice(s.value_eur, "EUR")}</span>` : "",
+  ].join("");
+  const list = collFiltered();
+  $("#coll-result").textContent = empty ? "" : `${list.length} Einträge${list.length !== coll.entries.length ? ` (von ${coll.entries.length})` : ""}`;
+  const shown = list.slice(0, collShown);
+  const grid = collView === "grid";
+  $("#coll-list").classList.toggle("grid", grid);
+  $("#coll-list").innerHTML = shown.map((e) => {
+    const decks = coll.decks?.[e.name] || [];
+    const printing = [e.set_name || (e.set ? e.set.toUpperCase() : "Standard-Druck"), e.collector_number ? `#${e.collector_number}` : ""].filter(Boolean).join(" · ");
+    const badges = `${e.foil ? '<span class="tagb foil">Foil</span>' : ""}${e.lang && e.lang !== "en" ? `<span class="tagb">${esc(LANG_NAMES[e.lang] || e.lang)}</span>` : ""}`;
+    const img = e.image ? `<img src="${esc(e.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(e.name)}</div>`;
+    if (grid) {
+      return `<div class="coll-tile" data-id="${esc(e.id)}">
+        <button type="button" class="card tile-img" data-act="art" data-img="${esc(e.image || "")}" data-name="${esc(e.name)}" title="Artwork ändern">${img}</button>
+        <span class="qty-badge">${e.qty}×</span>${e.proxy ? '<span class="own proxy tile-p" title="Proxy">P</span>' : ""}
+        <span class="tile-name">${esc(e.name)} ${badges}</span></div>`;
+    }
+    return `<div class="coll-row" data-id="${esc(e.id)}">
+      <button type="button" class="thumb card" data-act="art" data-img="${esc(e.image || "")}" data-name="${esc(e.name)}" title="Artwork ändern" aria-label="Artwork von ${esc(e.name)} ändern">${img}</button>
+      <div class="coll-main">
+        <div class="coll-name">${esc(e.name)} ${badges}</div>
+        <div class="muted small">${esc(printing)}${e.note ? ` · ${esc(e.note)}` : ""}${decks.length ? ` · in ${decks.length === 1 ? "Deck" : "Decks"}: ${esc(decks.join(", "))}` : ""}</div>
+      </div>
+      <label class="check small"><input type="checkbox" data-act="proxy" ${e.proxy ? "checked" : ""}> Proxy</label>
+      <label class="check small tg-foil"><input type="checkbox" data-act="foil" ${e.foil ? "checked" : ""}> Foil</label>
+      <div class="stepper" aria-label="Anzahl">
+        <button type="button" class="mini" data-act="minus" aria-label="Eine weniger">−</button>
+        <span class="q">${e.qty}</span>
+        <button type="button" class="mini" data-act="plus" aria-label="Eine mehr">+</button>
+      </div>
+      <span class="price">${e.price_eur && !e.proxy ? esc(fmtPrice(Number(e.price_eur) * e.qty, "€")) : ""}</span>
+      <button type="button" class="mini danger" data-act="delete" title="Entfernen" aria-label="${esc(e.name)} entfernen">✕</button>
+    </div>`;
+  }).join("");
+  $("#coll-more").hidden = list.length <= collShown;
+}
+
+$("#coll-q").addEventListener("input", debounce(() => { collShown = COLL_PAGE; renderCollection(); }, 150));
+$$('[name="collfilter"]').forEach((r) => r.addEventListener("change", () => { collShown = COLL_PAGE; renderCollection(); }));
+$("#coll-sort").addEventListener("change", renderCollection);
+$$('[name="collview"]').forEach((r) => r.addEventListener("change", () => { collView = r.value; store.set("collview", collView); renderCollection(); }));
+$("#coll-more button").addEventListener("click", () => { collShown += COLL_PAGE; renderCollection(); });
+
+async function patchEntry(id, body) {
+  try {
+    await api(`/api/collection/${enc(id)}`, { method: "PATCH", body });
+    await loadCollection();
+  } catch (err) { fail(err); }
+}
+
+$("#coll-list").addEventListener("click", async (e) => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  const row = e.target.closest("[data-id]");
+  if (!act || !row || act === "proxy" || act === "foil") return;
+  const entry = coll.entries.find((x) => x.id === row.dataset.id);
+  if (!entry) return;
+  if (act === "plus") patchEntry(entry.id, { qty: entry.qty + 1 });
+  if (act === "minus") {
+    if (entry.qty > 1) patchEntry(entry.id, { qty: entry.qty - 1 });
+    else if (await ask({ title: `${entry.name} entfernen?`, ok: "Entfernen", danger: true })) patchEntry(entry.id, { qty: 0 });
+  }
+  if (act === "delete" && await ask({ title: `${entry.name} entfernen?`, text: `${entry.qty}× ${entry.proxy ? "Proxy" : "echt"} – aus der Sammlung löschen.`, ok: "Entfernen", danger: true })) {
+    await api(`/api/collection/${enc(entry.id)}`, { method: "DELETE" }).catch(fail);
+    loadCollection();
+  }
+  if (act === "art") {
+    const p = await pickPrinting(entry.name);
+    if (p) patchEntry(entry.id, { printing: p });
+  }
+});
+$("#coll-list").addEventListener("change", (e) => {
+  const box = e.target.closest("input[data-act]");
+  const row = e.target.closest("[data-id]");
+  if (box && row) patchEntry(row.dataset.id, { [box.dataset.act]: box.checked });
+});
+
+// artwork picker: all printings of a card; resolves with the chosen printing (or null)
+function pickPrinting(name) {
+  const dlg = $("#prints-dialog");
+  $("#prints-title").textContent = `Artwork: ${name}`;
+  $("#prints-hint").textContent = "Lade alle Drucke von Scryfall …";
+  $("#prints-grid").innerHTML = "";
+  dlg.showModal();
+  return new Promise((resolve) => {
+    let prints = [];
+    const done = (p) => { resolve(p); if (dlg.open) dlg.close(); };
+    dlg.onclose = () => resolve(null);
+    $("#prints-close").onclick = () => done(null);
+    $("#prints-grid").onclick = (e) => {
+      const b = e.target.closest("[data-i]");
+      if (b) done(prints[Number(b.dataset.i)]);
+    };
+    api(`/api/cards/prints?name=${enc(name)}`).then((list) => {
+      prints = list;
+      $("#prints-hint").textContent = list.length ? `${list.length} Drucke – klick wählt das Artwork.` : "Keine Drucke gefunden.";
+      $("#prints-grid").innerHTML = list.map((p, i) => `<button type="button" class="similar" data-i="${i}">
+        ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(name)}</div>`}
+        <span class="sim-name">${esc(p.set_name || p.set)}</span>
+        <span class="muted small">#${esc(p.collector_number)} · ${esc((p.released || "").slice(0, 4))}${p.price_eur ? ` · ${esc(p.price_eur)} €` : ""}</span></button>`).join("");
+    }).catch((err) => { $("#prints-hint").textContent = err.message; });
+  });
+}
+
+// add one card
+let addPrinting = null;
+function openCollAdd(name = "") {
+  addPrinting = null;
+  $("#coll-add-form").reset();
+  $("#coll-add-name").value = name;
+  $("#coll-add-art").hidden = true;
+  $("#coll-add-art-text").textContent = "Artwork: Standard-Druck";
+  $("#coll-add-dialog").showModal();
+  $("#coll-add-name").focus();
+}
+wireAutocomplete($("#coll-add-name"), $("#ac-coll"));
+$("#coll-add-btn").addEventListener("click", () => openCollAdd());
+$("#coll-add-cancel").addEventListener("click", () => $("#coll-add-dialog").close());
+$("#coll-add-art-btn").addEventListener("click", async () => {
+  const name = $("#coll-add-name").value.trim();
+  if (!name) { $("#coll-add-name").focus(); return; }
+  const p = await pickPrinting(name);
+  if (!p) return;
+  addPrinting = p;
+  $("#coll-add-name").value = p.name || name;
+  $("#coll-add-art").src = p.image || "";
+  $("#coll-add-art").hidden = !p.image;
+  $("#coll-add-art-text").textContent = `Artwork: ${p.set_name || p.set} · #${p.collector_number}`;
+});
+$("#coll-add-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const item = {
+    name: $("#coll-add-name").value.trim(), qty: Number($("#coll-add-qty").value) || 1,
+    proxy: $("#coll-add-proxy").checked, foil: $("#coll-add-foil").checked, lang: $("#coll-add-lang").value,
+    ...(addPrinting ? { printing: addPrinting } : {}),
+  };
+  try {
+    const r = await api("/api/collection", { method: "POST", body: { items: [item] } });
+    if (r.not_found.length) { toast(`Nicht gefunden: ${r.not_found.join(", ")}`, "error"); return; }
+    $("#coll-add-dialog").close();
+    toast(`${item.qty}× ${item.name} hinzugefügt.`);
+    await loadCollection();
+    if (currentDeck) loadOwnership(currentDeck);
+  } catch (err) { fail(err); }
+});
+
+// import
+$("#coll-import-btn").addEventListener("click", () => { $("#coll-import-form").reset(); $("#coll-import-dialog").showModal(); });
+$("#coll-import-cancel").addEventListener("click", () => $("#coll-import-dialog").close());
+$("#coll-import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (file) $("#coll-import-text").value = await file.text();
+});
+$("#coll-import-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("#coll-import-text").value;
+  if (!text.trim()) { toast("Datei wählen oder Text einfügen.", "error"); return; }
+  const replace = $("#coll-import-replace").checked;
+  if (replace && !(await ask({ title: "Sammlung ersetzen?", text: "Die bisherige Sammlung wird durch den Import ersetzt.", ok: "Ersetzen", danger: true }))) return;
+  const btn = $("#coll-import-ok");
+  btn.disabled = true;
+  btn.textContent = "Importiere …";
+  try {
+    const r = await api("/api/collection/import", { method: "POST", body: { text, proxy: $("#coll-import-proxy").checked, replace } });
+    $("#coll-import-dialog").close();
+    toast(`${r.added} Karten importiert.${r.not_found.length ? ` Nicht gefunden (${r.not_found.length}): ${r.not_found.slice(0, 5).join(", ")}${r.not_found.length > 5 ? " …" : ""}` : ""}`,
+      r.not_found.length ? "error" : "info", 8000);
+    await loadCollection();
+  } catch (err) { fail(err); }
+  finally { btn.disabled = false; btn.textContent = "Importieren"; }
+});
+$("#coll-empty").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-open]");
+  if (b?.dataset.open === "import") $("#coll-import-btn").click();
+  if (b?.dataset.open === "add") openCollAdd();
+});
+$("#coll-menu").addEventListener("click", (e) => { if (e.target.closest(".menu-list button")) $("#coll-menu").open = false; });
+$("#coll-clear").addEventListener("click", async () => {
+  if (!(await ask({ title: "Ganze Sammlung leeren?", text: `${collSummary.cards || 0} Karten werden gelöscht. Tipp: vorher exportieren.`, ok: "Leeren", danger: true }))) return;
+  await api("/api/collection?confirm=true", { method: "DELETE" }).catch(fail);
+  loadCollection();
+});
+
+// ---------- the deck vs. the collection ----------
+async function loadOwnership(d) {
+  ownership = null;
+  $("#own-panel").hidden = true;
+  if (!(collSummary.cards > 0)) return;
+  try { ownership = { ...(await api(`/api/decks/${enc(d.slug)}/ownership`)), slug: d.slug }; } catch { return; }
+  if (currentDeck?.slug !== d.slug) return;
+  renderCards(currentDeck);
+  const o = ownership;
+  const pct = (n) => `${(n / Math.max(o.need, 1)) * 100}%`;
+  const cur = o.currency === "usd" ? "USD" : "EUR";
+  $("#own-panel").hidden = false;
+  $("#own-summary").innerHTML = `
+    <div class="own-bar" role="img" aria-label="${o.have_real} echt, ${o.have_proxy} als Proxy, ${o.missing} fehlen">
+      <span class="r" style="width:${pct(o.have_real)}"></span><span class="p" style="width:${pct(o.have_proxy)}"></span></div>
+    <p class="small"><b>${o.have_real + o.have_proxy} von ${o.need}</b> vorhanden · ${o.have_real} echt · ${o.have_proxy} Proxy
+      · <b class="${o.missing ? "bad" : "ok"}">${o.missing} fehlen</b>${o.missing_price ? ` (≈ ${esc(fmtPrice(o.missing_price, cur))})` : ""}</p>
+    ${o.shared_shortages.length ? `<p class="small warn">In mehreren Decks, aber zu wenige Exemplare: ${esc(o.shared_shortages.slice(0, 6).join(", "))}${o.shared_shortages.length > 6 ? " …" : ""}</p>` : ""}
+    ${o.missing ? `<div class="btn-group">
+      <button type="button" class="btn small" id="own-copy">Einkaufsliste kopieren</button>
+      <button type="button" class="btn small" id="own-print">Fehlende drucken</button></div>` : '<p class="small ok">Du hast alle Karten dieses Decks.</p>'}`;
+}
+$("#own-summary").addEventListener("click", async (e) => {
+  if (e.target.id === "own-copy") {
+    try { await navigator.clipboard.writeText(ownership.shopping_text); toast("Einkaufsliste kopiert – z. B. bei Cardmarket als Wants-Liste einfügen."); }
+    catch { toast("Kopieren nicht erlaubt.", "error"); }
+  }
+  if (e.target.id === "own-print") {
+    $("#print-form").elements.only_missing.checked = true;
+    printLoadedFor = null;
+    selectTab("drucken");
+  }
+});
+
+$("#add-printed-btn").addEventListener("click", async () => {
+  if (!currentDeck) return;
+  const opts = printOpts();
+  const ok = await ask({ title: "Gedruckte Karten übernehmen?", ok: "Übernehmen",
+    text: `${printPlan?.quantity ?? "Alle"} Karten dieses Druckauftrags kommen als Proxy (mit dem gewählten Artwork) in deine Sammlung.` });
+  if (!ok) return;
+  try {
+    const r = await api(`/api/decks/${enc(currentDeck.slug)}/collection/add-printed`, { method: "POST", body: opts });
+    toast(`${r.added} Proxies zur Sammlung hinzugefügt.`);
+    await refreshCollectionSummary();
+    loadOwnership(currentDeck);
+  } catch (err) { fail(err); }
+});
+
+// ============================================================================================
 // blacklist
 // ============================================================================================
 async function refreshBlacklist() {
@@ -1752,4 +2041,4 @@ wireAutocomplete($("#bl-input"), $("#ac-bl"));
 setMode("build");
 refreshBlacklist();
 loadSettings().catch((err) => console.error(err));
-Promise.all([initBrackets(), refreshDeckList()]).then(route, (err) => { fail(err); route(); });
+Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary()]).then(route, (err) => { fail(err); route(); });

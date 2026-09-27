@@ -146,9 +146,21 @@ cards. Individual images can be swapped in the GUI's Druckstudio.
 For "make it cheaper / stronger / bracket X / more draw / swap Y":
 1. `load_deck` the deck (or `import_deck` an Archidekt/Moxfield URL, or parse a pasted list).
 2. `validate_deck` to see the current state.
-3. Make targeted swaps (keep the count at 100, keep what works), research replacements as above.
-4. `save_deck` with the **same slug** and a short `change_note`, then list the changes as
-   `+ in` / `- out` with reasons.
+3. Make targeted swaps (keep the count at 100, keep what works), research replacements as above;
+   `similar_cards` lists replacements for one card (same role, fits the colours, not in the deck).
+4. For a handful of swaps use `edit_deck` (slug, `add`, `remove`, `change_note`) – it re-validates
+   and saves a new version without resending the list. For bigger rebuilds use `save_deck` with the
+   **same slug** and a short `change_note`. Then list the changes as `+ in` / `- out` with reasons.
+
+## Meine Sammlung (collection)
+
+The user can keep a collection (cards they own, real or proxy, with quantity and printing).
+- "Build from my collection" / „Sammlung bevorzugen“: `collection_search` with the commander's colour
+  identity lists owned cards (`real`, `proxy` counts). Prefer them where they fit as well as the
+  alternatives; owned cards cost nothing, so for a budget only missing cards count.
+- `collection_status(slug)` compares a saved deck with the collection: owned real/proxy, missing
+  cards with prices (shopping list) and cards shared by several decks without enough copies.
+- `update_collection` adds cards – only when the user asks for it.
 
 ## Analyse only
 

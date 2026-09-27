@@ -23,16 +23,16 @@ Datenmodell (`collection.json`, gitignored, `MTG_COLLECTION_FILE`), ein Eintrag 
 (`set`, `set_name`, `collector_number`, `scryfall_id`, `image`) · `note` · `added`.
 Gleicher Name + Druck + Proxy + Foil + Sprache werden zusammengeführt (Anzahl addiert).
 
-- [ ] Backend `collection.py`: hinzufügen/ändern/löschen, Import (ManaBox-, Moxfield-, Archidekt-CSV
+- [x] Backend `collection.py`: hinzufügen/ändern/löschen, Import (ManaBox-, Moxfield-, Archidekt-CSV
       mit Proxy-Spalte, Textlisten „2 Sol Ring (C21) 263 *F*“), Export als CSV, Druck-Auflösung über
       Scryfall-ID oder Set+Nummer, Artwork-Auswahl aus allen Drucken.
-- [ ] Deck-Abgleich: pro Karte echt/Proxy/fehlt, Summe „72 von 100 vorhanden“, Preis der fehlenden
+- [x] Deck-Abgleich: pro Karte echt/Proxy/fehlt, Summe „72 von 100 vorhanden“, Preis der fehlenden
       Karten, Einkaufsliste, Hinweis wenn eine Karte in mehreren Decks steckt, aber zu wenige da sind.
-- [ ] Druckstudio: „Nur fehlende Karten drucken“ und nach dem Druck „Gedruckte Karten als Proxies in
+- [x] Druckstudio: „Nur fehlende Karten drucken“ und nach dem Druck „Gedruckte Karten als Proxies in
       die Sammlung übernehmen“ (mit dem gedruckten Artwork).
-- [ ] Claude: Option „Karten aus meiner Sammlung bevorzugen“ beim Bauen, MCP-Tools `collection_search`
+- [x] Claude: Option „Karten aus meiner Sammlung bevorzugen“ beim Bauen, MCP-Tools `collection_search`
       und `collection_status`, Skill-Anleitung.
-- [ ] GUI Seite „Meine Sammlung“: Suche, Filter (alle/echt/Proxy), Sortierung, Liste oder Bilder,
+- [x] GUI Seite „Meine Sammlung“: Suche, Filter (alle/echt/Proxy), Sortierung, Liste oder Bilder,
       Anzahl ±, Proxy-/Foil-Schalter, Artwork wählen, in welchen Decks, Import/Export, Karte hinzufügen.
       Im Deck: Besitz-Markierung pro Karte und Sammlungs-Zusammenfassung.
 
@@ -61,7 +61,7 @@ Gleicher Name + Druck + Proxy + Foil + Sprache werden zusammengeführt (Anzahl a
 - [x] Kartenliste gruppieren (Kategorie, Typ, Manawert, Farbe) und sortieren (Name, Manawert, Preis).
 - [ ] Schnellsuche Strg+K: Decks und Aktionen.
 - [ ] Export für Cockatrice (.cod) und Tabletop Simulator (.json).
-- [ ] Überschneidungen zwischen Decks (in Sammlung und Deck-Abgleich, siehe Phase 2).
+- [x] Überschneidungen zwischen Decks (in Sammlung und Deck-Abgleich, siehe Phase 2).
 
 ## Abschluss
 
