@@ -37,7 +37,8 @@ MAX_AGE = float(os.environ.get("MTG_BULK_MAX_AGE_DAYS", 7)) * 86400
 BULK_TYPE = os.environ.get("MTG_BULK_TYPE", "all_cards")
 # Bump when the stored card JSON (scryfall.compact) gains fields; older DBs are flagged for refresh.
 # 2: layout + image_back (double-faced cards)
-SCHEMA_VERSION = 2
+# 3: tokens (tokens, emblems and markers a card creates, from all_parts)
+SCHEMA_VERSION = 3
 
 # Layouts in the bulk file that are not deck cards.
 _SKIP_LAYOUTS = {"token", "double_faced_token", "emblem", "art_series", "planar", "scheme", "vanguard", "augment", "host"}

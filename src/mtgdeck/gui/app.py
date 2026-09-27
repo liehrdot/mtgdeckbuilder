@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from .. import blacklist, brackets, carddb, collection, deckedit, proxy, scryfall, storage
 from .. import settings as settings_mod
-from ..cards import resolve
+from ..cards import deck_tokens, resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
@@ -717,6 +717,18 @@ async def api_similar(slug: str, card: str, limit: int = 12) -> list[dict[str, A
         raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
 
 
+@app.get("/api/decks/{slug}/tokens")
+async def api_tokens(slug: str) -> list[dict[str, Any]]:
+    try:
+        deck = storage.load(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    try:
+        return await deck_tokens(deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])])
+    except HttpError as exc:
+        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+
+
 @app.get("/api/decks/{slug}/ownership")
 async def api_ownership(slug: str) -> dict[str, Any]:
     try:
@@ -908,6 +920,7 @@ class PrintRequest(BaseModel):
     foil: bool | None = None
     upscale: bool | None = None
     only_missing: bool = False
+    tokens: int = Field(default=0, ge=0, le=20)
     version: int | None = None
 
 
@@ -918,9 +931,10 @@ def _print_deck(slug: str, version: int | None = None) -> dict[str, Any]:
 
 
 @app.get("/api/decks/{slug}/print/plan")
-async def api_print_plan(slug: str, source: str = "auto", version: int | None = None, only_missing: bool = False) -> dict[str, Any]:
+async def api_print_plan(slug: str, source: str = "auto", version: int | None = None, only_missing: bool = False,
+                         tokens: int = 0) -> dict[str, Any]:  # fmt: skip
     try:
-        return await proxy.plan(_print_deck(slug, version), source=source, only_missing=only_missing)
+        return await proxy.plan(_print_deck(slug, version), source=source, only_missing=only_missing, tokens=min(max(tokens, 0), 20))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -936,9 +950,9 @@ async def api_add_printed(slug: str, req: PrintRequest) -> dict[str, Any]:
 
 
 @app.get("/api/decks/{slug}/print/alternatives")
-async def api_print_alternatives(slug: str, card: str, side: str = "front") -> list[dict[str, Any]]:
+async def api_print_alternatives(slug: str, card: str, side: str = "front", token: bool = False) -> list[dict[str, Any]]:
     try:
-        return await proxy.alternatives(_print_deck(slug), card, "back" if side == "back" else "front")
+        return await proxy.alternatives(_print_deck(slug), card, "back" if side == "back" else "front", token=token)
     except HttpError as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -966,7 +980,7 @@ async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
         try:
             result = await proxy.prepare(
                 deck, source=req.source, stock=req.stock, foil=req.foil, upscale=req.upscale,
-                only_missing=req.only_missing, progress=progress,
+                only_missing=req.only_missing, tokens=req.tokens, progress=progress,
             )
         except ValueError as exc:
             job.emit(type="error", text=str(exc))

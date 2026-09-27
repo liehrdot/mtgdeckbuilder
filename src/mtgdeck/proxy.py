@@ -43,7 +43,7 @@ from xml.sax.saxutils import escape
 
 from . import carddb, collection, imaging, scryfall
 from . import settings as settings_mod
-from .cards import resolve
+from .cards import deck_tokens, resolve
 from .http import download, get_json, post_json
 from .storage import PROJECT_ROOT
 
@@ -108,8 +108,8 @@ class MpcFill:
             }
         return self._settings
 
-    async def search(self, names: list[str]) -> dict[str, list[str]]:
-        """Card face name -> image identifiers (best first)."""
+    async def search(self, names: list[str], card_type: str = "CARD") -> dict[str, list[str]]:
+        """Card face name -> image identifiers (best first). ``card_type``: CARD or TOKEN."""
         settings = await self.search_settings()
         out: dict[str, list[str]] = {}
         unique = list(dict.fromkeys(names))
@@ -117,7 +117,7 @@ class MpcFill:
             chunk = unique[i : i + EDITOR_SEARCH_MAX_QUERIES]
             body = {
                 "searchSettings": settings,
-                "queries": {name: {"query": process_query(name), "cardType": "CARD"} for name in chunk},
+                "queries": {name: {"query": process_query(name), "cardType": card_type} for name in chunk},
             }
             results = (await post_json(f"{self.base}/3/editorSearch/", body, ttl=24 * 3600)).get("results") or {}
             out.update({name: results.get(name) or [] for name in chunk})
@@ -222,11 +222,12 @@ def _slot_names(deck: dict[str, Any], only_missing: bool = False) -> list[tuple[
     return slots
 
 
-async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool = False) -> dict[str, Any]:
+async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool = False, tokens: int = 0) -> dict[str, Any]:
     """Decide the image for every card face (no downloads).
 
     source: 'auto' (own choices > MPC Autofill > Scryfall), 'mpcfill' (requires a server) or 'scryfall'.
     only_missing: leave out cards the collection already has (real or proxy).
+    tokens: copies of every token/emblem/marker the deck creates (0 = none).
     """
     cfg = settings_mod.load()
     if source == "mpcfill" and not cfg.get("mpcfill_server"):
@@ -283,11 +284,14 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
             face = f[side]
             entry[side] = {"face": face, "image": chosen.get(face), "mpc_hits": hit_counts.get(face, 0)} if face else None
         cards.append(entry)
+    if tokens > 0:
+        cards += await _token_entries(deck, tokens, mpc, warnings)
     missing = sorted(set(not_found) | {c["name"] for c in cards if not c["front"]["image"]})
+    quantity = sum(c["qty"] for c in cards)
     return {
         "slug": slug,
-        "quantity": len(slots),
-        "mpc_bracket": mpc_bracket(len(slots)),
+        "quantity": quantity,
+        "mpc_bracket": mpc_bracket(quantity),
         "server": bool(mpc),
         "cards": cards,
         "missing": missing,
@@ -296,7 +300,38 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
     }
 
 
-async def alternatives(deck: dict[str, Any], card_name: str, side: str = "front", limit: int = 40) -> list[dict[str, Any]]:
+async def _token_entries(deck: dict[str, Any], copies: int, mpc: MpcFill | None, warnings: list[str]) -> list[dict[str, Any]]:
+    """Plan entries for the tokens/emblems/markers of a deck (MPC Autofill token scans, else Scryfall)."""
+    names = deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])]
+    toks = await deck_tokens(names)
+    faces: dict[str, dict[str, Any]] = {}
+    for t in toks:
+        face = t["name"]
+        n = 2
+        while face in faces:
+            face = f"{t['name']} {n}"
+            n += 1
+        faces[face] = t
+    chosen = {face: _scryfall_option({"image": t["image"]}, "front", face) for face, t in faces.items() if t.get("image")}
+    hits: dict[str, list[str]] = {}
+    if mpc and faces:
+        try:
+            hits = await mpc.search(list(faces), card_type="TOKEN")
+            best = {face: ids[0] for face, ids in hits.items() if ids}
+            details = await mpc.cards(list(best.values()))
+            for face, ident in best.items():
+                chosen[face] = mpc.option(ident, details.get(ident, {}), face)
+        except Exception as exc:
+            warnings.append(f"Token-Suche bei MPC Autofill fehlgeschlagen ({exc}) – verwende Scryfall-Bilder.")
+    for face, opt in load_selection(deck["slug"]).items():
+        if face in faces:
+            chosen[face] = {**opt, "custom": True}
+    return [{"name": face, "qty": copies, "commander": False, "token": True, "type_line": t["type_line"], "from": t["from"],
+             "front": {"face": face, "image": chosen.get(face), "mpc_hits": len(hits.get(face, []))}, "back": None}
+            for face, t in faces.items()]  # fmt: skip
+
+
+async def alternatives(deck: dict[str, Any], card_name: str, side: str = "front", limit: int = 40, token: bool = False) -> list[dict[str, Any]]:
     """All image options for one card face: MPC Autofill scans and every Scryfall printing."""
     cfg = settings_mod.load()
     parts = card_name.split(" // ")
@@ -305,12 +340,13 @@ async def alternatives(deck: dict[str, Any], card_name: str, side: str = "front"
     mpc = _mpc_client(cfg, "auto")
     if mpc:
         try:
-            ids = (await mpc.search([face])).get(face, [])[:limit]
+            ids = (await mpc.search([face], card_type="TOKEN" if token else "CARD")).get(face, [])[:limit]
             details = await mpc.cards(ids)
             options += [mpc.option(i, details.get(i, {}), face) for i in ids]
         except Exception:
             pass
-    prints = await scryfall.search(f'!"{parts[0]}" game:paper', order="released", unique="prints", max_results=limit)
+    query = f'!"{parts[0]}" t:token include:extras' if token else f'!"{parts[0]}" game:paper'
+    prints = await scryfall.search(query, order="released", unique="prints", max_results=limit)
     for raw in prints["cards"]:
         c = scryfall.compact(raw)
         c["set_name"] = raw.get("set_name")
@@ -492,6 +528,7 @@ async def prepare(
     foil: bool | None = None,
     upscale: bool | None = None,
     only_missing: bool = False,
+    tokens: int = 0,
     progress: Progress | None = None,
 ) -> dict[str, Any]:
     """Download + process all images and write proxies/<slug>/<slug>.xml (local files only).
@@ -523,7 +560,7 @@ async def prepare(
     if stock.startswith("(P10)") and foil:
         raise ValueError("Plastik-Karten (P10) gibt es nicht in Foil.")
 
-    p = await plan(deck, source=source, only_missing=only_missing)
+    p = await plan(deck, source=source, only_missing=only_missing, tokens=tokens)
     jobs = {img["id"]: img for c in p["cards"] for side in ("front", "back") if c[side] and (img := c[side]["image"])}
     total, done = len(jobs), 0
     local: dict[str, Path] = {}

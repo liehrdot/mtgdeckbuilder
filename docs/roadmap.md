@@ -38,10 +38,10 @@ Gleicher Name + Druck + Proxy + Foil + Sprache werden zusammengeführt (Anzahl a
 
 ## Phase 3 – Tokens und Marker
 
-- [ ] Kartendaten um `tokens` erweitern (Scryfall `all_parts`: Tokens, Embleme, Monarch, Initiative,
+- [x] Kartendaten um `tokens` erweitern (Scryfall `all_parts`: Tokens, Embleme, Monarch, Initiative,
       Dungeons); Datenbank-Schema v3, ältere Datenbanken werden live ergänzt.
-- [ ] Deck-Ansicht: Liste „Tokens & Marker“ mit Bildern und welche Karte sie erzeugt.
-- [ ] Druckstudio: „Tokens mitdrucken“ (MPC-Autofill-Token-Suche, sonst Scryfall), Anzahl pro Token.
+- [x] Deck-Ansicht: Liste „Tokens & Marker“ mit Bildern und welche Karte sie erzeugt.
+- [x] Druckstudio: „Tokens mitdrucken“ (MPC-Autofill-Token-Suche, sonst Scryfall), Anzahl pro Token.
 
 ## Phase 4 – Testhand und Wahrscheinlichkeiten
 

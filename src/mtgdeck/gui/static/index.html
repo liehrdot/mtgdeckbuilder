@@ -269,6 +269,10 @@
           <aside class="deck-side">
             <section class="panel"><h2>Prüfung</h2><div id="validation"></div></section>
             <section class="panel" id="own-panel" hidden><h2>Sammlung</h2><div id="own-summary"></div></section>
+            <section class="panel" id="token-panel" hidden>
+              <h2>Tokens &amp; Marker <span id="token-count" class="count"></span></h2>
+              <ul id="token-list" class="token-list"></ul>
+            </section>
             <section class="panel"><h2>Statistik</h2><div id="stats"></div></section>
           </aside>
         </div>
@@ -387,6 +391,10 @@
             </label>
             <label class="field">Kartenstärke <select name="stock"></select></label>
             <label class="check"><input type="checkbox" name="foil"> Foil</label>
+            <span class="check token-opt" title="Tokens, Embleme und Marker (z. B. Monarch) des Decks mitdrucken">
+              <label class="check"><input type="checkbox" name="tokens"> Tokens mitdrucken</label>
+              <label class="check">je <input type="number" name="token_copies" min="1" max="20" value="2" aria-label="Exemplare pro Token"></label>
+            </span>
             <label class="check needs-collection" hidden title="Karten, die du (echt oder als Proxy) schon hast, werden nicht gedruckt">
               <input type="checkbox" name="only_missing"> Nur fehlende Karten</label>
             <label class="check" title="Opt-in: Scryfall-Scans mit Real-ESRGAN auf 600 DPI hochrechnen (braucht das Zusatzprogramm, kostet Rechenzeit)">

@@ -34,6 +34,22 @@ def _back_image(card: dict[str, Any], size: str = "normal") -> str | None:
     return None
 
 
+# Related objects worth printing next to the deck: tokens, emblems and markers such as
+# The Monarch, The Initiative or dungeons (Scryfall lists them in all_parts).
+_MARKER_TYPES = ("Emblem", "Card", "Dungeon")
+
+
+def _tokens(card: dict[str, Any]) -> list[dict[str, str]]:
+    out = []
+    for part in card.get("all_parts") or []:
+        if part.get("id") == card.get("id"):
+            continue
+        type_line = part.get("type_line") or ""
+        if part.get("component") == "token" or (part.get("component") == "combo_piece" and type_line.startswith(_MARKER_TYPES)):
+            out.append({"id": part.get("id"), "name": part.get("name"), "type_line": type_line})
+    return out
+
+
 def compact(card: dict[str, Any], *, with_text: bool = True) -> dict[str, Any]:
     """Reduce a Scryfall card object to what deckbuilding needs (keeps LLM context small)."""
     prices = card.get("prices") or {}
@@ -52,6 +68,7 @@ def compact(card: dict[str, Any], *, with_text: bool = True) -> dict[str, Any]:
         "image_back": _back_image(card),
         "layout": card.get("layout"),
         "scryfall_uri": card.get("scryfall_uri"),
+        "tokens": _tokens(card),
     }
     if "_query_name" in card:
         out["_query_name"] = card["_query_name"]

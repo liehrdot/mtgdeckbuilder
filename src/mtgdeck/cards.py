@@ -35,6 +35,28 @@ async def resolve(names: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str
     return by_name, renames, missing
 
 
+async def deck_tokens(names: list[str]) -> list[dict[str, Any]]:
+    """Tokens, emblems and markers the given cards create, merged by name and type:
+    ``[{"name", "type_line", "id", "image", "from": [card names]}]``."""
+    data, _, _ = await resolve(names)
+    stale = [n for n, c in data.items() if "tokens" not in c]  # DB built before schema v3
+    if stale:
+        try:
+            raw, _ = await scryfall.collection(stale)
+            for r in raw:
+                if r["name"] in data:
+                    data[r["name"]]["tokens"] = scryfall.compact(r)["tokens"]
+        except Exception:  # offline: tokens of these cards stay unknown
+            pass
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for name, c in data.items():
+        for t in c.get("tokens") or []:
+            entry = merged.setdefault((t["name"], t["type_line"]), {**t, "image": scryfall.image_url(t["id"]) if t.get("id") else None, "from": []})
+            if name not in entry["from"]:
+                entry["from"].append(name)
+    return sorted(merged.values(), key=lambda t: (not t["type_line"].startswith("Token"), t["name"]))
+
+
 async def _complete_double_faced(cards: list[dict[str, Any]]) -> None:
     """Cards from a DB built before layout/image_back existed: fetch those fields live for
     multi-face cards (otherwise their back faces would be missing in previews and prints)."""

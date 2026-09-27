@@ -250,6 +250,8 @@ async def add_printed(plan: dict[str, Any]) -> dict[str, Any]:
     """After printing proxies: add the printed cards as proxy entries with the printed artwork."""
     items = []
     for c in plan.get("cards", []):
+        if c.get("token"):
+            continue
         img = (c.get("front") or {}).get("image") or {}
         m = _SCRYFALL_ID_RE.search(img.get("full") or img.get("thumb") or "")
         item: dict[str, Any] = {"name": c["name"], "qty": c["qty"], "proxy": True}

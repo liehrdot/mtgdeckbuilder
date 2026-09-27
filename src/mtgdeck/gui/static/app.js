@@ -538,6 +538,7 @@ async function openDeck(slug) {
   renderHistory(d);
   renderQuestions(d);
   loadOwnership(d);
+  loadTokens(d);
   $("#deck-menu").open = false;
   return true;
 }
@@ -903,6 +904,23 @@ function ownershipBadge(name, need = 1, commander = false) {
   if (real + prox > 0) return `<span class="own part" title="Nur ${real + prox} von ${need} vorhanden">${real + prox}/${need}</span>`;
   return "";  // missing: no badge (the Sammlung panel and "nach Besitz" show them) – keeps the list calm
 }
+
+// ---------- tokens, emblems and markers the deck creates ----------
+async function loadTokens(d) {
+  $("#token-panel").hidden = true;
+  let toks = [];
+  try { toks = await api(`/api/decks/${enc(d.slug)}/tokens`); } catch { return; }
+  if (currentDeck?.slug !== d.slug || !toks.length) return;
+  $("#token-panel").hidden = false;
+  $("#token-count").textContent = toks.length;
+  $("#token-list").innerHTML = toks.map((t) => `<li class="card" data-img="${esc(t.image || "")}" data-name="${esc(t.name)}">
+    ${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : ""}
+    <div><b>${esc(t.name)}</b><div class="muted small">${esc(t.type_line.replace(/^Token /, ""))} · von ${esc(t.from.slice(0, 3).join(", "))}${t.from.length > 3 ? ` +${t.from.length - 3}` : ""}</div></div></li>`).join("");
+}
+$("#token-list").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-name]");
+  if (li) showCardView(li.dataset.name, { image: li.dataset.img });
+});
 
 // ---------- replacement suggestions ----------
 let similarFor = null;
@@ -1370,9 +1388,11 @@ let prepared = { faces: {} };
 const printOpts = () => {
   const f = $("#print-form").elements;
   return { source: f.source.value, stock: f.stock.value, foil: f.foil.checked, upscale: f.upscale.checked,
-    only_missing: !f.only_missing.closest("[hidden]") && f.only_missing.checked };
+    only_missing: !f.only_missing.closest("[hidden]") && f.only_missing.checked,
+    tokens: f.tokens.checked ? Math.min(20, Math.max(1, Number(f.token_copies.value) || 1)) : 0 };
 };
 $("#print-form").addEventListener("submit", (e) => { e.preventDefault(); loadPlan(); });
+const planQuery = () => { const o = printOpts(); return new URLSearchParams({ source: o.source, only_missing: o.only_missing, tokens: o.tokens }).toString(); };
 
 async function loadPlan() {
   $("#print-summary").textContent = "Lade Vorschau …";
@@ -1380,7 +1400,7 @@ async function loadPlan() {
   const slug = currentDeck.slug;
   try {
     [printPlan, prepared] = await Promise.all([
-      api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}&only_missing=${printOpts().only_missing}`),
+      api(`/api/decks/${enc(slug)}/print/plan?${planQuery()}`),
       api(`/api/decks/${enc(slug)}/print/prepared`),
     ]);
   } catch (err) { $("#print-summary").textContent = err.message; return; }
@@ -1429,7 +1449,7 @@ function cardTile(c, i, side) {
   const img = f?.image;
   return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
     ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
-    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
+    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.token ? '<span class="tag tok">Token</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
     ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}" aria-label="Karte umdrehen">↻</span>` : ""}
     ${f && prepared.faces?.[f.face] ? `<span class="zoom" data-compare="${esc(f.face)}" title="Vorher/Nachher vergleichen">🔍 ${prepared.faces[f.face].dpi ? esc(prepared.faces[f.face].dpi) + " DPI" : ""}</span>` : ""}
     <div class="cap">${esc(f?.face || c.name)}${c.back ? `<span class="muted"> · ${side === "front" ? "Vorderseite" : "Rückseite"}</span>` : ""}</div>
@@ -1454,13 +1474,13 @@ $("#print-grid").addEventListener("click", (e) => {
 let pickerCtx = null;
 async function openPicker(i, side) {
   const c = printPlan.cards[i];
-  pickerCtx = { i, card: c, side, face: c[side].face };
+  pickerCtx = { i, card: c, side, face: c[side].face, token: !!c.token };
   $("#picker-title").textContent = `${c[side].face}${side === "back" ? " (Rückseite)" : ""}`;
   $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und alle Scryfall-Drucke …";
   $("#picker-grid").innerHTML = "";
   $("#picker").showModal();
   try {
-    const opts = await api(`/api/decks/${enc(currentDeck.slug)}/print/alternatives?card=${enc(c.name)}&side=${side}`);
+    const opts = await api(`/api/decks/${enc(currentDeck.slug)}/print/alternatives?card=${enc(c.name)}&side=${side}&token=${!!c.token}`);
     pickerCtx.options = opts;
     const current = c[side].image?.id;
     $("#picker-hint").textContent = `${opts.length} Bilder · MPC-Autofill-Scans sind druckoptimiert (mit Beschnitt-Rand)`;
@@ -1476,7 +1496,7 @@ async function pick(option) {
   await api(`/api/decks/${enc(slug)}/print/choose`, { method: "POST", body: { face, option } });
   $("#picker").close();
   // update just this tile: re-rendering the whole grid would make the page jump to the top
-  const plan = await api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}&only_missing=${printOpts().only_missing}`);
+  const plan = await api(`/api/decks/${enc(slug)}/print/plan?${planQuery()}`);
   if (currentDeck?.slug !== slug) return;
   printPlan = plan;
   renderPlanSummary();

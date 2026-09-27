@@ -51,6 +51,10 @@ CARDS = {
         card("Forest", type_line="Basic Land — Forest", text="({T}: Add {G}.)", cmc=0, eur=None, mana_cost=""),
         card("Swamp", type_line="Basic Land — Swamp", text="({T}: Add {B}.)", cmc=0, eur=None, mana_cost=""),
         card("Relentless Rats", ci="B", text="A deck can have any number of cards named Relentless Rats."),
+        {**card("Pitiless Plunderer", ci="B", text="Whenever another creature you control dies, create a Treasure token."),
+         "all_parts": [{"id": "self", "component": "combo_piece", "name": "Pitiless Plunderer", "type_line": "Creature — Zombie Pirate"},
+                       {"id": "a0b0-treasure", "component": "token", "name": "Treasure", "type_line": "Token Artifact — Treasure"},
+                       {"id": "c0d0-monarch", "component": "combo_piece", "name": "The Monarch", "type_line": "Card"}]},  # fmt: skip
         card("Hullbreacher", ci="U", legal=False),
         {
             **card("Delver of Secrets // Insectile Aberration", ci="U"),
@@ -95,7 +99,7 @@ PRINTINGS = {
 }
 
 MPC_SERVER = "https://mpc.test"
-MPC_HITS = {"sol ring": ["drive-sol-1", "drive-sol-2"], "insectile aberration": ["drive-insect"]}
+MPC_HITS = {"sol ring": ["drive-sol-1", "drive-sol-2"], "insectile aberration": ["drive-insect"], "treasure": ["drive-treasure"]}
 
 
 def lookup_card(name: str) -> dict[str, Any] | None:

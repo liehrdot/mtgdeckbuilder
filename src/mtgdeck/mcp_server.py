@@ -42,7 +42,7 @@ Currency = Literal["eur", "usd"]
 
 def _slim(card: dict[str, Any]) -> dict[str, Any]:
     """Card data for the model: drop images/links and empty fields to save context."""
-    drop = {"image", "image_back", "scryfall_uri", "layout"}
+    drop = {"image", "image_back", "scryfall_uri", "layout", "tokens"}
     return {k: v for k, v in card.items() if k not in drop and v not in (None, "", [], False)}
 
 
