@@ -413,7 +413,7 @@ function tickElapsed() {
 }
 
 function setBusy(busy) {
-  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn"]) {
+  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn"]) {
     const b = $(sel);
     b.disabled = busy;
     b.title = busy ? "Es läuft gerade ein Auftrag" : "";
@@ -437,6 +437,7 @@ function handleEvent(ev) {
     case "error": logLine("error", "Fehler: " + ev.text); if (jobInfo) jobInfo.error = ev.text; break;
     case "result": logLine("result", ev.text); break;
     case "suggestions": renderSuggestions(ev.items); break;
+    case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
     case "progress": {
       const bar = $("#progress");
       bar.hidden = false;
@@ -486,6 +487,7 @@ async function finishJob(ev) {
       go(`#/deck/${enc(info.slug)}/verlauf`);
       break;
     case "finder":
+    case "upgrade":
       info.dismissed = true;
       break;
     case "print":
@@ -535,6 +537,9 @@ async function openDeck(slug) {
   setProfile($("#retune-form .profile-fields"), d.power_profile);
   $("#retune-form").elements.request.value = "";
   renderPower(d);
+  $("#upgrade-budget-field").hidden = !!d.proxy;
+  $("#upgrade-cur").textContent = `(${(d.currency || "eur").toUpperCase()})`;
+  if (upgrades?.slug !== d.slug) $("#upgrade-result").hidden = true;
   renderHistory(d);
   renderQuestions(d);
   loadOwnership(d);
@@ -1189,6 +1194,76 @@ $("#refine-chips").addEventListener("click", (e) => {
   const input = $("#refine-form").elements.request;
   input.value = chip.dataset.q;
   input.focus();
+});
+
+// ---------- upgrade suggestions ----------
+let upgrades = null;  // { slug, items, currency, budget }
+$("#upgrade-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentDeck || currentJob) return;
+  const f = new FormData(e.target);
+  const body = { budget: f.get("budget") ? Number(f.get("budget")) : null, focus: f.get("focus") || null, count: Number(f.get("count")) };
+  const { slug, name } = currentDeck;
+  try {
+    const { job } = await api(`/api/decks/${enc(slug)}/upgrades`, { method: "POST", body });
+    upgrades = { slug, items: [], budget: body.budget };
+    $("#upgrade-result").hidden = true;
+    startJob(job, `Claude sucht Upgrades für ${name}`, { kind: "upgrade", slug, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
+    $("#tune-job-slot").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) { fail(err); }
+});
+
+function renderUpgrades(ev, slug) {
+  upgrades = { ...(upgrades || {}), slug, items: ev.items, currency: (ev.currency || "eur").toUpperCase() };
+  if (currentDeck?.slug !== slug) return;
+  $("#upgrade-result").hidden = false;
+  $("#upgrade-summary").textContent = ev.summary || "";
+  $("#upgrade-list").innerHTML = ev.items.map((u, i) => `<li>
+    <label class="up-check"><input type="checkbox" data-i="${i}" checked aria-label="${esc(u.add)} statt ${esc(u.remove)} übernehmen"></label>
+    <span class="up-imgs">
+      ${u.image_remove ? `<img class="card out" data-img="${esc(u.image_remove)}" data-name="${esc(u.remove)}" src="${esc(u.image_remove)}" alt="">` : ""}
+      ${u.image ? `<img class="card in" data-img="${esc(u.image)}" data-name="${esc(u.add)}" src="${esc(u.image)}" alt="">` : ""}
+    </span>
+    <div class="up-text">
+      <div><span class="minus">− ${esc(u.remove)}</span> <span aria-hidden="true">→</span> <b class="plus">+ ${esc(u.add)}</b>
+        ${u.impact ? `<span class="tagb">${esc(u.impact)}</span>` : ""}${u.owned ? '<span class="own ok" title="Schon in deiner Sammlung">✓ Sammlung</span>' : ""}</div>
+      <div class="muted small">${esc(u.reason)}</div>
+    </div>
+    <span class="up-price">${u.owned ? "0 (hast du)" : u.price != null ? esc(fmtPrice(u.price, upgrades.currency)) : "–"}</span>
+  </li>`).join("");
+  updateUpgradeTotal();
+  $("#upgrade-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function selectedUpgrades() {
+  return $$("#upgrade-list input[data-i]").filter((b) => b.checked).map((b) => upgrades.items[Number(b.dataset.i)]);
+}
+function updateUpgradeTotal() {
+  const sel = selectedUpgrades();
+  const total = sel.reduce((a, u) => a + (u.owned ? 0 : u.price || 0), 0);
+  const over = upgrades.budget != null && total > upgrades.budget;
+  $("#upgrade-total").innerHTML = `${sel.length} ausgewählt · <b class="${over ? "bad" : ""}">${esc(fmtPrice(total, upgrades.currency))}</b>`
+    + (upgrades.budget != null ? ` von ${esc(fmtPrice(upgrades.budget, upgrades.currency))}` : "");
+  $("#upgrade-apply").disabled = !sel.length;
+}
+$("#upgrade-list").addEventListener("change", updateUpgradeTotal);
+$("#upgrade-apply").addEventListener("click", async () => {
+  const sel = selectedUpgrades();
+  if (!sel.length || !currentDeck || upgrades?.slug !== currentDeck.slug) return;
+  const body = {
+    add: sel.map((u) => ({ name: u.add, qty: 1 })), remove: sel.map((u) => u.remove),
+    note: `Upgrades: ${sel.map((u) => `${u.remove} → ${u.add}`).join(", ")}`,
+  };
+  try {
+    const r = await api(`/api/decks/${enc(currentDeck.slug)}/cards`, { method: "POST", body });
+    const slug = currentDeck.slug;
+    upgrades = null;
+    $("#upgrade-result").hidden = true;
+    currentDeck = null;
+    await refreshDeckList();
+    go(`#/deck/${enc(slug)}/verlauf`);
+    toast(`${sel.length} Upgrades übernommen (v${r.version}).${r.legal ? "" : " Achtung: Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
+  } catch (err) { fail(err); }
 });
 
 function retuneTarget() {

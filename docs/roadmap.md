@@ -51,10 +51,10 @@ Gleicher Name + Druck + Proxy + Foil + Sprache werden zusammengeführt (Anzahl a
 
 ## Phase 5 – Upgrade-Pfad
 
-- [ ] „Upgrade-Vorschläge“ im Tab „Anpassen“: Budget (z. B. 20 €) und optional ein Fokus → Claude
+- [x] „Upgrade-Vorschläge“ im Tab „Anpassen“: Budget (z. B. 20 €) und optional ein Fokus → Claude
       liefert eine sortierte Liste „+ rein / − raus, Preis, Wirkung, Grund“ (strukturierte Antwort,
       nur lesend; Karten aus der Sammlung zählen als kostenlos).
-- [ ] Vorschläge einzeln anhaken und „Übernehmen“ – ohne weiteren Claude-Lauf (nutzt Phase 1).
+- [x] Vorschläge einzeln anhaken und „Übernehmen“ – ohne weiteren Claude-Lauf (nutzt Phase 1).
 
 ## Phase 6 – Kleinere Verbesserungen
 

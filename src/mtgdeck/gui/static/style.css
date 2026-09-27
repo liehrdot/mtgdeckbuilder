@@ -457,6 +457,26 @@ ul.issues li { margin-bottom: 3px; }
 .qa-form textarea { min-height: 44px; }
 .qa-form .btn { height: 44px; }
 
+/* upgrade suggestions */
+.upgrade-form { display: grid; grid-template-columns: 140px minmax(0, 1fr) 90px auto; gap: var(--space-3); align-items: end; }
+.upgrade-form .field { margin: 0; }
+#upgrade-result { margin-top: var(--space-4); }
+.upgrade-list { list-style: none; margin: 0 0 var(--space-3); padding: 0; }
+.upgrade-list li { display: grid; grid-template-columns: 24px 88px minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-2) 0; border-top: 1px solid var(--border); }
+.up-check input { width: 18px; height: 18px; }
+.up-imgs { display: flex; gap: 4px; }
+.up-imgs img { width: 40px; aspect-ratio: 488 / 680; object-fit: cover; border-radius: 3px; }
+.up-imgs img.out { opacity: .55; }
+.up-text { font-size: 14px; min-width: 0; }
+.up-text .own { width: auto; }
+.up-price { font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
+.upgrade-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-4); }
+@media (max-width: 700px) {
+  .upgrade-form { grid-template-columns: 1fr 1fr; }
+  .upgrade-list li { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .up-imgs { display: none; }
+}
+
 /* test hand + probabilities */
 .hand { display: flex; flex-wrap: wrap; gap: var(--space-2); min-height: 40px; }
 .hand-card { width: min(130px, 22vw); padding: 0; border: none; background: none; cursor: pointer; border-radius: 6%/4.4%; transition: transform .12s; }

@@ -322,6 +322,29 @@
           </div>
         </section>
 
+        <section class="panel" id="upgrade-panel">
+          <h2>Upgrade-Vorschläge</h2>
+          <p class="muted">Claude sucht die wirkungsvollsten Tausche für dein Budget. Du wählst aus, was übernommen wird –
+            ohne weiteren KI-Lauf.</p>
+          <form id="upgrade-form" class="upgrade-form" autocomplete="off">
+            <label class="field" id="upgrade-budget-field"><span>Budget <span class="muted" id="upgrade-cur">(EUR)</span></span>
+              <input name="budget" type="number" min="0" step="5" placeholder="unbegrenzt" inputmode="numeric"></label>
+            <label class="field"><span>Fokus <span class="muted">(optional)</span></span>
+              <input name="focus" placeholder="z. B. mehr Kartenzug, schnellerer Start, Tutoren"></label>
+            <label class="field">Anzahl
+              <select name="count"><option>5</option><option selected>8</option><option>12</option></select></label>
+            <button type="submit" class="btn primary" id="upgrade-btn">Vorschläge holen</button>
+          </form>
+          <div id="upgrade-result" hidden>
+            <p id="upgrade-summary"></p>
+            <ul id="upgrade-list" class="upgrade-list"></ul>
+            <div class="upgrade-actions">
+              <span id="upgrade-total" class="small"></span>
+              <button type="button" class="btn primary" id="upgrade-apply">Ausgewählte übernehmen</button>
+            </div>
+          </div>
+        </section>
+
         <section class="panel" id="power-panel">
           <div class="panel-head">
             <h2>Stärke ändern</h2>

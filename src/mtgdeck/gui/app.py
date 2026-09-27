@@ -105,7 +105,7 @@ READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_comma
 WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
                "edit_deck", "update_collection"]  # fmt: skip
-Finish = Callable[[Job, bool, str], Awaitable[None]]
+Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
 
 
 async def _run_claude(
@@ -118,7 +118,7 @@ async def _run_claude(
     finish: Finish | None = None,
 ) -> None:
     """Run Claude Code on ``prompt``. ``read_only`` restricts the mtg tools to research;
-    ``finish(job, ok, final_text)`` replaces the default end (detect the saved deck)."""
+    ``finish(job, ok, final_text, structured_output)`` replaces the default end (detect the saved deck)."""
     try:
         from claude_agent_sdk import (
             AssistantMessage,
@@ -176,7 +176,7 @@ async def _run_claude(
         job.emit(type="error", text=f"{type(exc).__name__}: {exc}")
 
     if finish is not None:
-        await finish(job, ok, final_text)
+        await finish(job, ok, final_text, structured)
         job.done = True
         return
 
@@ -555,6 +555,118 @@ async def api_retune(req: RetuneRequest) -> dict[str, str]:
     return _start(retune_prompt(req, deck), req.model)
 
 
+# --- upgrade suggestions ----------------------------------------------------------------------
+
+UPGRADE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "One or two sentences: what the upgrades achieve together"},
+        "upgrades": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "add": {"type": "string", "description": "English card name to put in"},
+                    "remove": {"type": "string", "description": "Card of the deck to take out"},
+                    "price": {"type": ["number", "null"], "description": "Price of the new card in the deck currency"},
+                    "owned": {"type": "boolean", "description": "The user already owns the new card (collection)"},
+                    "impact": {"type": "string", "description": "Short effect label, e.g. 'mehr Kartenzug', 'schnellerer Ramp'"},
+                    "reason": {"type": "string", "description": "Why this swap, one or two sentences (German)"},
+                },
+                "required": ["add", "remove", "reason"],
+            },
+        },
+    },
+    "required": ["upgrades"],
+}
+
+
+class UpgradeRequest(BaseModel):
+    budget: float | None = Field(default=None, ge=0)
+    focus: str | None = None
+    count: int = Field(default=8, ge=1, le=20)
+    model: str | None = None
+
+
+def upgrade_prompt(deck: dict[str, Any], req: UpgradeRequest, has_collection: bool) -> str:
+    cur = deck.get("currency", "eur").upper()
+    if deck.get("proxy"):
+        money = "- Proxy-Deck: Preise spielen keine Rolle, nimm die stärksten passenden Karten."
+    elif req.budget is not None:
+        money = f"- Budget für alle Upgrades zusammen: max. {req.budget:g} {cur} (Summe der Preise der neuen Karten)."
+    else:
+        money = "- Kein Budget-Limit, aber nenne den Preis jeder neuen Karte."
+    lines = [
+        f"Schlage Upgrades für das gespeicherte Commander-Deck `{deck['slug']}` vor (lade es mit `load_deck`, "
+        f"{storage.level_text(deck)}). Recherchiere wie beim Bauen (Skill `commander-deckbuilder`): "
+        "`edhrec_recommendations`, `similar_cards`, `find_combos`, `get_cards`.",
+        "",
+        money,
+        f"- Bis zu {req.count} Tausche, sortiert nach Wirkung (stärkster zuerst). Jeder Tausch: genau eine Karte rein "
+        "(`add`), eine Karte raus (`remove`, muss im Deck sein, keine Basic Lands außer für Länder-Tausche).",
+        "- Bracket, Hausregeln, Farbidentität und Blacklist (`get_blacklist`) einhalten; keine zusätzlichen Game Changer "
+        "über dem Limit, keine im Bracket verbotenen Combos.",
+    ]
+    if req.focus:
+        lines.append(f"- Fokus des Nutzers: {req.focus}")
+    if has_collection:
+        lines.append("- Sammlung: Karten, die der Nutzer schon besitzt (`collection_search`), kosten nichts – bevorzuge sie "
+                     "bei gleicher Wirkung und setze `owned` auf true.")
+    lines += ["", "Du läufst im GUI-Modus: keine Rückfragen und nichts speichern – der Nutzer wählt die Tausche selbst aus. "
+              "Texte auf Deutsch."]
+    return "\n".join(lines)
+
+
+async def _enrich_upgrades(deck: dict[str, Any], structured: Any) -> list[dict[str, Any]]:
+    """Check Claude's suggestions against the deck and add images, current prices and ownership."""
+    items = (structured or {}).get("upgrades") if isinstance(structured, dict) else None
+    if not items:
+        return []
+    in_deck = {c["name"] for c in deck.get("cards", [])}
+    try:
+        data, renames, _ = await resolve([i.get("add", "") for i in items] + [i.get("remove", "") for i in items])
+    except Exception:
+        data, renames = {}, {}
+    owned = collection.owned_counts()
+    cur = "price_usd" if deck.get("currency") == "usd" else "price_eur"
+    out, seen = [], set()
+    for i in items:
+        add = renames.get(i.get("add", ""), i.get("add", ""))
+        remove = renames.get(i.get("remove", ""), i.get("remove", ""))
+        if add not in data or add in in_deck or remove not in in_deck or add in seen:
+            continue
+        seen.add(add)
+        have = owned.get(add, {})
+        price = data[add].get(cur)
+        out.append({
+            "add": add, "remove": remove, "reason": i.get("reason", ""), "impact": i.get("impact", ""),
+            "price": float(price) if price else None, "owned": bool(have.get("real") or have.get("proxy")),
+            "image": data[add].get("image"), "image_remove": (data.get(remove) or {}).get("image"),
+            "type_line": data[add].get("type_line"),
+        })  # fmt: skip
+    return out
+
+
+@app.post("/api/decks/{slug}/upgrades")
+async def api_upgrades(slug: str, req: UpgradeRequest) -> dict[str, str]:
+    try:
+        deck = storage.load(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
+        items = await _enrich_upgrades(deck, structured) if ok else []
+        if items:
+            job.emit(type="upgrades", items=items, summary=(structured or {}).get("summary", ""), currency=deck.get("currency", "eur"))
+        elif ok:
+            job.emit(type="error", text="Keine verwertbaren Vorschläge erhalten.")
+        job.emit(type="done", ok=bool(items), deck=None)
+
+    prompt = upgrade_prompt(deck, req, bool(collection.load()))
+    output_format = {"type": "json_schema", "schema": UPGRADE_SCHEMA}
+    return _start(prompt, req.model, output_format, read_only=True, finish=finish)
+
+
 @app.get("/api/decks/{slug}/questions")
 async def api_questions(slug: str) -> list[dict[str, Any]]:
     return storage.questions(slug)
@@ -568,7 +680,7 @@ async def api_ask(slug: str, req: AskRequest) -> dict[str, str]:
         raise HTTPException(404, str(exc)) from exc
     question = req.question.strip()
 
-    async def finish(job: Job, ok: bool, answer: str) -> None:
+    async def finish(job: Job, ok: bool, answer: str, _structured: Any = None) -> None:
         if ok and answer:
             cards = await _card_refs(answer)
             entry = storage.add_question(slug, question, answer, version=deck.get("version"), cards=cards)
