@@ -1141,6 +1141,11 @@ function originTag(img) {
 }
 
 function renderPlan() {
+  renderPlanSummary();
+  $("#print-grid").innerHTML = printPlan.cards.map((c, i) => cardTile(c, i, "front")).join("");
+}
+
+function renderPlanSummary() {
   const p = printPlan;
   const imgs = p.cards.flatMap((c) => [c.front?.image, c.back?.image]).filter(Boolean);
   const mpc = imgs.filter((i) => i.origin === "mpcfill").length;
@@ -1149,7 +1154,6 @@ function renderPlan() {
     + (p.server ? "" : ' · <span class="warn">kein MPC-Autofill-Server eingestellt (nur Scryfall)</span>')
     + (p.missing.length ? ` · <span class="bad">ohne Bild: ${esc(p.missing.join(", "))}</span>` : "")
     + (p.warnings.length ? `<br><span class="warn">${esc(p.warnings.join(" "))}</span>` : "");
-  $("#print-grid").innerHTML = p.cards.map((c, i) => cardTile(c, i, "front")).join("");
 }
 
 function cardTile(c, i, side) {
@@ -1182,7 +1186,7 @@ $("#print-grid").addEventListener("click", (e) => {
 let pickerCtx = null;
 async function openPicker(i, side) {
   const c = printPlan.cards[i];
-  pickerCtx = { card: c, side, face: c[side].face };
+  pickerCtx = { i, card: c, side, face: c[side].face };
   $("#picker-title").textContent = `${c[side].face}${side === "back" ? " (Rückseite)" : ""}`;
   $("#picker-hint").textContent = "Lade Bilder von MPC Autofill und alle Scryfall-Drucke …";
   $("#picker-grid").innerHTML = "";
@@ -1199,9 +1203,20 @@ async function openPicker(i, side) {
   } catch (err) { $("#picker-hint").textContent = err.message; }
 }
 async function pick(option) {
-  await api(`/api/decks/${enc(currentDeck.slug)}/print/choose`, { method: "POST", body: { face: pickerCtx.face, option } });
+  const { i, card, side, face } = pickerCtx;
+  const slug = currentDeck.slug;
+  await api(`/api/decks/${enc(slug)}/print/choose`, { method: "POST", body: { face, option } });
   $("#picker").close();
-  loadPlan();
+  // update just this tile: re-rendering the whole grid would make the page jump to the top
+  const plan = await api(`/api/decks/${enc(slug)}/print/plan?source=${printOpts().source}`);
+  if (currentDeck?.slug !== slug) return;
+  printPlan = plan;
+  renderPlanSummary();
+  const j = plan.cards.findIndex((c) => c.name === card.name);
+  const tile = $(`#print-grid .pcard[data-i="${i}"]`);
+  if (j < 0 || !tile) { renderPlan(); return; }
+  tile.outerHTML = cardTile(plan.cards[j], j, side);
+  $(`#print-grid .pcard[data-i="${j}"]`)?.focus({ preventScroll: true });
 }
 $("#picker-grid").addEventListener("click", (e) => {
   const t = e.target.closest("[data-k]");
