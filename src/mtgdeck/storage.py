@@ -1,11 +1,13 @@
 """Saved decks live as JSON (+ a plain text export) in the decks/ directory, with a full
-snapshot per version in decks/.versions/<slug>/ (history, diffs, restore, copy)."""
+snapshot per version in decks/.versions/<slug>/ (history, diffs, restore, copy) and the questions
+asked about a deck in decks/.questions/<slug>.json."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,7 +53,7 @@ def diff(old: dict[str, Any], new: dict[str, Any]) -> dict[str, list[str]]:
     return {"added": added, "removed": removed}
 
 
-def _level(deck: dict[str, Any]) -> str:
+def level_text(deck: dict[str, Any]) -> str:
     tier = (deck.get("power_profile") or {}).get("tier")
     labels = {"low": "unteres", "mid": "mittleres", "high": "oberes"}
     return f"{labels[tier]} Bracket {deck.get('bracket')}" if tier else f"Bracket {deck.get('bracket')}"
@@ -60,7 +62,7 @@ def _level(deck: dict[str, Any]) -> str:
 def _metrics(deck: dict[str, Any]) -> dict[str, Any]:
     v = deck.get("validation") or {}
     return {
-        "level": _level(deck),
+        "level": level_text(deck),
         "price": v.get("price_total"),
         "power": ((v.get("bracket") or {}).get("power") or {}).get("value"),
         "legal": v.get("legal"),
@@ -112,7 +114,7 @@ def save(deck: dict[str, Any]) -> dict[str, Any]:
         old["version"] = 1
         old.setdefault("history", []).append(
             {"version": 1, "at": old.get("updated") or now, "note": "Ursprüngliche Version", "added": [], "removed": [],
-             "from": None, "to": _level(old), **_metrics(old)}  # fmt: skip
+             "from": None, "to": level_text(old), **_metrics(old)}  # fmt: skip
         )
         _snapshot(old)
 
@@ -128,8 +130,8 @@ def save(deck: dict[str, Any]) -> dict[str, Any]:
                 "at": now,
                 "note": note or ("Erstellt" if old is None else ""),
                 **change,
-                "from": _level(old) if old else None,
-                "to": _level(deck),
+                "from": level_text(old) if old else None,
+                "to": level_text(deck),
                 **_metrics(deck),
             }
         )
@@ -222,11 +224,53 @@ def delete(deck_slug: str) -> None:
     s = slug(deck_slug)
     for ext in ("json", "txt"):
         (DECKS_DIR / f"{s}.{ext}").unlink(missing_ok=True)
+    _questions_file(s).unlink(missing_ok=True)
     vdir = _versions_dir(s)
     if vdir.exists():
         for f in vdir.glob("*.json"):
             f.unlink()
         vdir.rmdir()
+
+
+# --- questions about a deck ("Fragen zum Deck") ---------------------------------------------------
+
+QUESTIONS_DIRNAME = ".questions"  # decks/.questions/<slug>.json – question/answer log per deck
+
+
+def _questions_file(deck_slug: str) -> Path:
+    return DECKS_DIR / QUESTIONS_DIRNAME / f"{slug(deck_slug)}.json"
+
+
+def questions(deck_slug: str) -> list[dict[str, Any]]:
+    """Questions asked about a deck, oldest first: id, asked, question, answer, version."""
+    path = _questions_file(deck_slug)
+    if not path.exists():
+        return []
+    try:
+        items = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return []
+    return items if isinstance(items, list) else []
+
+
+def add_question(deck_slug: str, question: str, answer: str, **extra: Any) -> dict[str, Any]:
+    entry = {"id": uuid.uuid4().hex[:10], "asked": _now(), "question": question, "answer": answer, **extra}
+    path = _questions_file(deck_slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(questions(deck_slug) + [entry], ensure_ascii=False, indent=2), encoding="utf-8")
+    return entry
+
+
+def delete_questions(deck_slug: str, entry_id: str | None = None) -> int:
+    """Delete one question (``entry_id``) or all of them; returns how many were removed."""
+    items = questions(deck_slug)
+    keep = [q for q in items if entry_id is not None and q.get("id") != entry_id]
+    path = _questions_file(deck_slug)
+    if keep:
+        path.write_text(json.dumps(keep, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        path.unlink(missing_ok=True)
+    return len(items) - len(keep)
 
 
 def list_decks() -> list[dict[str, Any]]:
@@ -245,7 +289,7 @@ def list_decks() -> list[dict[str, Any]]:
                 "commanders": d.get("commanders", []),
                 "bracket": d.get("bracket"),
                 "tier": (d.get("power_profile") or {}).get("tier"),
-                "level": _level(d),
+                "level": level_text(d),
                 "proxy": bool(d.get("proxy")),
                 "updated": d.get("updated"),
                 "version": d.get("version"),

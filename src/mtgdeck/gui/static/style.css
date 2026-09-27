@@ -247,3 +247,34 @@ dialog.card-view { width: auto; max-width: 96vw; }
 .card-view-faces figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .pcard .tag.dfc { background: var(--accent); }
 .pcard .flip { top: auto; bottom: 24px; right: 4px; font-size: 15px; padding: 3px 8px; }
+
+/* questions about a deck */
+.qa-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; max-height: 70vh; overflow: auto; }
+.qa-list:empty { display: none; }
+.qa-item { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.qa-q { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 8px 12px; background: var(--bg); font-weight: 600; }
+.qa-q .meta { color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.qa-q .qa-del { background: none; border: none; color: var(--muted); padding: 0 0 0 6px; font-size: 14px; }
+.qa-q .qa-del:hover { color: var(--bad); }
+.qa-a { padding: 4px 12px 10px; font-size: 14px; overflow-x: auto; }
+.qa-a h4, .qa-a h5 { margin: 12px 0 4px; font-size: 14px; }
+.qa-a p { margin: 8px 0; }
+.qa-a ul, .qa-a ol { margin: 6px 0; padding-left: 22px; }
+.qa-a li { margin: 2px 0; }
+.qa-a code { background: var(--bg); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+.qa-a table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+.qa-a th, .qa-a td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.qa-a th { background: var(--bg); }
+.qa-a .card-ref { color: var(--accent); cursor: help; border-bottom: 1px dotted currentColor; }
+.qa-live { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; }
+.qa-live .qa-pending { font-weight: 600; }
+.qa-live button { margin-left: auto; padding: 4px 10px; }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.qa-form { display: flex; gap: 8px; align-items: flex-end; }
+.qa-form textarea { margin: 0; resize: vertical; min-height: 42px; }
+.qa-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 99px; padding: 3px 12px; font-size: 13px; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 600px) { .qa-form { flex-direction: column; align-items: stretch; } }

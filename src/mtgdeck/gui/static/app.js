@@ -740,6 +740,167 @@ $("#refine-form").addEventListener("submit", async (e) => {
   } catch (err) { alert(err.message); }
 });
 
+// ---------- questions about the deck ----------
+let qaRun = null;  // { job, slug, question, source, error }
+const QA_TOOLS = {
+  load_deck: "lädt das Deck", get_cards: "liest Kartentexte", find_combos: "sucht Combos",
+  edhrec_average_deck: "schaut sich ein Deck auf EDHREC an", edhrec_recommendations: "prüft EDHREC",
+  validate_deck: "prüft Bracket & Legalität", bracket_rules: "liest die Bracket-Regeln",
+  game_changers: "prüft Game Changer", search_cards: "sucht Karten", local_card_search: "sucht Karten",
+  import_deck: "importiert ein Deck", compare_deck_versions: "vergleicht Versionen",
+  list_deck_versions: "liest den Verlauf", Skill: "lädt die Deckbau-Anleitung", Read: "liest eine Referenz",
+};
+
+function cardRef(name, refs) {
+  const r = refs[name] || currentDeck?.card_data?.[name] || {};
+  return `<span class="card card-ref" data-img="${esc(r.image || "")}" data-img-back="${esc(r.image_back || "")}"
+    data-name="${esc(name)}" data-uri="${esc(r.scryfall_uri || "")}">${esc(name)}</span>`;
+}
+
+// Small Markdown subset for answers: headings, lists, tables, bold/italic/code, [[Card]] refs.
+// Everything is escaped first; only the tags generated here end up in the HTML.
+function md(text, refs = {}) {
+  const names = [];
+  const raw = String(text || "").replace(/\[\[([^\[\]]+)\]\]/g, (_, n) => `\u0001${names.push(n.trim()) - 1}\u0001`);
+  const inline = (s) => s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(„])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,:;!?“]|$)/g, "$1<em>$2</em>");
+  let html = "", para = [], list = null, table = [];
+  const flushPara = () => { if (para.length) html += `<p>${inline(para.join(" "))}</p>`; para = []; };
+  const flushList = () => { if (list) html += `</${list}>`; list = null; };
+  const flushTable = () => {
+    if (!table.length) return;
+    const rows = table.filter((r) => !/^\|[\s:|-]+\|$/.test(r))
+      .map((r) => r.slice(1, -1).split("|").map((c) => inline(c.trim())));
+    html += "<table>" + rows.map((cells, i) => {
+      const tag = i === 0 && table.length > 1 && /^\|[\s:|-]+\|$/.test(table[1]) ? "th" : "td";
+      return `<tr>${cells.map((c) => `<${tag}>${c}</${tag}>`).join("")}</tr>`;
+    }).join("") + "</table>";
+    table = [];
+  };
+  for (const line of esc(raw).split(/\r?\n/)) {
+    const t = line.trim();
+    if (/^\|.*\|$/.test(t)) { flushPara(); flushList(); table.push(t); continue; }
+    flushTable();
+    let m;
+    if (!t) { flushPara(); flushList(); }
+    else if ((m = t.match(/^#{1,6}\s+(.*)$/))) { flushPara(); flushList(); html += `<h4>${inline(m[1])}</h4>`; }
+    else if (/^([-*_])\1{2,}$/.test(t)) { flushPara(); flushList(); html += "<hr>"; }
+    else if ((m = t.match(/^(?:[-*+•]|(\d+)[.)])\s+(.*)$/))) {
+      flushPara();
+      const kind = m[1] ? "ol" : "ul";
+      if (list !== kind) { flushList(); html += `<${kind}>`; list = kind; }
+      html += `<li>${inline(m[2])}</li>`;
+    }
+    else if ((m = t.match(/^&gt;\s?(.*)$/))) { flushPara(); flushList(); html += `<p><em>${inline(m[1])}</em></p>`; }
+    else { flushList(); para.push(t); }
+  }
+  flushPara(); flushList(); flushTable();
+  return html.replace(/\u0001(\d+)\u0001/g, (_, i) => cardRef(names[Number(i)], refs));
+}
+
+function qaItem(q) {
+  const when = q.asked ? new Date(q.asked).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "";
+  const older = q.version && currentDeck?.version && q.version !== currentDeck.version;
+  const ver = q.version ? ` · v${q.version}${older ? " (ältere Version)" : ""}` : "";
+  return `<article class="qa-item" data-id="${esc(q.id)}">
+    <div class="qa-q"><span>${esc(q.question)}</span>
+      <span class="meta">${esc(when)}${esc(ver)}<button type="button" class="qa-del" title="Frage löschen" aria-label="Frage löschen">✕</button></span></div>
+    <div class="qa-a">${md(q.answer, q.cards || {})}</div></article>`;
+}
+
+async function renderQuestions(d) {
+  const items = await api(`/api/decks/${encodeURIComponent(d.slug)}/questions`).catch(() => []);
+  if (currentDeck?.slug !== d.slug) return;
+  $("#qa-list").innerHTML = items.map(qaItem).join("");
+  $("#qa-clear").classList.toggle("hidden", !items.length);
+  const list = $("#qa-list");
+  list.scrollTop = list.scrollHeight;
+  updateQaLive();
+}
+
+function updateQaLive() {
+  const run = qaRun && currentDeck && qaRun.slug === currentDeck.slug ? qaRun : null;
+  $("#qa-live").classList.toggle("hidden", !run);
+  $("#qa-btn").disabled = !!(qaRun && !qaRun.finished);
+  if (!run) return;
+  $("#qa-question").textContent = run.question;
+  $("#qa-live .spinner").classList.toggle("hidden", !!run.finished);
+  $("#qa-status").textContent = run.error ? "Fehler: " + run.error : run.status || "Claude denkt nach …";
+  $("#qa-status").classList.toggle("bad", !!run.error);
+  $("#qa-cancel").textContent = run.finished ? "Schließen" : "Abbrechen";
+}
+
+function onQaEvent(run, ev) {
+  switch (ev.type) {
+    case "tool": run.status = `Claude ${QA_TOOLS[ev.name] || ev.name} …`; break;
+    case "status": run.status = ev.text; break;
+    case "error": run.error = ev.text; break;
+    case "answer":
+      if (currentDeck?.slug === run.slug) {
+        $("#qa-list").insertAdjacentHTML("beforeend", qaItem(ev.entry));
+        $("#qa-clear").classList.remove("hidden");
+        $("#qa-list").lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+      break;
+    case "done":
+      run.source.close();
+      run.finished = true;
+      if (ev.ok) qaRun = null;
+      else run.error ||= "Keine Antwort erhalten.";
+      break;
+  }
+  updateQaLive();
+}
+
+$("#qa-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentDeck || (qaRun && !qaRun.finished)) return;
+  const question = e.target.elements.question.value.trim();
+  if (!question) return;
+  try {
+    const slug = currentDeck.slug;
+    const { job } = await api(`/api/decks/${encodeURIComponent(slug)}/ask`, { method: "POST", body: { question } });
+    const run = { job, slug, question, source: new EventSource(`/api/jobs/${job}/events`) };
+    run.source.onmessage = (ev) => onQaEvent(run, JSON.parse(ev.data));
+    qaRun = run;
+    e.target.reset();
+    updateQaLive();
+  } catch (err) { alert(err.message); }
+});
+$("#qa-form textarea").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#qa-form").requestSubmit(); }
+});
+$("#qa-chips").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const box = $("#qa-form textarea");
+  box.value = chip.dataset.q;
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+});
+$("#qa-cancel").addEventListener("click", async () => {
+  if (!qaRun) return;
+  if (!qaRun.finished) await api(`/api/jobs/${qaRun.job}/cancel`, { method: "POST" }).catch(() => {});
+  else { qaRun = null; updateQaLive(); }
+});
+$("#qa-list").addEventListener("click", async (e) => {
+  const ref = e.target.closest(".card-ref");
+  if (ref) { showCardView(ref.dataset.name, { image: ref.dataset.img, image_back: ref.dataset.imgBack, scryfall_uri: ref.dataset.uri }); return; }
+  const del = e.target.closest(".qa-del");
+  if (!del || !currentDeck) return;
+  const item = del.closest(".qa-item");
+  await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/questions?id=${encodeURIComponent(item.dataset.id)}`, { method: "DELETE" });
+  item.remove();
+  $("#qa-clear").classList.toggle("hidden", !$("#qa-list").children.length);
+});
+$("#qa-clear").addEventListener("click", async () => {
+  if (!currentDeck || !confirm("Alle Fragen und Antworten zu diesem Deck löschen?")) return;
+  await api(`/api/decks/${encodeURIComponent(currentDeck.slug)}/questions`, { method: "DELETE" });
+  renderQuestions(currentDeck);
+});
+
 $("#cancel-btn").addEventListener("click", async () => {
   if (currentJob) await api(`/api/jobs/${currentJob}/cancel`, { method: "POST" }).catch(() => {});
 });
@@ -780,6 +941,7 @@ async function openDeck(slug) {
   $("#retune-form").elements.request.value = "";
   renderPower(d);
   renderHistory(d);
+  renderQuestions(d);
   refreshDeckList();
 }
 
@@ -871,8 +1033,9 @@ document.addEventListener("mousemove", (e) => {
 $("#cards").addEventListener("click", (e) => {
   const el = e.target.closest(".card[data-name]");
   if (!el || !currentDeck) return;
-  const name = el.dataset.name;
-  const cd = currentDeck.card_data?.[name] || {};
+  showCardView(el.dataset.name, currentDeck.card_data?.[el.dataset.name] || {});
+});
+function showCardView(name, cd) {
   const faces = name.split(" // ");
   const imgs = [[cd.image, faces[0]], ...(cd.image_back ? [[cd.image_back, faces[1] || "Rückseite"]] : [])];
   $("#card-view-title").textContent = name + (cd.image_back ? " – doppelseitig" : "");
@@ -882,7 +1045,7 @@ $("#cards").addEventListener("click", (e) => {
   $("#card-view-link").href = cd.scryfall_uri || `https://scryfall.com/search?q=${encodeURIComponent('!"' + name + '"')}`;
   preview.classList.add("hidden");
   $("#card-view").showModal();
-});
+}
 $("#card-view-close").addEventListener("click", () => $("#card-view").close());
 
 $("#copy-btn").addEventListener("click", async () => {

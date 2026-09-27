@@ -50,6 +50,8 @@ Dann z. B.:
 - „Setz Cyclonic Rift und Smothering Tithe auf meine Blacklist.“
 - „Mach mein Deck `meren-aristocrats` billiger, max. 80 €.“
 - „Welches Bracket hat dieses Deck? https://archidekt.com/decks/123456“
+- „Wie spiele ich `meren-aristocrats`, und wie schlägt es sich gegen Atraxa?“ – Fragen zum Deck
+  beantwortet Claude nur lesend, das Deck bleibt unverändert.
 - Deutsche Kartennamen („Schwerter zu Pflugscharen“, „Sol-Ring“) funktionieren mit der lokalen DB.
 
 Fertige Decks landen in `decks/<name>.json` und `decks/<name>.txt`. Die `.txt` kannst du direkt in
@@ -197,6 +199,13 @@ uv run mtg-gui              # → http://127.0.0.1:8765
   (Tool-Aufrufe, Zwischentexte) wird live angezeigt
 - Deckansicht: Prüfung (legal, Bracket, Game Changer, Combos …), Manakurve, Rollen, Preis,
   Kartenbilder beim Hovern, Liste kopieren, „Überarbeiten lassen“ per Freitext
+- „Fragen zum Deck“: Fragen in natürlicher Sprache stellen – Strategie, Mulligan, ist es zu stark
+  für meine Runde, wie schlägt es sich gegen Commander XY (Claude holt sich dessen typisches Deck von
+  EDHREC), Schwächen, warum ist Karte X drin. Schnellwahl-Knöpfe für häufige Fragen; Anschlussfragen
+  („und gegen Kinnan?“) kennen den bisherigen Verlauf. Claude darf dabei nur lesen (kein Speichern) –
+  Tauschvorschläge setzt du bei Bedarf über „Überarbeiten lassen“ um. Fragen und Antworten werden pro
+  Deck in `decks/.questions/<slug>.json` gespeichert; Kartennamen in Antworten zeigen beim Hovern
+  das Bild.
 - Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
 
 ## Datenquellen & Zugänge

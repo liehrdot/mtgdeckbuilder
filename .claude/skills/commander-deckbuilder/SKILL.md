@@ -1,6 +1,6 @@
 ---
 name: commander-deckbuilder
-description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built, a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier.
+description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built, a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier. Also use it to answer questions about a saved deck (strategy, how to play it, power level, matchups against other commanders, weaknesses, card choices).
 argument-hint: "<Commander> [bracket 1-5] [budget] [theme]"
 ---
 
@@ -155,3 +155,10 @@ For "make it cheaper / stronger / bracket X / more draw / swap Y":
 If the user only wants an assessment ("which bracket is my deck?"), run `validate_deck` and
 explain the bracket result, Game Changers, combos, curve and weaknesses — without saving,
 unless asked.
+
+## Fragen zum Deck (Q&A)
+
+For questions about a saved deck — strategy, how to pilot or mulligan it, win conditions, whether
+it is too strong for a table, matchups against a commander/deck/archetype, weaknesses, why a card
+is in, rules interactions — follow [references/deck-questions.md](references/deck-questions.md).
+Read-only: never save; suggest swaps as `+ in` / `- out` instead.

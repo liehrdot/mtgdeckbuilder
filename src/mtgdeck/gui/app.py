@@ -9,11 +9,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -95,7 +97,27 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
     return ""
 
 
-async def _run_claude(job: Job, prompt: str, model: str | None, output_format: dict[str, Any] | None = None) -> None:
+# Tools for questions about a deck: research only, nothing that saves or changes anything.
+READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
+                   "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
+                   "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck",
+                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck"]  # fmt: skip
+WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
+               "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings"]  # fmt: skip
+Finish = Callable[[Job, bool, str], Awaitable[None]]
+
+
+async def _run_claude(
+    job: Job,
+    prompt: str,
+    model: str | None,
+    output_format: dict[str, Any] | None = None,
+    *,
+    read_only: bool = False,
+    finish: Finish | None = None,
+) -> None:
+    """Run Claude Code on ``prompt``. ``read_only`` restricts the mtg tools to research;
+    ``finish(job, ok, final_text)`` replaces the default end (detect the saved deck)."""
     try:
         from claude_agent_sdk import (
             AssistantMessage,
@@ -111,12 +133,14 @@ async def _run_claude(job: Job, prompt: str, model: str | None, output_format: d
         job.done = True
         return
 
+    base_tools = ["Skill", "ToolSearch", "Read", "Glob", "Grep"]
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_ROOT),
         setting_sources=["project"],  # loads .claude/skills and CLAUDE.md
         mcp_servers={"mtg": {"type": "stdio", "command": sys.executable, "args": ["-m", "mtgdeck.mcp_server"]}},
         strict_mcp_config=True,
-        allowed_tools=["Skill", "ToolSearch", "Read", "Glob", "Grep", "mcp__mtg"],
+        allowed_tools=base_tools + ([f"mcp__mtg__{t}" for t in READ_ONLY_TOOLS] if read_only else ["mcp__mtg"]),
+        disallowed_tools=(["Write", "Edit", "Bash"] + [f"mcp__mtg__{t}" for t in WRITE_TOOLS]) if read_only else [],
         permission_mode="dontAsk",
         model=model or None,
         max_turns=int(os.environ.get("MTG_MAX_TURNS", 120)),
@@ -124,13 +148,16 @@ async def _run_claude(job: Job, prompt: str, model: str | None, output_format: d
     )
     ok = False
     structured: Any = None
+    final_text = ""
+    last_text = ""
     job.emit(type="status", text="Starte Claude Code …")
     try:
         async for msg in query(prompt=prompt, options=options):
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock) and block.text.strip():
-                        job.emit(type="text", text=block.text.strip())
+                        last_text = block.text.strip()
+                        job.emit(type="text", text=last_text)
                     elif isinstance(block, ToolUseBlock) and block.name == "StructuredOutput":
                         job.emit(type="status", text="Übergebe Ergebnis …")
                     elif isinstance(block, ToolUseBlock):
@@ -139,12 +166,18 @@ async def _run_claude(job: Job, prompt: str, model: str | None, output_format: d
             elif isinstance(msg, ResultMessage):
                 ok = not msg.is_error
                 structured = msg.structured_output
+                final_text = (msg.result or "").strip() or last_text
                 cost = f" · Kosten ${msg.total_cost_usd:.2f}" if getattr(msg, "total_cost_usd", None) else ""
                 job.emit(type="result", text=f"{'Fertig' if ok else 'Abgebrochen'} nach {msg.num_turns} Schritten{cost}")
     except asyncio.CancelledError:
         job.emit(type="error", text="Abgebrochen.")
     except Exception as exc:  # surface everything in the UI
         job.emit(type="error", text=f"{type(exc).__name__}: {exc}")
+
+    if finish is not None:
+        await finish(job, ok, final_text)
+        job.done = True
+        return
 
     if output_format is not None:  # commander finder: structured suggestions instead of a deck
         suggestions = await _enrich_suggestions(structured) if ok else []
@@ -165,10 +198,10 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(ts - 1))
 
 
-def _start(prompt: str, model: str | None, output_format: dict[str, Any] | None = None) -> dict[str, str]:
+def _start(prompt: str, model: str | None, output_format: dict[str, Any] | None = None, **kw: Any) -> dict[str, str]:
     job = Job(id=uuid.uuid4().hex[:12])
     JOBS[job.id] = job
-    job.task = asyncio.create_task(_run_claude(job, prompt, model, output_format))
+    job.task = asyncio.create_task(_run_claude(job, prompt, model, output_format, **kw))
     return {"job": job.id}
 
 
@@ -399,6 +432,63 @@ def refine_prompt(req: RefineRequest, deck: dict[str, Any] | None = None) -> str
     )
 
 
+CARD_REF = re.compile(r"\[\[([^\[\]]{2,141})\]\]")
+
+
+async def _card_refs(text: str) -> dict[str, dict[str, Any]]:
+    """Images for the [[Card Name]] references of an answer (hover preview in the GUI)."""
+    names = list(dict.fromkeys(m.strip() for m in CARD_REF.findall(text)))[:80]
+    if not names:
+        return {}
+    try:
+        cards, renames, _ = await resolve(names)
+    except Exception:
+        return {}
+    out = {}
+    for name in names:
+        c = cards.get(renames.get(name, name))
+        if c and c.get("image"):
+            out[name] = {"image": c["image"], "image_back": c.get("image_back"), "scryfall_uri": c.get("scryfall_uri")}
+    return out
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=4000)
+    model: str | None = None
+
+
+ASK_HISTORY = 4  # earlier questions passed along for follow-ups ("und gegen Kinnan?")
+
+
+def ask_prompt(question: str, deck: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
+    about = [f"„{deck.get('name', deck['slug'])}“", "Commander: " + (" + ".join(deck.get("commanders") or []) or "?"),
+             storage.level_text(deck)] + (["Proxy-Deck"] if deck.get("proxy") else [])  # fmt: skip
+    lines = [
+        f"Beantworte eine Frage zum gespeicherten Commander-Deck `{deck['slug']}` ({', '.join(about)}).",
+        "Lade es mit `load_deck` und nutze den Skill `commander-deckbuilder`, Abschnitt „Fragen zum Deck“ "
+        "(references/deck-questions.md).",
+        "",
+        "Regeln:",
+        "- Nur lesen: Das Deck wird nicht verändert oder gespeichert. Läuft die Frage auf Änderungen hinaus, "
+        "schlage konkrete Tausche vor (+ rein / − raus, jeweils mit Grund); umsetzen kann man sie über „Anpassen“.",
+        "- Du läufst im GUI-Modus: keine Rückfragen. Triff sinnvolle Annahmen und nenne sie kurz.",
+        "- Stütze Aussagen auf die Tools (Oracle-Text über `get_cards`, Combos über `find_combos`, "
+        "Gegner-Commander über `edhrec_average_deck`/`edhrec_recommendations`) statt auf dein Gedächtnis.",
+        "- Schreibe Kartennamen als [[Kartenname]] (englischer Oracle-Name).",
+        "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze oder Listen. "
+        "Keine Vorrede über deine Arbeitsschritte.",
+    ]
+    earlier = (history or [])[-ASK_HISTORY:]
+    if earlier:
+        lines += ["", "Bisherige Fragen zu diesem Deck (nur zur Einordnung von Anschlussfragen):"]
+        for h in earlier:
+            answer = h.get("answer", "")
+            answer = answer if len(answer) <= 1200 else answer[:1200] + " …"
+            lines += [f"Frage: {h.get('question', '')}", f"Antwort: {answer}", ""]
+    lines += ["", f"Frage: {question.strip()}"]
+    return "\n".join(lines)
+
+
 # --- routes ------------------------------------------------------------------------------------
 
 
@@ -452,6 +542,37 @@ async def api_retune(req: RetuneRequest) -> dict[str, str]:
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     return _start(retune_prompt(req, deck), req.model)
+
+
+@app.get("/api/decks/{slug}/questions")
+async def api_questions(slug: str) -> list[dict[str, Any]]:
+    return storage.questions(slug)
+
+
+@app.post("/api/decks/{slug}/ask")
+async def api_ask(slug: str, req: AskRequest) -> dict[str, str]:
+    try:
+        deck = storage.load(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    question = req.question.strip()
+
+    async def finish(job: Job, ok: bool, answer: str) -> None:
+        if ok and answer:
+            cards = await _card_refs(answer)
+            entry = storage.add_question(slug, question, answer, version=deck.get("version"), cards=cards)
+            job.emit(type="answer", entry=entry)
+        elif ok:
+            job.emit(type="error", text="Keine Antwort erhalten.")
+        job.emit(type="done", ok=bool(ok and answer), deck=None)
+
+    prompt = ask_prompt(question, deck, storage.questions(slug))
+    return _start(prompt, req.model, read_only=True, finish=finish)
+
+
+@app.delete("/api/decks/{slug}/questions")
+async def api_questions_delete(slug: str, id: str | None = None) -> dict[str, int]:
+    return {"deleted": storage.delete_questions(slug, id)}
 
 
 @app.post("/api/find-commander")

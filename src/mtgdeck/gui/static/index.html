@@ -277,6 +277,34 @@
         </form>
       </div>
 
+      <div class="panel" id="qa-panel">
+        <div class="power-head">
+          <h3>Fragen zum Deck <span class="opt">– Claude analysiert, das Deck bleibt unverändert</span></h3>
+          <button type="button" class="secondary hidden" id="qa-clear">Verlauf löschen</button>
+        </div>
+        <div id="qa-list" class="qa-list"></div>
+        <div id="qa-live" class="qa-live hidden" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="qa-question" class="qa-pending"></span>
+          <span id="qa-status" class="hint"></span>
+          <button type="button" class="secondary" id="qa-cancel">Abbrechen</button>
+        </div>
+        <form id="qa-form" class="qa-form" autocomplete="off">
+          <textarea name="question" rows="2" required
+            placeholder="z. B. Wie gewinnt das Deck? Ist es zu stark für eine Bracket-2-Runde? Wie schlägt es sich gegen Atraxa?"></textarea>
+          <button type="submit" id="qa-btn">Fragen</button>
+        </form>
+        <div class="qa-chips" id="qa-chips">
+          <button type="button" class="chip" data-q="Was ist die Strategie des Decks und wie gewinnt es?">Strategie</button>
+          <button type="button" class="chip" data-q="Wie spiele ich das Deck: worauf achte ich beim Mulligan, in den ersten Zügen, im Mid- und Late-Game?">So spielt man es</button>
+          <button type="button" class="chip" data-q="Ist das Deck zu stark oder zu schwach für sein Bracket? Welche Karten treiben die Power?">Zu stark?</button>
+          <button type="button" class="chip" data-q="Wie schlägt sich das Deck gegen " data-open="1">Gegen …</button>
+          <button type="button" class="chip" data-q="Was sind die größten Schwächen des Decks und wie gleiche ich sie aus?">Schwächen</button>
+          <button type="button" class="chip" data-q="Welche Karten sind die wichtigsten, und welche sind leicht austauschbar?">Schlüsselkarten</button>
+        </div>
+        <p class="hint">Enter schickt die Frage ab, Umschalt+Enter macht eine neue Zeile. Anschlussfragen („und gegen Kinnan?“) verstehen den bisherigen Verlauf.</p>
+      </div>
+
       <div class="panel hidden" id="history-panel">
         <div class="power-head">
           <h3>Verlauf &amp; Versionen</h3>

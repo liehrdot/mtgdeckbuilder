@@ -73,6 +73,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Stored as `deck["power_profile"]`.
 - **Budget / proxy:** `validate_deck(budget=, proxy=)` warns on budget overruns unless `proxy=True`. `price_total` includes the commanders. Decks store `proxy`, and a proxy deck has `budget: None`.
 - **`storage.py`**: saves decks to `decks/<slug>.json` plus a `.txt` export (Moxfield format). The `decks/` contents are gitignored.
+  - Questions about a deck: `questions()` / `add_question()` / `delete_questions()` in `decks/.questions/<slug>.json`. `delete()` removes them too.
   - **Versioning:** a new version is created when content changes (`_CONTENT_KEYS`) or a `change_note` is given. Re-validation alone does not create one.
   - Each version gets a full snapshot in `decks/.versions/<slug>/vNNNN.json` and a `history` entry: diff, from/to level, price, power.
   - `restore()` saves the old snapshot as a *new* version.
@@ -114,6 +115,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Generic background jobs via `_start_runner(runner)`. They emit `progress` / `print` / `console` events besides text.
   - Print routes: `/api/decks/{slug}/print/{plan,alternatives,choose,prepare,pdf,autofill,files/{xml|pdf}}`. Settings: `/api/settings`.
   - Version routes: `/api/decks/{slug}/versions[/{v}[/restore]]`, `/diff?a=&b=` and `/copy`.
+  - Deck questions (`/api/decks/{slug}/ask`, `ask_prompt`, panel „Fragen zum Deck“) run `_run_claude(read_only=True, finish=)`: only `READ_ONLY_TOOLS` are allowed, `WRITE_TOOLS` plus Write/Edit/Bash are disallowed. The final answer (`ResultMessage.result`) goes to `storage.add_question()` (`decks/.questions/<slug>.json`), with images for its `[[Card]]` references (`_card_refs`). The last `ASK_HISTORY` Q&As go into the prompt for follow-ups. The skill side is `references/deck-questions.md`.
   - Commander-finder jobs pass `output_format` (JSON schema `SUGGESTION_SCHEMA`) to the SDK. They read `ResultMessage.structured_output`, enrich it with card data (`_enrich_suggestions`) and emit a `suggestions` SSE event instead of a deck.
 
 **Skill ↔ tools contract:**
