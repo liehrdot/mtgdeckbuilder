@@ -82,7 +82,7 @@ let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
 const VIEWS = ["new", "job", "deck", "collection", "blacklist", "settings"];
-const TABS = ["karten", "anpassen", "fragen", "verlauf", "drucken"];
+const TABS = ["karten", "testen", "anpassen", "fragen", "verlauf", "drucken"];
 let lastView = null;
 
 function parseHash() {
@@ -539,6 +539,8 @@ async function openDeck(slug) {
   renderQuestions(d);
   loadOwnership(d);
   loadTokens(d);
+  resetHand();
+  renderOdds(d);
   $("#deck-menu").open = false;
   return true;
 }
@@ -903,6 +905,115 @@ function ownershipBadge(name, need = 1, commander = false) {
   if (real + prox >= need) return '<span class="own proxy" title="Als Proxy in deiner Sammlung">P</span>';
   if (real + prox > 0) return `<span class="own part" title="Nur ${real + prox} von ${need} vorhanden">${real + prox}/${need}</span>`;
   return "";  // missing: no badge (the Sammlung panel and "nach Besitz" show them) – keeps the list calm
+}
+
+// ---------- test hand (London mulligan, first mulligan free) ----------
+let hand = null;  // { lib: [card], hand: [card], draws, mull, bottom }
+const isLand = (cd) => /\bLand\b/.test(cd?.type_line || "");
+function libraryOf(d) {
+  return d.cards.flatMap((c) => Array.from({ length: c.qty || 1 }, () => ({ name: c.name, cd: d.card_data?.[c.name] || {} })));
+}
+function shuffle(arr) {
+  const rnd = new Uint32Array(arr.length);
+  crypto.getRandomValues(rnd);
+  for (let i = arr.length - 1; i > 0; i--) { const j = rnd[i] % (i + 1); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+  return arr;
+}
+function resetHand() {
+  hand = null;
+  $("#hand").innerHTML = "";
+  $("#hand-hint").hidden = true;
+  $("#hand-status").textContent = "Zieh eine Starthand – wie am Tisch.";
+}
+function dealHand(mull) {
+  const lib = shuffle(libraryOf(currentDeck));
+  hand = { lib, hand: lib.splice(0, 7), draws: 0, mull, bottom: Math.max(0, mull - 1) };
+  renderHand();
+}
+function renderHand() {
+  if (!hand) return;
+  const lands = hand.hand.filter((c) => isLand(c.cd)).length;
+  const onDraw = $("#on-draw").checked;
+  const turn = hand.draws === 0 ? 1 : onDraw ? hand.draws : hand.draws + 1;
+  $("#hand-status").textContent = `${hand.draws ? `Zug ${turn}` : "Starthand"} · ${hand.hand.length} Karten · ${lands} ${lands === 1 ? "Land" : "Länder"}`
+    + (hand.mull ? ` · ${hand.mull}. Mulligan` : "") + ` · noch ${hand.lib.length} in der Bibliothek`;
+  const hint = $("#hand-hint");
+  hint.hidden = !hand.bottom && hand.mull !== 1;
+  hint.textContent = hand.bottom
+    ? `Lege noch ${hand.bottom} ${hand.bottom === 1 ? "Karte" : "Karten"} unter die Bibliothek – klick sie an.`
+    : "Der erste Mulligan ist in Commander frei: du behältst alle 7 Karten.";
+  $("#hand").innerHTML = hand.hand.map((c, i) => `<button type="button" class="hand-card card ${isLand(c.cd) ? "land" : ""}" data-i="${i}"
+      data-img="${esc(c.cd.image || "")}" data-name="${esc(c.name)}" title="${esc(c.name)}${hand.bottom ? " – unter die Bibliothek legen" : ""}">
+      ${c.cd.image ? `<img src="${esc(c.cd.image)}" alt="${esc(c.name)}">` : `<span class="noimg">${esc(c.name)}</span>`}</button>`).join("");
+  $("#hand-draw").disabled = !!hand.bottom || !hand.lib.length;
+}
+$("#hand-new").addEventListener("click", () => currentDeck && dealHand(0));
+$("#hand-mull").addEventListener("click", () => currentDeck && dealHand((hand?.mull || 0) + 1));
+$("#hand-draw").addEventListener("click", () => {
+  if (!hand) return dealHand(0);
+  if (hand.bottom || !hand.lib.length) return;
+  hand.hand.push(hand.lib.shift());
+  hand.draws += 1;
+  renderHand();
+});
+$("#on-draw").addEventListener("change", () => { renderHand(); if (currentDeck) renderOdds(currentDeck); });
+$("#hand").addEventListener("click", (e) => {
+  const b = e.target.closest(".hand-card");
+  if (!b || !hand) return;
+  if (!hand.bottom) { showCardView(b.dataset.name, hand.hand[Number(b.dataset.i)].cd); return; }
+  hand.lib.push(...hand.hand.splice(Number(b.dataset.i), 1));
+  hand.bottom -= 1;
+  renderHand();
+});
+
+// ---------- probabilities (hypergeometric) ----------
+function choose(n, k) {
+  if (k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 1; i <= Math.min(k, n - k); i++) r = (r * (n - Math.min(k, n - k) + i)) / i;
+  return r;
+}
+const pExactly = (N, K, n, k) => (choose(K, k) * choose(N - K, n - k)) / choose(N, n);
+function pAtLeast(N, K, n, k) {
+  let p = 0;
+  for (let i = k; i <= Math.min(n, K); i++) p += pExactly(N, K, n, i);
+  return Math.min(1, p);
+}
+const pct = (p) => `${Math.round(p * 100)} %`;
+
+function renderOdds(d) {
+  const lib = libraryOf(d);
+  const N = lib.length;
+  if (N < 8) { $("#odds").innerHTML = '<p class="muted">Zu wenige Karten.</p>'; return; }
+  const count = (fn) => lib.filter((c) => fn(c.cd)).length;
+  const L = count(isLand);
+  const has = (roles) => (cd) => !isLand(cd) && (cd.roles || []).some((r) => roles.includes(r));
+  const R = count(has(["ramp"])), D = count(has(["card_draw"])), X = count(has(["removal", "board_wipe", "counterspell"]));
+  const onDraw = $("#on-draw").checked;
+  const seen = (turn) => 7 + (onDraw ? turn : turn - 1);  // cards seen by the given turn
+  const dist = Array.from({ length: 8 }, (_, k) => pExactly(N, L, 7, k));
+  const max = Math.max(...dist);
+  const keep = dist.slice(2, 6).reduce((a, b) => a + b, 0);
+  const bars = dist.map((p, k) => `<div class="dbar ${k >= 2 && k <= 5 ? "ok" : ""}" title="${k} Länder: ${pct(p)}">
+      <div class="fill" style="height:${(p / max) * 100}%"></div><span class="x">${k}</span></div>`).join("");
+  const row = (label, p, detail) => `<tr><th scope="row">${label}</th><td class="num">${pct(p)}</td><td class="muted small">${detail}</td></tr>`;
+  $("#odds").innerHTML = `
+    <div class="odds-grid">
+      <figure class="dist">
+        <figcaption><b>Länder in der Starthand</b> · Ø ${(7 * L / N).toFixed(1)} · 2–5 Länder: <b>${pct(keep)}</b></figcaption>
+        <div class="dbars" role="img" aria-label="Länder in der Starthand: ${dist.map((p, k) => `${k}: ${pct(p)}`).join(", ")}">${bars}</div>
+      </figure>
+      <table class="odds-table">
+        <caption class="sr-only">Wahrscheinlichkeiten ${onDraw ? "auf dem Draw" : "auf dem Play"}</caption>
+        <tbody>
+          ${[2, 3, 4, 5].map((t) => row(`${t}. Landdrop in Zug ${t}`, pAtLeast(N, L, seen(t), t), `mind. ${t} Länder unter ${seen(t)} Karten`)).join("")}
+          ${R ? row("Ramp bis Zug 2", pAtLeast(N, R, seen(2), 1), `${R} Ramp-Karten im Deck`) : ""}
+          ${D ? row("Kartenzug bis Zug 3", pAtLeast(N, D, seen(3), 1), `${D} Kartenzug-Karten`) : ""}
+          ${X ? row("Interaktion bis Zug 4", pAtLeast(N, X, seen(4), 1), `${X} Removal/Wipes/Counter`) : ""}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small">${L} Länder in ${N} Karten · ${onDraw ? "auf dem Draw (Karte in Zug 1)" : "auf dem Play (keine Karte in Zug 1)"}${keep < 0.75 ? ` · <span class="warn">Nur ${pct(keep)} der Starthände haben 2–5 Länder – mehr Länder oder günstiger Ramp helfen.</span>` : ""}</p>`;
 }
 
 // ---------- tokens, emblems and markers the deck creates ----------

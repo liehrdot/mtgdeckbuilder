@@ -45,8 +45,8 @@ Gleicher Name + Druck + Proxy + Foil + Sprache werden zusammengeführt (Anzahl a
 
 ## Phase 4 – Testhand und Wahrscheinlichkeiten
 
-- [ ] Tab „Testen“: Starthand ziehen, London-Mulligan, Karten nachziehen (Zug für Zug).
-- [ ] Wahrscheinlichkeiten (hypergeometrisch, auf dem Play/Draw): Länder in der Starthand,
+- [x] Tab „Testen“: Starthand ziehen, London-Mulligan, Karten nachziehen (Zug für Zug).
+- [x] Wahrscheinlichkeiten (hypergeometrisch, auf dem Play/Draw): Länder in der Starthand,
       Landdrops bis Zug 2/3/4, Ramp in den ersten Zügen, Kartenzug und Removal bis Zug 4.
 
 ## Phase 5 – Upgrade-Pfad

@@ -218,6 +218,7 @@
 
       <div class="tabs" role="tablist" id="deck-tabs" aria-label="Deckbereiche">
         <button type="button" role="tab" id="tab-karten" aria-controls="panel-karten" data-tab="karten">Karten</button>
+        <button type="button" role="tab" id="tab-testen" aria-controls="panel-testen" data-tab="testen">Testen</button>
         <button type="button" role="tab" id="tab-anpassen" aria-controls="panel-anpassen" data-tab="anpassen">Anpassen</button>
         <button type="button" role="tab" id="tab-fragen" aria-controls="panel-fragen" data-tab="fragen">Fragen <span class="count" id="qa-count"></span></button>
         <button type="button" role="tab" id="tab-verlauf" aria-controls="panel-verlauf" data-tab="verlauf">Verlauf <span class="count" id="version-count"></span></button>
@@ -276,6 +277,31 @@
             <section class="panel"><h2>Statistik</h2><div id="stats"></div></section>
           </aside>
         </div>
+      </div>
+
+      <!-- test hand + probabilities -->
+      <div role="tabpanel" id="panel-testen" aria-labelledby="tab-testen" class="tabpanel" hidden>
+        <section class="panel" id="hand-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Testhand</h2>
+              <p class="muted small" id="hand-status">Zieh eine Starthand – wie am Tisch.</p>
+            </div>
+            <div class="btn-group">
+              <label class="check small"><input type="checkbox" id="on-draw"> auf dem Draw</label>
+              <button type="button" class="btn" id="hand-mull">Mulligan</button>
+              <button type="button" class="btn" id="hand-draw">Karte ziehen</button>
+              <button type="button" class="btn primary" id="hand-new">Neue Hand</button>
+            </div>
+          </div>
+          <p id="hand-hint" class="hint-box" hidden></p>
+          <div id="hand" class="hand" aria-live="polite"></div>
+        </section>
+        <section class="panel" id="odds-panel">
+          <h2>Wahrscheinlichkeiten</h2>
+          <p class="muted small">Exakt berechnet (hypergeometrisch) aus der Deckliste, ohne Mulligans. Länder inkl. doppelseitiger Karten mit Land-Rückseite.</p>
+          <div id="odds"></div>
+        </section>
       </div>
 
       <!-- tune -->

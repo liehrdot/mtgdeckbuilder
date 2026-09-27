@@ -457,6 +457,31 @@ ul.issues li { margin-bottom: 3px; }
 .qa-form textarea { min-height: 44px; }
 .qa-form .btn { height: 44px; }
 
+/* test hand + probabilities */
+.hand { display: flex; flex-wrap: wrap; gap: var(--space-2); min-height: 40px; }
+.hand-card { width: min(130px, 22vw); padding: 0; border: none; background: none; cursor: pointer; border-radius: 6%/4.4%; transition: transform .12s; }
+.hand-card img, .hand-card .noimg { width: 100%; aspect-ratio: 488 / 680; object-fit: cover; border-radius: 6%/4.4%; display: block; box-shadow: var(--shadow); }
+.hand-card .noimg { display: grid; place-items: center; text-align: center; font-size: var(--fs-xs); background: var(--surface-2); padding: 6px; }
+.hand-card:hover { transform: translateY(-4px); }
+.hand-card.land img { outline: 2px solid var(--ok); outline-offset: 1px; }
+.hint-box { background: var(--accent-soft); color: var(--on-accent-soft); border-radius: var(--radius); padding: 8px 12px; font-size: 14px; }
+.odds-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.3fr); gap: var(--space-6); align-items: start; margin-bottom: var(--space-3); }
+.dist { margin: 0; }
+.dist figcaption { font-size: 14px; margin-bottom: var(--space-3); }
+.dbars { display: flex; align-items: flex-end; gap: 2px; height: 130px; }
+.dbar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; }
+.dbar .fill { background: var(--border-strong); border-radius: 4px 4px 0 0; min-height: 2px; }
+.dbar.ok .fill { background: var(--bar); }
+.dbar .x { text-align: center; font-size: var(--fs-xs); color: var(--muted); margin-top: 4px; }
+.dbar:hover .fill { filter: brightness(1.15); }
+.odds-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.odds-table th { text-align: left; font-weight: 550; padding: 6px 8px 6px 0; }
+.odds-table td { padding: 6px 8px; border-top: 1px solid var(--border); }
+.odds-table tr:first-child td, .odds-table tr:first-child th { border-top: none; }
+.odds-table tr + tr th { border-top: 1px solid var(--border); }
+.odds-table .num { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+@media (max-width: 800px) { .odds-grid { grid-template-columns: 1fr; } }
+
 /* tokens */
 .token-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .token-list li { display: flex; gap: 10px; align-items: center; padding: 4px; margin: 0 -4px; border-radius: 6px; cursor: pointer; font-size: 14px; }
