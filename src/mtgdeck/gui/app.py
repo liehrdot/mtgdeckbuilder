@@ -319,6 +319,9 @@ SUGGESTION_SCHEMA: dict[str, Any] = {
                     "why": {"type": "string", "description": "2-3 sentences in German why it fits the wish"},
                     "strategy": {"type": "string", "description": "Suggested strategy text for the deck build form"},
                     "bracket_fit": {"type": "string", "description": "How it plays in the requested bracket"},
+                    "difficulty": {"type": "string", "enum": ["einfach", "mittel", "anspruchsvoll"],
+                                   "description": "How hard the deck is to pilot for a new player"},
+                    "difficulty_note": {"type": "string", "description": "One sentence (German) why it is easy or hard to play"},
                 },
                 "required": ["name", "archetype", "why"],
             },
@@ -328,8 +331,35 @@ SUGGESTION_SCHEMA: dict[str, Any] = {
 }
 
 
+# guided finder: quiz answers -> wording for the prompt (keys come from the GUI)
+FINDER_FEEL = {
+    "big": "große Kreaturen und angreifen", "tokens": "viele kleine Kreaturen / Spielsteine",
+    "spells": "Spontanzauber und Hexereien, Tricks", "control": "Kontrolle, auf alles eine Antwort haben",
+    "graveyard": "Friedhof, Dinge zurückholen", "sacrifice": "opfern und Lebenspunkte abziehen",
+    "voltron": "einen Helden mit Auren/Ausrüstungen groß machen", "chaos": "Politik, Chaos, Überraschungen",
+    "combo": "Combos und Engines bauen", "lands": "Länder und viel Mana (Landfall, Ramp)",
+}  # fmt: skip
+FINDER_THEMES = {
+    "dragons": "Drachen", "vampires": "Vampire", "elves": "Elfen", "zombies": "Zombies", "angels": "Engel",
+    "dinosaurs": "Dinosaurier", "pets": "Katzen und Hunde", "pirates": "Piraten", "artifacts": "Artefakte und Maschinen",
+    "wizards": "Magier und Zauberer", "horror": "Horror", "nature": "Natur und Tiere",
+}  # fmt: skip
+FINDER_EXPERIENCE = {
+    "new": "neu bei Commander – bevorzuge Commander, die einfach zu spielen sind: klarer Plan, wenige Entscheidungen "
+           "pro Zug, verzeihend bei Fehlern, kein Stax und keine komplizierten Combos. Mindestens drei Vorschläge "
+           "sollen „einfach“ sein.",
+    "some": "hat schon ein paar Partien gespielt – einfache bis mittlere Commander.",
+    "experienced": "erfahren – Schwierigkeit egal, gerne auch anspruchsvolle Commander.",
+}  # fmt: skip
+COLOR_WORDS = {"W": "Weiß", "U": "Blau", "B": "Schwarz", "R": "Rot", "G": "Grün"}
+
+
 class FinderRequest(BaseModel):
-    prompt: str
+    prompt: str = ""
+    feel: list[str] = Field(default_factory=list)
+    colors: list[str] = Field(default_factory=list)
+    themes: list[str] = Field(default_factory=list)
+    experience: str | None = Field(None, pattern="^(new|some|experienced)$")
     bracket: int | None = Field(None, ge=1, le=5)
     budget: float | None = None
     proxy: bool = False
@@ -342,16 +372,31 @@ def finder_prompt(req: FinderRequest) -> str:
     lines = [
         "Finde passende Commander. Nutze dafür den Skill `commander-finder`.",
         "",
-        f"- Wunsch des Spielers: {req.prompt}",
-        f"- Anzahl Vorschläge: {req.count}",
     ]
+    if req.prompt.strip():
+        lines.append(f"- Wunsch des Spielers: {req.prompt.strip()}")
+    feel = [FINDER_FEEL[f] for f in req.feel if f in FINDER_FEEL]
+    if feel:
+        lines.append(f"- Spielgefühl, das Spaß macht: {'; '.join(feel)}")
+    colors = [COLOR_WORDS[c] for c in "WUBRG" if c in req.colors]
+    if colors:
+        lines.append(f"- Lieblingsfarben: {', '.join(colors)} – die Farbidentität soll daraus bestehen oder sie enthalten "
+                     "(nicht zwingend alle auf einmal).")
+    themes = [FINDER_THEMES[t] for t in req.themes if t in FINDER_THEMES]
+    if themes:
+        lines.append(f"- Lieblingsthemen: {', '.join(themes)}")
+    if req.experience:
+        lines.append(f"- Erfahrung: {FINDER_EXPERIENCE[req.experience]}")
+    lines.append(f"- Anzahl Vorschläge: {req.count}")
     if req.bracket:
         lines.append(f"- Ziel-Bracket: {req.bracket} ({brackets.BY_NUMBER[req.bracket]['name']})")
     lines.append(_budget_line(req.budget, req.proxy, req.currency).replace("`validate_deck`/`save_deck`", "die Deck-Planung"))
     lines += [
         "",
         "Du läufst im GUI-Modus: keine Rückfragen. Baue KEIN Deck und speichere nichts.",
-        "Gib die Vorschläge als strukturierte Ausgabe zurück (exakte englische Kartennamen), Begründungen auf Deutsch.",
+        "Gib die Vorschläge als strukturierte Ausgabe zurück (exakte englische Kartennamen), Begründungen auf Deutsch. "
+        "`why` erklärt dem Spieler direkt („du“), warum der Commander zu seinen Antworten passt; "
+        "`difficulty` und `difficulty_note` sagen, wie leicht er zu spielen ist.",
     ]
     return "\n".join(lines)
 
@@ -856,6 +901,8 @@ async def api_questions_delete(slug: str, id: str | None = None) -> dict[str, in
 
 @app.post("/api/find-commander")
 async def api_find_commander(req: FinderRequest) -> dict[str, str]:
+    if not (req.prompt.strip() or req.feel or req.colors or req.themes):
+        raise HTTPException(400, "Beantworte mindestens eine Frage oder beschreibe deinen Wunsch.")
     output_format = {"type": "json_schema", "schema": SUGGESTION_SCHEMA}
     return _start(finder_prompt(req), req.model, output_format)
 

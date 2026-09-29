@@ -86,7 +86,7 @@
           <span class="step-num" aria-hidden="true">1</span>
           <div class="step-body">
             <h2 class="step-title mode-build">Commander</h2>
-            <h2 class="step-title mode-find">Was willst du spielen?</h2>
+            <h2 class="step-title mode-find">Was für ein Spieler bist du?</h2>
             <div class="mode-build commander-row">
               <div class="grow">
                 <label class="field">Name
@@ -101,9 +101,59 @@
               </div>
               <div id="commander-preview" class="commander-preview" aria-live="polite"></div>
             </div>
-            <div class="mode-find">
-              <label class="field">Beschreibe deinen Wunsch
-                <textarea name="prompt" rows="4" required placeholder="z. B. Ich mag Drachen und große Zauber, gerne Rot-Grün, nicht zu kompetitiv. Oder: Vampire mit Lebensentzug, budgetfreundlich."></textarea>
+            <div class="mode-find quiz">
+              <div class="field-block">
+                <span class="field-label">Was macht dir Spaß? <span class="muted">(Mehrfachwahl)</span></span>
+                <div class="pick-chips">
+                  <label><input type="checkbox" name="feel" value="big"><span>Große Kreaturen &amp; angreifen</span></label>
+                  <label><input type="checkbox" name="feel" value="tokens"><span>Viele kleine Kreaturen</span></label>
+                  <label><input type="checkbox" name="feel" value="spells"><span>Zauber &amp; Tricks</span></label>
+                  <label><input type="checkbox" name="feel" value="control"><span>Kontrolle &amp; Antworten</span></label>
+                  <label><input type="checkbox" name="feel" value="graveyard"><span>Friedhof &amp; Wiederkehr</span></label>
+                  <label><input type="checkbox" name="feel" value="sacrifice"><span>Opfern &amp; Leben abziehen</span></label>
+                  <label><input type="checkbox" name="feel" value="voltron"><span>Ein Held, groß gemacht</span></label>
+                  <label><input type="checkbox" name="feel" value="lands"><span>Länder &amp; viel Mana</span></label>
+                  <label><input type="checkbox" name="feel" value="chaos"><span>Politik &amp; Chaos</span></label>
+                  <label><input type="checkbox" name="feel" value="combo"><span>Combos &amp; Engines</span></label>
+                </div>
+              </div>
+              <div class="field-block">
+                <span class="field-label">Welche Farben magst du? <span class="muted">(keine Wahl = egal)</span></span>
+                <div class="color-picks">
+                  <label><input type="checkbox" name="colors" value="W"><span><i class="pip w" aria-hidden="true"></i><b>Weiß</b><small>Ordnung, Armeen, Schutz</small></span></label>
+                  <label><input type="checkbox" name="colors" value="U"><span><i class="pip u" aria-hidden="true"></i><b>Blau</b><small>Wissen, Karten ziehen, Kontrolle</small></span></label>
+                  <label><input type="checkbox" name="colors" value="B"><span><i class="pip b" aria-hidden="true"></i><b>Schwarz</b><small>Macht um jeden Preis, Tod &amp; Friedhof</small></span></label>
+                  <label><input type="checkbox" name="colors" value="R"><span><i class="pip r" aria-hidden="true"></i><b>Rot</b><small>Tempo, Chaos, direkter Schaden</small></span></label>
+                  <label><input type="checkbox" name="colors" value="G"><span><i class="pip g" aria-hidden="true"></i><b>Grün</b><small>Wachstum, Mana, große Kreaturen</small></span></label>
+                </div>
+              </div>
+              <div class="field-block">
+                <span class="field-label">Wie viel Erfahrung hast du mit Commander?</span>
+                <div class="segmented" role="radiogroup" aria-label="Erfahrung">
+                  <label><input type="radio" name="experience" value="new" checked><span>Ich fange gerade an</span></label>
+                  <label><input type="radio" name="experience" value="some"><span>Ein paar Partien</span></label>
+                  <label><input type="radio" name="experience" value="experienced"><span>Erfahren</span></label>
+                </div>
+              </div>
+              <div class="field-block">
+                <span class="field-label">Lieblingsthemen <span class="muted">(optional)</span></span>
+                <div class="pick-chips">
+                  <label><input type="checkbox" name="themes" value="dragons"><span>Drachen</span></label>
+                  <label><input type="checkbox" name="themes" value="vampires"><span>Vampire</span></label>
+                  <label><input type="checkbox" name="themes" value="elves"><span>Elfen</span></label>
+                  <label><input type="checkbox" name="themes" value="zombies"><span>Zombies</span></label>
+                  <label><input type="checkbox" name="themes" value="angels"><span>Engel</span></label>
+                  <label><input type="checkbox" name="themes" value="dinosaurs"><span>Dinosaurier</span></label>
+                  <label><input type="checkbox" name="themes" value="pets"><span>Katzen &amp; Hunde</span></label>
+                  <label><input type="checkbox" name="themes" value="pirates"><span>Piraten</span></label>
+                  <label><input type="checkbox" name="themes" value="artifacts"><span>Artefakte &amp; Maschinen</span></label>
+                  <label><input type="checkbox" name="themes" value="wizards"><span>Magier</span></label>
+                  <label><input type="checkbox" name="themes" value="horror"><span>Horror</span></label>
+                  <label><input type="checkbox" name="themes" value="nature"><span>Natur &amp; Tiere</span></label>
+                </div>
+              </div>
+              <label class="field"><span>Noch etwas? <span class="muted">(optional)</span></span>
+                <textarea name="prompt" rows="2" placeholder="z. B. Lieblingskarte, ein Charakter aus einer Geschichte, „nicht zu kompetitiv“ …"></textarea>
               </label>
               <label class="field inline">Anzahl Vorschläge
                 <select name="count"><option>3</option><option selected>5</option><option>8</option></select>

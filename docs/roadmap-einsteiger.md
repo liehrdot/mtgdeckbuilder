@@ -44,9 +44,9 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 
 ## Phase E – Geführter Commander-Finder
 
-- [ ] Quiz statt nur Freitext: Spielgefühl, Farben (mit Bedeutung jeder Farbe), Schwierigkeit,
+- [x] Quiz statt nur Freitext: Spielgefühl, Farben (mit Bedeutung jeder Farbe), Schwierigkeit,
       Lieblingsthemen – optional ergänzt durch Freitext.
-- [ ] Vorschläge mit „Warum passt der zu dir?“ und Schwierigkeitsgrad; Anfänger bekommen einfache
+- [x] Vorschläge mit „Warum passt der zu dir?“ und Schwierigkeitsgrad; Anfänger bekommen einfache
       Commander bevorzugt.
 
 ## Phase F – Einstieg über Precons

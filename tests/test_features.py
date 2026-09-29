@@ -100,3 +100,18 @@ def test_gui_blacklist_routes_and_finder_start(monkeypatch):
     assert client.post("/api/find-commander", json={"prompt": "Vampire", "bracket": 2}).json() == {"job": "x"}
     assert started["output_format"]["type"] == "json_schema"
     assert "suggestions" in started["output_format"]["schema"]["properties"]
+
+
+def test_guided_finder_quiz(monkeypatch):
+    f = gui.finder_prompt(gui.FinderRequest(feel=["tokens", "unknown"], colors=["G", "W"], themes=["elves"], experience="new"))
+    assert "Wunsch des Spielers" not in f
+    assert "viele kleine Kreaturen" in f and "Weiß, Grün" in f and "Elfen" in f and "einfach zu spielen" in f
+    assert "unknown" not in f
+    schema = gui.SUGGESTION_SCHEMA["properties"]["suggestions"]["items"]["properties"]
+    assert schema["difficulty"]["enum"] == ["einfach", "mittel", "anspruchsvoll"]
+    monkeypatch.setattr(gui, "_start", lambda *a, **k: {"job": "y"})
+    client = TestClient(gui.app)
+    assert client.post("/api/find-commander", json={"prompt": " "}).status_code == 400
+    assert client.post("/api/find-commander", json={"experience": "new"}).status_code == 400  # nothing to go on
+    assert client.post("/api/find-commander", json={"colors": ["B"], "experience": "new"}).json() == {"job": "y"}
+    assert client.post("/api/find-commander", json={"colors": ["B"], "experience": "pro"}).status_code == 422

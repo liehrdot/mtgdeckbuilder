@@ -249,7 +249,14 @@ buildForm.addEventListener("submit", async (e) => {
   const f = Object.fromEntries(new FormData(buildForm));
   try {
     if (buildForm.dataset.mode === "find") {
-      const body = { ...buildSettings(), prompt: f.prompt, count: Number(f.count) };
+      const fd = new FormData(buildForm);
+      const body = { ...buildSettings(), prompt: f.prompt || "", count: Number(f.count), feel: fd.getAll("feel"),
+        colors: fd.getAll("colors"), themes: fd.getAll("themes"), experience: f.experience || null };
+      if (!body.prompt.trim() && !body.feel.length && !body.colors.length && !body.themes.length) {
+        toast("Wähl mindestens aus, was dir Spaß macht – oder beschreibe deinen Wunsch.", "error");
+        buildForm.querySelector(".quiz input").focus();
+        return;
+      }
       const { job } = await api("/api/find-commander", { method: "POST", body });
       $("#suggestions").hidden = true;
       startJob(job, "Claude sucht passende Commander", { kind: "finder", slot: "#finder-job-slot", route: "#/new" });
@@ -280,7 +287,9 @@ function renderSuggestions(items) {
       ${s.image ? `<img src="${esc(s.image)}" alt="${esc(s.name)}" loading="lazy">` : ""}
       <h3>${esc(s.name)}${s.partner ? " + " + esc(s.partner) : ""}</h3>
       <p class="muted small">${esc(s.archetype || "")} · ${esc(colors)}${s[priceKey] ? " · " + esc(s[priceKey]) : ""}</p>
-      <p>${esc(s.why || "")}</p>
+      ${s.difficulty ? `<span class="difficulty ${esc(s.difficulty)}" title="${esc(s.difficulty_note || "")}">${esc(s.difficulty[0].toUpperCase() + s.difficulty.slice(1))} zu spielen</span>` : ""}
+      <p><span class="why-label">Warum passt der zu dir?</span> ${esc(s.why || "")}</p>
+      ${s.difficulty_note ? `<p class="muted small">${esc(s.difficulty_note)}</p>` : ""}
       ${s.bracket_fit ? `<p class="muted small">${esc(s.bracket_fit)}</p>` : ""}
       <div class="actions">
         <button type="button" class="btn" data-use="${i}">Übernehmen</button>

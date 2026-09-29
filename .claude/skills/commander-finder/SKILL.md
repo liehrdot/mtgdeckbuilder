@@ -45,8 +45,15 @@ Prefer variety: different colors or angles, so the user has a real choice.
 
 ## 4. Present
 
-For each suggestion: name (+ partner), colors, archetype, 2-3 sentences *why it fits the wish*,
-how it plays in the requested bracket, and a one-line strategy the deckbuilder can use.
+For each suggestion: name (+ partner), colors, archetype, 2-3 sentences *why it fits the wish*
+(addressed to the player: "du"), how it plays in the requested bracket, how hard it is to pilot
+(`einfach` / `mittel` / `anspruchsvoll` plus one sentence why) and a one-line strategy the
+deckbuilder can use.
+
+**Beginners** (the wish says the player is new): prefer commanders with a clear, proactive plan that
+works from the command zone, few decisions per turn and forgiving misplays (e.g. go-wide tokens,
++1/+1 counters, simple landfall or stompy). Avoid stax, complex combo engines, heavy stack
+interaction and commanders that need precise sequencing. Explain what makes each one easy or hard.
 End with: "Soll ich ein Deck mit einem davon bauen?" – if yes, continue with the
 `commander-deckbuilder` skill using that commander, bracket, budget/proxy and strategy.
 

@@ -256,8 +256,8 @@ details.more[open] > summary { margin-bottom: var(--space-3); }
 .suggestion img { width: 100%; border-radius: 9px; }
 .suggestion h3 { font-size: var(--fs-md); }
 .suggestion p { margin: 0; font-size: 14px; }
-.suggestion .actions { display: flex; gap: var(--space-2); margin-top: auto; padding-top: var(--space-2); }
-.suggestion .actions .btn { flex: 1; }
+.suggestion .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-2); }
+.suggestion .actions .btn { flex: 1 1 auto; }
 
 /* ---------- job panel ---------- */
 .job { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -805,3 +805,20 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
   .game-list li { grid-template-columns: minmax(0, 1fr) auto; }
   .game-list li .when { grid-column: 1 / -1; }
 }
+
+/* ---------- guided commander finder ---------- */
+.color-picks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); }
+.color-picks input { position: absolute; opacity: 0; pointer-events: none; }
+.color-picks span { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; height: 100%; padding: 10px 6px; border: 1px solid var(--input-border); border-radius: 10px; cursor: pointer; background: var(--surface); }
+.color-picks span:hover { border-color: var(--accent); }
+.color-picks input:checked + span { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.color-picks input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.color-picks small { font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.pip { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgb(0 0 0 / .25); margin-bottom: 2px; }
+.pip.w { background: #f8f3d9; } .pip.u { background: #6ab4e6; } .pip.b { background: #5b5350; } .pip.r { background: #e8704f; } .pip.g { background: #4fae6e; }
+.suggestion .difficulty { align-self: flex-start; font-size: var(--fs-xs); font-weight: 650; border-radius: 99px; padding: 2px 9px; }
+.difficulty.einfach { background: var(--ok-soft); color: var(--ok); }
+.difficulty.mittel { background: var(--warn-soft); color: var(--warn); }
+.difficulty.anspruchsvoll { background: var(--bad-soft); color: var(--bad); }
+.suggestion .why-label { font-weight: 650; font-size: var(--fs-sm); }
+@media (max-width: 700px) { .color-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); } .color-picks label:last-child { grid-column: 1 / -1; } }
