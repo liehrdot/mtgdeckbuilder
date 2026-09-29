@@ -24,9 +24,9 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, exports, proxy, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, exports, glossary, proxy, scryfall, storage
 from .. import settings as settings_mod
-from ..cards import deck_tokens, resolve
+from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
 from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
@@ -530,6 +530,22 @@ async def api_card(name: str) -> dict[str, Any]:
     if missing or not cards:
         raise HTTPException(404, f"Karte nicht gefunden: {name}")
     return next(iter(cards.values()))
+
+
+@app.get("/api/cards/text")
+async def api_card_text(name: str, lang: str = "de") -> dict[str, Any]:
+    try:
+        data = await card_text(name, lang)
+    except Exception as exc:
+        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+    if not data:
+        raise HTTPException(404, f"Karte nicht gefunden: {name}")
+    return data
+
+
+@app.get("/api/glossary")
+async def api_glossary() -> list[dict[str, Any]]:
+    return glossary.entries()
 
 
 @app.post("/api/build")

@@ -81,7 +81,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "collection", "blacklist", "settings"];
+const VIEWS = ["new", "job", "deck", "collection", "glossary", "blacklist", "settings"];
 const TABS = ["karten", "testen", "anpassen", "fragen", "verlauf", "drucken"];
 let lastView = null;
 
@@ -106,6 +106,7 @@ async function route() {
   if (r.view === "deck") selectTab(r.tab || "karten", false);
   if (r.view === "settings") refreshDbStatus();
   if (r.view === "collection") loadCollection();
+  if (r.view === "glossary") showGlossary(r.slug);
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -117,7 +118,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", glossary: "Glossar", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -1125,10 +1126,106 @@ function showCardView(name, cd) {
     `<figure><img src="${esc(u.replace("/normal/", "/large/"))}" alt="${esc(label)}"><figcaption>${i ? "Rückseite" : "Vorderseite"}: ${esc(label)}</figcaption></figure>`).join("")
     || '<p class="muted">Kein Bild verfügbar.</p>';
   $("#card-view-link").href = cd.scryfall_uri || `https://scryfall.com/search?q=${enc('!"' + name + '"')}`;
+  const inDeck = !!currentDeck && parseHash().view === "deck" && (!!currentDeck.card_data?.[name] || currentDeck.commanders.includes(name));
+  $("#card-view-explain").hidden = $("#card-view-explain-hint").hidden = !inDeck;
+  $("#card-view-explain").dataset.name = name;
   preview.hidden = true;
   $("#card-view").showModal();
+  loadCardText(name);
 }
 $("#card-view-close").addEventListener("click", () => $("#card-view").close());
+
+// rules text next to the image: German printed text or English Oracle text, glossary terms marked
+const cardTexts = new Map();
+let cardViewName = null;
+let cardLang = store.get("cardlang") === "en" ? "en" : "de";
+document.querySelector(`[name="cardlang"][value="${cardLang}"]`).checked = true;
+
+async function loadCardText(name) {
+  cardViewName = name;
+  const box = $("#card-view-text");
+  box.hidden = false;
+  $("#card-view-rules").innerHTML = '<p class="muted small">Kartentext wird geladen …</p>';
+  $("#card-view-terms").hidden = true;
+  let data = cardTexts.get(name);
+  if (!data) {
+    try { data = await api(`/api/cards/text?name=${enc(name)}&lang=de`); cardTexts.set(name, data); }
+    catch { data = null; }
+  }
+  if (cardViewName !== name) return;  // another card was opened meanwhile
+  if (!data) { box.hidden = true; return; }
+  renderCardText(data);
+}
+
+function manaHtml(sym) {
+  const s = sym.slice(1, -1);
+  const color = /^[WUBRG]$/.test(s) ? s.toLowerCase() : "";
+  const label = { T: "↷", Q: "↶" }[s] || s.replace("/", "");
+  return `<span class="mana ${color}" title="${esc(sym)}">${esc(label)}</span>`;
+}
+
+// escape a rules text, turning {G}-symbols into pills and glossary terms into buttons
+function rulesHtml(text, terms) {
+  const names = [];
+  for (const t of terms) for (const n of [t.term, t.de]) if (n) names.push([n, t.term]);
+  names.sort((a, b) => b[0].length - a[0].length);
+  const byName = new Map(names.map(([n, t]) => [n.toLowerCase(), t]));
+  const alt = names.map(([n]) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const re = new RegExp(`\\{[^}]+\\}` + (alt ? `|(?<![\\p{L}\\d-])(?:${alt})(?![\\p{L}\\d-])` : ""), "giu");
+  let out = "", last = 0;
+  for (const m of text.matchAll(re)) {
+    out += esc(text.slice(last, m.index));
+    const hit = m[0];
+    if (hit.startsWith("{")) out += manaHtml(hit);
+    else {
+      const term = byName.get(hit.toLowerCase());
+      const entry = terms.find((t) => t.term === term);
+      out += `<button type="button" class="term" data-term="${esc(term)}" title="${esc(entry?.text || "")}">${esc(hit)}</button>`;
+    }
+    last = m.index + hit.length;
+  }
+  return out + esc(text.slice(last));
+}
+
+function renderCardText(data) {
+  const german = cardLang === "de" && data.printed;
+  const faces = german ? data.printed.faces : data.faces;
+  $("#card-view-rules").innerHTML = faces.map((f, i) => `<div class="face">
+      <div class="head"><span>${esc(f.name)}</span><span>${(data.faces[i]?.mana_cost || "").match(/\{[^}]+\}/g)?.map(manaHtml).join("") || ""}</span></div>
+      <div class="type">${esc(f.type_line)}</div>
+      ${f.text.split("\n").filter(Boolean).map((line) => `<p>${rulesHtml(line, data.terms)}</p>`).join("") || '<p class="muted small">Kein Regeltext.</p>'}
+    </div>`).join("")
+    + (data.pt && faces.length === 1 ? `<p class="pt">${esc(data.pt)}</p>` : "")
+    + (cardLang === "de" && !data.printed ? '<p class="note">Keine deutsche Ausgabe gefunden – das ist der englische Originaltext.</p>' : "")
+    + (german ? `<p class="note">Gedruckter Text${data.printed.set_name ? " aus " + esc(data.printed.set_name) : ""}. Maßgeblich ist der aktuelle englische Oracle-Text.</p>` : "");
+  $("#card-view-terms").hidden = !data.terms.length;
+  $("#card-view-terms-list").innerHTML = data.terms.map((t) =>
+    `<dt data-term="${esc(t.term)}">${esc(t.de || t.term)}${t.de ? ` <span class="de">(${esc(t.term)})</span>` : ""}</dt><dd data-term="${esc(t.term)}">${esc(t.text)}</dd>`).join("");
+}
+
+$("#card-view-text").addEventListener("change", (e) => {
+  if (e.target.name !== "cardlang") return;
+  cardLang = e.target.value;
+  store.set("cardlang", cardLang);
+  const data = cardTexts.get(cardViewName);
+  if (data) renderCardText(data);
+});
+$("#card-view-rules").addEventListener("click", (e) => {
+  const b = e.target.closest(".term");
+  if (!b) return;
+  for (const el of $$("#card-view-text .on")) el.classList.remove("on");
+  for (const el of $$(`#card-view-text [data-term="${CSS.escape(b.dataset.term)}"]`)) el.classList.add("on");
+  $(`#card-view-terms-list dt[data-term="${CSS.escape(b.dataset.term)}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+});
+$("#card-view-explain").addEventListener("click", () => {
+  const name = $("#card-view-explain").dataset.name;
+  $("#card-view").close();
+  selectTab("fragen");
+  const box = $("#qa-form textarea");
+  box.value = `Erkläre mir die Karte [[${name}]]: Was macht sie genau, wofür ist sie in diesem Deck und wann spiele ich sie am besten?`;
+  if (qaRun && !qaRun.finished) { toast("Claude beantwortet gerade eine andere Frage – deine Frage steht bereit."); box.focus(); return; }
+  $("#qa-form").requestSubmit();
+});
 
 // ---------- deck actions ----------
 $("#copy-btn").addEventListener("click", async () => {
@@ -2308,6 +2405,39 @@ $("#db-btn").addEventListener("click", async () => {
 });
 
 // ============================================================================================
+// glossary: keywords, actions and Commander terms
+// ============================================================================================
+let glossaryItems = null;
+const GLOSSARY_GROUPS = { keyword: "Schlüsselwörter", action: "Aktionen, Spielsteine & Marker", concept: "Commander-Begriffe & Spielweisen" };
+async function loadGlossary() {
+  if (!glossaryItems) glossaryItems = await api("/api/glossary");
+  return glossaryItems;
+}
+const glossaryId = (term) => "gl-" + term.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+function renderGlossary() {
+  const words = $("#gl-filter").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = (glossaryItems || []).filter((t) => words.every((w) => `${t.term} ${t.de} ${t.text}`.toLowerCase().includes(w)));
+  $("#gl-list").innerHTML = Object.entries(GLOSSARY_GROUPS).map(([kind, title]) => {
+    const items = hits.filter((t) => t.kind === kind).sort((a, b) => (a.de || a.term).localeCompare(b.de || b.term, "de"));
+    return items.length ? `<section class="panel gl-group"><h2>${esc(title)} <span class="count">${items.length}</span></h2><dl>${items.map((t) =>
+      `<dt id="${glossaryId(t.term)}" tabindex="-1">${esc(t.de || t.term)}${t.de ? ` <span class="de">(${esc(t.term)})</span>` : ""}</dt><dd>${esc(t.text)}</dd>`).join("")}</dl></section>` : "";
+  }).join("") || '<p class="empty-inline">Kein Begriff gefunden.</p>';
+}
+
+async function showGlossary(term) {
+  try { await loadGlossary(); } catch (err) { return fail(err); }
+  if (term) $("#gl-filter").value = "";
+  renderGlossary();
+  if (term) {
+    const el = document.getElementById(glossaryId(term));
+    if (el) { el.scrollIntoView({ block: "center" }); el.focus({ preventScroll: true }); }
+  }
+}
+$("#gl-filter").addEventListener("input", debounce(renderGlossary, 120));
+loadGlossary().catch(() => {});  // the quick search lists glossary terms too
+
+// ============================================================================================
 // quick search (Ctrl+K): decks, pages and actions
 // ============================================================================================
 let paletteHits = [];
@@ -2319,6 +2449,7 @@ function paletteItems() {
     { label: "Meine Sammlung", hint: "Seite", run: () => go("#/collection") },
     { label: "Karte zur Sammlung hinzufügen", hint: "Sammlung", run: () => { go("#/collection"); openCollAdd(); } },
     { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },
+    { label: "Glossar", hint: "Seite", run: () => go("#/glossary") },
     { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
     { label: "Einstellungen", hint: "Seite", run: () => go("#/settings") },
   ];
@@ -2330,6 +2461,7 @@ function paletteItems() {
     items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });
   }
   for (const d of deckIndex) items.push({ label: d.name, hint: `Deck · ${d.commanders.join(" + ")} · ${d.level || ""}`, run: () => go(`#/deck/${enc(d.slug)}`) });
+  for (const t of glossaryItems || []) items.push({ label: t.de ? `${t.de} (${t.term})` : t.term, hint: "Glossar", run: () => go(`#/glossary/${enc(t.term)}`) });
   return items;
 }
 function renderPalette() {

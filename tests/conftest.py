@@ -100,6 +100,14 @@ PRINTINGS = {
 
 PRINT_COUNTS = {"Forest": 250}
 
+# printed (translated) text of a card's German printing, for lang:de searches
+GERMAN = {"Cultivate": {"printed_name": "Kultivieren", "printed_type_line": "Hexerei",
+                        "printed_text": "Durchsuche deine Bibliothek nach bis zu zwei Standardland-Karten, zeige sie offen vor, bringe eine davon getappt ins Spiel und nimm die andere auf deine Hand."},
+          "Delver of Secrets // Insectile Aberration": {"card_faces": [
+              {"printed_name": "Hüter der Geheimnisse", "printed_type_line": "Kreatur", "printed_text": ""},
+              {"printed_name": "Insektoide Abnormität", "printed_type_line": "Kreatur", "printed_text": "Flugfähigkeit"}],
+              "keywords": ["Flying", "Transform"]}}  # fmt: skip
+
 MPC_SERVER = "https://mpc.test"
 MPC_HITS = {"sol ring": ["drive-sol-1", "drive-sol-2"], "insectile aberration": ["drive-insect"], "treasure": ["drive-treasure"]}
 
@@ -154,6 +162,14 @@ def handler(request: httpx.Request) -> httpx.Response:
                 base = lookup_card(name)
                 if not base:
                     return httpx.Response(404, json={"details": "no cards"})
+                if "lang:" in q:  # printings in one language (German card text)
+                    de = GERMAN.get(base["name"])
+                    if not de or "lang:de" not in q:
+                        return httpx.Response(404, json={"details": "no cards"})
+                    printed = {**base, **de, "lang": "de", "set_name": "Innistrad"}
+                    if "card_faces" in de:  # real faces carry Oracle and printed fields side by side
+                        printed["card_faces"] = [{**f, **d} for f, d in zip(base["card_faces"], de["card_faces"])]
+                    return httpx.Response(200, json={"total_cards": 1, "has_more": False, "data": [printed]})
                 total = PRINT_COUNTS.get(base["name"], 3)  # basic lands have hundreds of printings
                 page = int(url.params.get("page", 1))
                 ids = range((page - 1) * 175, min(page * 175, total))
