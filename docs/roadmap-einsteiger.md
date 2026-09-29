@@ -58,6 +58,16 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 - [x] Upgrade-Plan in Stufen (z. B. 20 € · 50 € · 100 €): eine KI-Anfrage, pro Stufe Tausche mit
       Begründung; stufenweise übernehmen.
 
+## Zusatz – Deck-Import per Link
+
+- [x] Importer für Archidekt (inkl. Kategorien, ohne Maybe-/Sideboard), Moxfield (v3, dann v2; blockiert →
+      Hinweis auf den Text-Export), MTGGoldfish, TappedOut, Deckstats, EDHREC-Durchschnittsdecks; eingefügte Listen.
+- [x] Vorschau: Name, Quelle, Kartenzahl, nicht erkannte Karten, Commander-Auswahl (Kandidaten aus der Liste,
+      vorausgewählt per Hinweis), Bracket automatisch geschätzt oder gewählt.
+- [x] „Neues Deck“: dritter Einstieg „Ich habe schon ein Deck“ mit Link · Liste einfügen · Starterdeck.
+- [x] Die Seiten waren aus der Entwicklungsumgebung nicht erreichbar – Formate nach den öffentlichen Endpunkten
+      umgesetzt und defensiv geparst, offline mit Mocks getestet.
+
 ## Abschluss
 
 - [ ] README, CLAUDE.md, Skill-Dokumentation.

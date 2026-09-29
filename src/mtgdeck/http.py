@@ -112,9 +112,11 @@ async def request_json(
     json_body: Any = None,
     ttl: int = DEFAULT_TTL,
     retries: int = 2,
+    text: bool = False,
 ) -> Any:
-    """Perform a request and return decoded JSON, using the disk cache for identical requests."""
-    key = json.dumps([method, url, params, json_body], sort_keys=True, default=str)
+    """Perform a request and return decoded JSON (or the body as text), using the disk cache for
+    identical requests."""
+    key = json.dumps([method, url, params, json_body] + (["text"] if text else []), sort_keys=True, default=str)
     cached = _cache_get(key, ttl)
     if cached is not None:
         return cached
@@ -140,13 +142,17 @@ async def request_json(
             detail = resp.text[:300]
         raise HttpError(resp.status_code, url, str(detail))
 
-    data = resp.json()
+    data = resp.text if text else resp.json()
     _cache_put(key, data)
     return data
 
 
 async def get_json(url: str, params: dict[str, Any] | None = None, ttl: int = DEFAULT_TTL) -> Any:
     return await request_json("GET", url, params=params, ttl=ttl)
+
+
+async def get_text(url: str, params: dict[str, Any] | None = None, ttl: int = DEFAULT_TTL) -> str:
+    return await request_json("GET", url, params=params, ttl=ttl, text=True)
 
 
 async def post_json(url: str, body: Any, ttl: int = DEFAULT_TTL) -> Any:

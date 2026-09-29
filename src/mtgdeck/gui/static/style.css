@@ -237,7 +237,16 @@ details.more[open] > summary { margin-bottom: var(--space-3); }
 .step-title .muted { font-weight: 400; font-size: 14px; }
 .step .field:last-child, .step .switch:last-child { margin-bottom: 0; }
 .form-card[data-mode="build"] .mode-find, .form-card[data-mode="find"] .mode-build,
-.form-card:not([data-mode="precon"]) .mode-precon, .form-card[data-mode="precon"] :is(.mode-build, .mode-find, .not-precon) { display: none !important; }
+.form-card:not([data-mode="import"]) .mode-import, .form-card[data-mode="import"] :is(.mode-build, .mode-find, .not-import) { display: none !important; }
+#import-box:not([data-imode="link"]) .imode-link, #import-box:not([data-imode="text"]) .imode-text,
+#import-box:not([data-imode="precon"]) .imode-precon, #import-box[data-imode="precon"] .import-preview { display: none !important; }
+#import-box .segmented { margin-bottom: var(--space-3); }
+#import-box textarea { margin-bottom: var(--space-2); font-family: var(--mono); font-size: var(--fs-sm); }
+.import-preview { flex-wrap: wrap; }
+.import-preview .grow { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.import-preview .field { margin: 0; }
+.import-preview .cmd-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+@media (max-width: 600px) { .import-preview .cmd-row { grid-template-columns: 1fr; } }
 .commander-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: var(--space-5); align-items: start; }
 .commander-preview img { width: 100%; border-radius: 7px; box-shadow: var(--shadow); display: block; }
 .commander-preview:empty { display: none; }
@@ -851,3 +860,6 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
   .precon-pick img { width: 120px; }
   .plan-list .upgrade-list li { grid-template-columns: minmax(0, 1fr) auto; }
 }
+.mode-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.mode-switch span { justify-content: center; text-align: center; height: 100%; }
+@media (max-width: 700px) { .mode-switch { grid-template-columns: 1fr; } }

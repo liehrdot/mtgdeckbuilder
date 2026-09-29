@@ -567,11 +567,15 @@ async def import_precon(
 
 
 @mcp.tool()
-async def import_deck(url: Annotated[str, Field(description="Archidekt or Moxfield deck URL")]) -> dict[str, Any]:
-    """Import a public deck from Archidekt (reliable) or Moxfield (best effort, no public API)."""
+async def import_deck(
+    url: Annotated[str, Field(description="Deck URL: Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats or an EDHREC average deck")],
+) -> dict[str, Any]:
+    """Import a public deck from a deckbuilding site: name, commanders, cards ("N Name"), categories.
+    Moxfield is best effort (no public API); if blocked, ask the user to paste the text export.
+    ``commanders`` can be empty when the site does not mark them (``commander_hint`` may help)."""
     try:
         return await importers.import_url(url)
-    except (ValueError, RuntimeError) as exc:
+    except Exception as exc:
         return {"error": str(exc)}
 
 

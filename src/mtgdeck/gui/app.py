@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, exports, games, glossary, health, precons, proxy, rule0, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, exports, importers, games, glossary, health, precons, proxy, rule0, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -967,6 +967,55 @@ async def api_upgrade_plan(slug: str, req: PlanRequest) -> dict[str, str]:
 
     prompt = plan_prompt(deck, req, bool(collection.load()))
     return _start(prompt, req.model, {"type": "json_schema", "schema": PLAN_SCHEMA}, read_only=True, finish=finish)
+
+
+class ImportPreviewRequest(BaseModel):
+    url: str | None = None
+    text: str | None = None
+    name: str | None = None
+
+
+@app.post("/api/import/preview")
+async def api_import_preview(req: ImportPreviewRequest) -> dict[str, Any]:
+    try:
+        if req.url and req.url.strip():
+            data = await importers.import_url(req.url)
+        else:
+            data = importers.import_text(req.text or "", req.name)
+    except HttpError as exc:  # before RuntimeError: HttpError is one
+        status = 404 if exc.status == 404 else 502
+        raise HTTPException(status, "Deck nicht gefunden – ist es öffentlich?" if status == 404 else f"Seite nicht erreichbar: {exc}") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Seite nicht erreichbar: {exc}") from exc
+    if not data["cards"]:
+        raise HTTPException(400, "Keine Karten gefunden.")
+    return await deckimport.preview(data)
+
+
+class ImportRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    commanders: list[str] = Field(min_length=1, max_length=2)
+    cards: list[str] = Field(min_length=1)
+    categories: dict[str, str] = Field(default_factory=dict)
+    bracket: int | None = Field(None, ge=1, le=5)
+    currency: str = Field("eur", pattern="^(eur|usd)$")
+    site: str = ""
+    source: str = ""
+
+
+@app.post("/api/import")
+async def api_import(req: ImportRequest) -> dict[str, Any]:
+    where = f"{req.site}: {req.source}" if req.source else (req.site or "Liste")
+    try:
+        return await deckimport.save(
+            name=req.name.strip(), commanders=req.commanders, cards=req.cards, categories=req.categories, bracket=req.bracket,
+            currency=req.currency, description=f"Importiert von {where}." if req.source else "",
+            note=f"Importiert ({req.site or 'Liste'})", extra={"imported_from": {"site": req.site, "source": req.source}},
+        )  # fmt: skip
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/precons")

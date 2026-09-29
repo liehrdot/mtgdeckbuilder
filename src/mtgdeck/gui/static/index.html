@@ -77,10 +77,10 @@
       </header>
 
       <form id="build-form" class="panel form-card" data-mode="build" autocomplete="off">
-        <div class="segmented" role="radiogroup" aria-label="Wie willst du starten?">
+        <div class="segmented mode-switch" role="radiogroup" aria-label="Wie willst du starten?">
           <label><input type="radio" name="mode" value="build" checked><span>Ich habe einen Commander</span></label>
           <label><input type="radio" name="mode" value="find"><span><svg class="icon"><use href="#i-spark"/></svg>Commander vorschlagen lassen</span></label>
-          <label><input type="radio" name="mode" value="precon"><span><svg class="icon"><use href="#i-box"/></svg>Ich habe ein Starterdeck</span></label>
+          <label><input type="radio" name="mode" value="import"><span><svg class="icon"><use href="#i-box"/></svg>Ich habe schon ein Deck</span></label>
         </div>
 
         <section class="step">
@@ -88,14 +88,37 @@
           <div class="step-body">
             <h2 class="step-title mode-build">Commander</h2>
             <h2 class="step-title mode-find">Was für ein Spieler bist du?</h2>
-            <h2 class="step-title mode-precon">Welches Starterdeck hast du?</h2>
-            <div class="mode-precon">
-              <p class="muted small">Vorgefertigte Commander-Decks (Precons) von MTGJSON. Das Deck wird importiert und geprüft –
-                danach hilft dir der Upgrade-Plan unter „Anpassen“, es Schritt für Schritt zu verbessern.</p>
-              <input id="precon-q" type="search" placeholder="Name, Set-Kürzel oder Jahr, z. B. „Lorehold“ oder 2024" aria-label="Starterdeck suchen">
-              <p id="precon-msg" class="muted small" aria-live="polite"></p>
-              <div id="precon-pick" class="precon-pick" hidden></div>
-              <ul id="precon-list" class="precon-list"></ul>
+            <h2 class="step-title mode-import">Woher kommt dein Deck?</h2>
+            <div class="mode-import" id="import-box" data-imode="link">
+              <div class="segmented small" role="radiogroup" aria-label="Woher kommt das Deck?">
+                <label><input type="radio" name="imode" value="link" checked><span>Link</span></label>
+                <label><input type="radio" name="imode" value="text"><span>Liste einfügen</span></label>
+                <label><input type="radio" name="imode" value="precon"><span>Starterdeck (Precon)</span></label>
+              </div>
+              <div class="imode-link">
+                <p class="muted small">Link zu einem öffentlichen Deck von Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats
+                  oder einem EDHREC-Durchschnittsdeck.</p>
+                <div class="inline-form">
+                  <input id="import-url" type="url" inputmode="url" placeholder="https://www.moxfield.com/decks/…" aria-label="Deck-Link">
+                  <button type="button" class="btn primary" id="import-url-btn">Laden</button>
+                </div>
+              </div>
+              <div class="imode-text">
+                <p class="muted small">Liste aus Moxfield („Export“ → „Copy Plain Text“), Archidekt, MTG Arena oder von Hand. Den Commander
+                  mit <code>*CMDR*</code> markieren oder unter eine Zeile „Commander“ schreiben – sonst fragen wir nach.</p>
+                <textarea id="import-text" rows="8" aria-label="Deckliste" placeholder="Commander&#10;1 Meren of Clan Nel Toth&#10;&#10;Deck&#10;1 Sol Ring&#10;1 Kultivieren&#10;18 Wald"></textarea>
+                <button type="button" class="btn primary" id="import-text-btn">Liste prüfen</button>
+              </div>
+              <div class="imode-precon">
+                <p class="muted small">Vorgefertigte Commander-Decks von MTGJSON. Danach hilft dir der Upgrade-Plan unter „Anpassen“,
+                  das Deck Schritt für Schritt zu verbessern.</p>
+                <input id="precon-q" type="search" placeholder="Name, Set-Kürzel oder Jahr, z. B. „Lorehold“ oder 2024" aria-label="Starterdeck suchen">
+                <p id="precon-msg" class="muted small" aria-live="polite"></p>
+                <div id="precon-pick" class="precon-pick" hidden></div>
+                <ul id="precon-list" class="precon-list"></ul>
+              </div>
+              <p id="import-msg" class="small" aria-live="polite"></p>
+              <div id="import-preview" class="precon-pick import-preview" hidden></div>
             </div>
             <div class="mode-build commander-row">
               <div class="grow">
@@ -172,7 +195,7 @@
           </div>
         </section>
 
-        <section class="step not-precon">
+        <section class="step not-import">
           <span class="step-num" aria-hidden="true">2</span>
           <div class="step-body">
             <h2 class="step-title">Stärke (Bracket)</h2>
@@ -185,7 +208,7 @@
           </div>
         </section>
 
-        <section class="step not-precon">
+        <section class="step not-import">
           <span class="step-num" aria-hidden="true">3</span>
           <div class="step-body">
             <h2 class="step-title">Budget</h2>
@@ -220,7 +243,7 @@
           </div>
         </section>
 
-        <details class="more advanced not-precon">
+        <details class="more advanced not-import">
           <summary>Erweitert</summary>
           <label class="field">KI-Modell
             <select name="model">
@@ -232,7 +255,7 @@
           </label>
         </details>
 
-        <div class="form-actions not-precon">
+        <div class="form-actions not-import">
           <button type="submit" id="build-btn" class="btn primary lg">
             <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span></button>
           <p class="muted small"><span class="mode-build">Dauert ein paar Minuten – du kannst währenddessen andere Decks ansehen.</span>

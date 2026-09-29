@@ -14,8 +14,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from . import storage
-from .deck import BASIC_LANDS
 from .http import get_json
 
 BASE = "https://mtgjson.com/api/v5"
@@ -85,31 +83,13 @@ async def load(file_name: str) -> dict[str, Any]:
 
 async def import_precon(file_name: str, *, bracket: int = 2, currency: str = "eur", name: str | None = None) -> dict[str, Any]:
     """Save a precon as a new deck (validated, categories guessed) and return its storage paths."""
-    from .deckedit import guess_category  # deckedit imports validate, keep this module light
-    from .validate import validate_deck
+    from .deckimport import save  # deckimport -> validate -> heavy imports; keep this module light
 
     p = await load(file_name)
-    lines = [f"{c['qty']} {c['name']}" for c in p["cards"]]
-    result = await validate_deck(p["commanders"], lines, bracket, currency=currency)
-    card_data = result.pop("_card_data")
     year = f", {p['released'][:4]}" if p["released"] else ""
-    deck_name = name or p["name"]
-    deck = {
-        "name": deck_name,
-        "slug": storage.unique_slug(deck_name),
-        "commanders": result["commanders"],
-        "bracket": bracket,
-        "description": f"Vorgefertigtes Commander-Deck „{p['name']}“ ({p['code']}{year}).",
-        "strategy": "",
-        "budget": None,
-        "proxy": False,
-        "power_profile": None,
-        "currency": currency,
-        "notes": "",
-        "precon": {"file": p["file"], "name": p["name"], "code": p["code"], "released": p["released"]},
-        "change_note": f"Importiert: Precon „{p['name']}“",
-        "cards": [{**c, "category": "Land" if c["name"] in BASIC_LANDS else guess_category(card_data.get(c["name"], {}))}
-                  for c in result.pop("cards")],  # fmt: skip
-        "validation": result,
-    }
-    return storage.save(deck)
+    return await save(
+        name=name or p["name"], commanders=p["commanders"], cards=[f"{c['qty']} {c['name']}" for c in p["cards"]],
+        bracket=bracket, currency=currency, description=f"Vorgefertigtes Commander-Deck „{p['name']}“ ({p['code']}{year}).",
+        note=f"Importiert: Precon „{p['name']}“",
+        extra={"precon": {"file": p["file"], "name": p["name"], "code": p["code"], "released": p["released"]}},
+    )  # fmt: skip

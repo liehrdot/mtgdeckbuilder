@@ -195,7 +195,7 @@ function setMode(mode) {
   // only the fields of the active mode take part in validation and submission
   for (const el of buildForm.querySelectorAll(".mode-build :is(input, textarea, select)")) el.disabled = mode !== "build";
   for (const el of buildForm.querySelectorAll(".mode-find :is(input, textarea, select)")) el.disabled = mode !== "find";
-  if (mode === "precon" && !preconItems) searchPrecons();
+  if (mode === "import" && $("#import-box").dataset.imode === "precon" && !preconItems) searchPrecons();
 }
 buildForm.addEventListener("change", (e) => { if (e.target.name === "mode") setMode(e.target.value); });
 
@@ -246,7 +246,12 @@ function buildSettings() {
 
 buildForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (buildForm.dataset.mode === "precon") { searchPrecons(); return; }  // Enter in the search field
+  if (buildForm.dataset.mode === "import") {  // Enter in the link or search field
+    const im = $("#import-box").dataset.imode;
+    if (im === "link") loadImport({ url: $("#import-url").value });
+    else if (im === "precon") searchPrecons();
+    return;
+  }
   if (currentJob) { toast("Es läuft schon ein Auftrag – warte kurz oder brich ihn ab.", "error"); return; }
   const f = Object.fromEntries(new FormData(buildForm));
   try {
@@ -274,6 +279,90 @@ buildForm.addEventListener("submit", async (e) => {
       go("#/job");
     }
   } catch (err) { fail(err); }
+});
+
+// ---------- import an existing deck: link, pasted list or starter deck ----------
+let importData = null;
+function setImportMode(mode) {
+  $("#import-box").dataset.imode = mode;
+  $(`#import-box [name=imode][value="${mode}"]`).checked = true;
+  $("#import-msg").textContent = "";
+  if (mode === "precon" && !preconItems) searchPrecons();
+}
+$("#import-box").addEventListener("change", (e) => { if (e.target.name === "imode") setImportMode(e.target.value); });
+$("#import-url-btn").addEventListener("click", () => loadImport({ url: $("#import-url").value }));
+$("#import-text-btn").addEventListener("click", () => loadImport({ text: $("#import-text").value }));
+
+async function loadImport(body) {
+  if (body.url !== undefined && !body.url.trim()) { toast("Füge zuerst einen Link ein.", "error"); $("#import-url").focus(); return; }
+  const msg = $("#import-msg");
+  msg.className = "small muted";
+  msg.textContent = body.url ? "Lade das Deck …" : "Prüfe die Liste …";
+  $("#import-preview").hidden = true;
+  try {
+    importData = await api("/api/import/preview", { method: "POST", body });
+    msg.textContent = "";
+    renderImportPreview(importData);
+  } catch (err) {
+    msg.className = "small bad";
+    msg.textContent = err.message;
+  }
+}
+
+function renderImportPreview(d) {
+  const box = $("#import-preview");
+  const options = (sel) => d.commander_candidates.map((c) => `<option${c.name === sel ? " selected" : ""}>${esc(c.name)}</option>`).join("");
+  const known = d.commanders.length > 0;
+  const img = (known ? d.commander_images?.[d.commanders[0]] : null)
+    || d.commander_candidates.find((c) => c.name === d.suggested[0])?.image;
+  const count = d.card_count === 100 ? "100 Karten" : `<span class="warn">${d.card_count} Karten (Commander-Decks haben 100)</span>`;
+  let cmd;
+  if (known) cmd = `<p>Commander: <b>${d.commanders.map(esc).join(" + ")}</b></p>`;
+  else if (d.commander_candidates.length) {
+    cmd = `<div class="cmd-row"><label class="field"><span>Commander</span><select id="imp-cmd1">${d.suggested.length ? "" : "<option value=''>– bitte wählen –</option>"}${options(d.suggested[0])}</select></label>
+      <label class="field"><span>Partner <span class="muted">(optional)</span></span><select id="imp-cmd2"><option value="">–</option>${options(d.suggested[1])}</select></label></div>`;
+  } else {
+    cmd = `<label class="field"><span>Commander <span class="muted">(die Seite markiert ihn nicht)</span></span>
+      <input id="imp-cmd-text" list="ac-imp-cmd" placeholder="Name des Commanders"><datalist id="ac-imp-cmd"></datalist></label>`;
+  }
+  box.innerHTML = `${img ? `<img src="${esc(img)}" alt="">` : ""}
+    <div class="grow">
+      <label class="field"><span>Name</span><input id="imp-name" value="${esc(d.name || (d.commanders[0] || d.suggested[0] || "Importiertes Deck"))}" maxlength="120"></label>
+      <p class="muted small">${esc(d.site)}${d.source ? ` · <a href="${esc(d.source)}" target="_blank" rel="noopener">Quelle</a>` : ""} · ${count}
+        ${d.unresolved?.length ? `<br><span class="warn">Nicht erkannt: ${d.unresolved.slice(0, 8).map(esc).join(", ")}${d.unresolved.length > 8 ? " …" : ""}</span>` : ""}</p>
+      ${cmd}
+      <label class="field"><span>Bracket</span><select id="imp-bracket"><option value="">automatisch schätzen</option>
+        ${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n} – ${esc(brackets.find((b) => b.number === n)?.name || "")}</option>`).join("")}</select></label>
+      <div><button type="button" class="btn primary" id="imp-save">Importieren &amp; prüfen</button></div>
+    </div>`;
+  box.hidden = false;
+  if ($("#imp-cmd-text")) wireAutocomplete($("#imp-cmd-text"), $("#ac-imp-cmd"));
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+$("#import-preview").addEventListener("click", async (e) => {
+  const b = e.target.closest("#imp-save");
+  if (!b || !importData) return;
+  const d = importData;
+  const commanders = d.commanders.length ? d.commanders
+    : $("#imp-cmd-text") ? [$("#imp-cmd-text").value.trim()].filter(Boolean)
+    : [$("#imp-cmd1").value, $("#imp-cmd2").value].filter(Boolean);
+  if (!commanders.length) { toast("Wähle den Commander des Decks.", "error"); return; }
+  const bracket = $("#imp-bracket").value;
+  const body = { name: $("#imp-name").value.trim() || "Importiertes Deck", commanders, cards: d.cards, categories: d.categories,
+    bracket: bracket ? Number(bracket) : null, currency: buildForm.elements.currency.value || "eur", site: d.site, source: d.source || "" };
+  b.disabled = true;
+  b.textContent = "Importiere und prüfe …";
+  try {
+    const r = await api("/api/import", { method: "POST", body });
+    await refreshDeckList();
+    go(`#/deck/${enc(r.slug)}/karten`);
+    toast(`Deck importiert (Bracket ${r.bracket}${bracket ? "" : ", geschätzt"}).${r.legal ? "" : " Die Prüfung hat Probleme gefunden – siehe rechts."}`, r.legal ? "info" : "error", 7000);
+    importData = null;
+    $("#import-preview").hidden = true;
+    $("#import-url").value = "";
+    $("#import-text").value = "";
+  } catch (err) { b.disabled = false; b.textContent = "Importieren & prüfen"; fail(err); }
 });
 
 // ---------- starter deck (precon) import ----------
@@ -2804,7 +2893,9 @@ function paletteItems() {
   const items = [
     { label: "Neues Deck", hint: "Seite", run: () => { go("#/new"); setMode("build"); } },
     { label: "Commander vorschlagen lassen", hint: "Neues Deck", run: () => { go("#/new"); setMode("find"); } },
-    { label: "Starterdeck (Precon) importieren", hint: "Neues Deck", run: () => { go("#/new"); setMode("precon"); } },
+    { label: "Deck per Link importieren", hint: "Moxfield, Archidekt, …", run: () => { go("#/new"); setMode("import"); setImportMode("link"); $("#import-url").focus(); } },
+    { label: "Deckliste einfügen", hint: "Neues Deck", run: () => { go("#/new"); setMode("import"); setImportMode("text"); $("#import-text").focus(); } },
+    { label: "Starterdeck (Precon) importieren", hint: "Neues Deck", run: () => { go("#/new"); setMode("import"); setImportMode("precon"); } },
     { label: "Meine Sammlung", hint: "Seite", run: () => go("#/collection") },
     { label: "Karte zur Sammlung hinzufügen", hint: "Sammlung", run: () => { go("#/collection"); openCollAdd(); } },
     { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },

@@ -183,6 +183,31 @@ def handler(request: httpx.Request) -> httpx.Response:
                 data = [c for c in CARDS.values() if c["game_changer"]]
                 return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})
             return httpx.Response(404, json={"details": "no cards"})
+    if url.host == "archidekt.com" and url.path == "/api/decks/4242/":
+        def ae(name, cats, qty=1):
+            return {"quantity": qty, "categories": cats, "card": {"oracleCard": {"name": name}}}
+        return httpx.Response(200, json={"name": "Meren Archidekt", "categories": [
+            {"name": "Considering", "includedInDeck": False}, {"name": "Ramp", "includedInDeck": True}],
+            "cards": [ae("Meren of Clan Nel Toth", ["Commander"]), ae("Sol Ring", ["Ramp"]), ae("Cultivate", ["Mana Ramp"]),
+                      ae("Necropotence", ["Considering"]), ae("Demonic Tutor", ["Maybeboard"]), ae("Pitiless Plunderer", ["Aristocrats"]),
+                      *[ae(f"Filler {i}", ["Synergy"]) for i in range(60)], ae("Forest", ["Land"], 18), ae("Swamp", ["Lands"], 18)]})  # fmt: skip
+    if url.host in ("api2.moxfield.com", "api.moxfield.com"):
+        if "blocked" in url.path:
+            return httpx.Response(403, text="cloudflare")
+        if url.host == "api2.moxfield.com":
+            return httpx.Response(403, text="cloudflare")  # v3 blocked, v2 answers
+        main = {f"k{i}": {"quantity": 1, "card": {"name": f"Filler {i}"}} for i in range(61)}
+        main["sol"] = {"quantity": 1, "card": {"name": "Sol Ring"}}
+        main["forest"] = {"quantity": 37, "card": {"name": "Forest"}}
+        return httpx.Response(200, json={"name": "Mox Meren", "commanders": {"m": {"quantity": 1, "card": {"name": "Meren of Clan Nel Toth"}}},
+                                         "mainboard": main})  # fmt: skip
+    if url.host == "www.mtggoldfish.com" and url.path == "/deck/download/777":
+        body = "\n".join(["1 Sol Ring", "1 Cultivate", *[f"1 Filler {i}" for i in range(61)], "18 Forest", "18 Swamp", "", "1 Meren of Clan Nel Toth"])
+        return httpx.Response(200, text=body)
+    if url.host == "tappedout.net":
+        return httpx.Response(200, text="1x Meren of Clan Nel Toth *CMDR*\n1x Sol Ring\n36x Forest\n" + "\n".join(f"1x Filler {i}" for i in range(62)))
+    if url.host == "deckstats.net":
+        return httpx.Response(200, text="//Main\n1 Meren of Clan Nel Toth # !Commander\n1 Sol Ring # mana\n36 Swamp\n" + "\n".join(f"1 Filler {i}" for i in range(62)))
     if url.host == "mtgjson.com":
         if url.path.endswith("/DeckList.json"):
             return httpx.Response(200, json={"meta": {}, "data": [
@@ -198,6 +223,9 @@ def handler(request: httpx.Request) -> httpx.Response:
                                                       "sideBoard": []}})  # fmt: skip
         return httpx.Response(404)
     if url.host == "json.edhrec.com":
+        if url.path == "/pages/average-decks/meren-of-clan-nel-toth.json":
+            return httpx.Response(200, json={"deck": ["1 Meren of Clan Nel Toth", "1 Sol Ring", "1 Pitiless Plunderer", "36 Forest",
+                                                      *[f"1 Filler {i}" for i in range(61)]]})  # fmt: skip
         if "meren-of-clan-nel-toth" in url.path:
             return httpx.Response(200, json={
                 "num_decks_avg": 1234,
