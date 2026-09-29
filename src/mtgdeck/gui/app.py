@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, exports, glossary, proxy, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, exports, glossary, health, proxy, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -791,6 +791,7 @@ async def api_deck(slug: str) -> dict[str, Any]:
     deck["card_data"] = {n: {k: c.get(k) for k in keep} for n, c in card_data.items()}
     entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
     deck["export_text"] = to_text(deck.get("commanders", []), entries)
+    deck["health"] = health.check(deck)
     return deck
 
 
@@ -837,6 +838,21 @@ async def api_edit_cards(slug: str, req: EditRequest) -> dict[str, Any]:
 async def api_similar(slug: str, card: str, limit: int = 12) -> list[dict[str, Any]]:
     try:
         return await deckedit.similar_cards(storage.load(slug), card, limit=min(limit, 30))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except HttpError as exc:
+        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+
+
+@app.get("/api/decks/{slug}/role-candidates")
+async def api_role_candidates(slug: str, role: str, limit: int = 18) -> list[dict[str, Any]]:
+    try:
+        deck = storage.load(slug)
+        budget = deck.get("budget") if not deck.get("proxy") else None
+        # cards for one slot should not blow the budget: at most a tenth of it per card
+        return await deckedit.role_candidates(deck, role, limit=min(limit, 40), max_price=budget / 10 if budget else None)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:

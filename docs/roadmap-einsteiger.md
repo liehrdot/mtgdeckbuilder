@@ -17,11 +17,11 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 
 ## Phase B – Deck-Check als Ampel
 
-- [ ] `health.py`: pro Bereich grün/gelb/rot mit Zahl, Richtwert und „Warum ist das wichtig?“ –
+- [x] `health.py`: pro Bereich grün/gelb/rot mit Zahl, Richtwert und „Warum ist das wichtig?“ –
       Länder (abhängig vom Manawert und Ramp), Ramp, Kartenzug, Removal, Board Wipes, Manakurve,
       Siegbedingungen (Kategorie „Win Condition“ oder Combos).
-- [ ] Deck-Ansicht: Panel „Deck-Check“ oben neben der Kartenliste.
-- [ ] „Beheben“: Kandidaten für die Rolle ansehen (ohne KI, passend zu den Farben) und in den
+- [x] Deck-Ansicht: Panel „Deck-Check“ oben neben der Kartenliste.
+- [x] „Beheben“: Kandidaten für die Rolle ansehen (ohne KI, passend zu den Farben) und in den
       Bearbeiten-Modus übernehmen – oder Upgrade-Vorschläge mit vorausgefülltem Fokus.
 
 ## Phase C – Deck-Anleitung, Spickzettel und Rule-0-Text

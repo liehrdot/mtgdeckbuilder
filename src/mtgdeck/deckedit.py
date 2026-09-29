@@ -187,3 +187,31 @@ async def similar_cards(deck: dict[str, Any], card_name: str, *, limit: int = 12
     best = sorted(score, key=lambda n: (-score[n], found[n].get("edhrec_rank") or 10**6))[:limit]
     keep = ("name", "type_line", "mana_cost", "cmc", "image", "image_back", "price_eur", "price_usd", "game_changer", "oracle_text")
     return [{**{k: found[n].get(k) for k in keep}, "reason": reason[n]} for n in best]
+
+
+ROLE_LABELS = {"ramp": "Ramp", "card_draw": "Kartenzug", "removal": "Removal", "board_wipe": "Board Wipe",
+               "counterspell": "Counterspell", "tutor": "Tutor", "protection": "Schutz"}  # fmt: skip
+
+
+async def role_candidates(deck: dict[str, Any], role: str, *, limit: int = 18, max_price: float | None = None) -> list[dict[str, Any]]:
+    """Popular cards for one role (ramp, card_draw, …) in the deck's colours that are not in the deck
+    yet and not blacklisted – without an AI run (local DB tags, else a Scryfall tagger search)."""
+    if role not in _ROLE_QUERY:
+        raise ValueError(f"Unbekannte Rolle: {role}")
+    data, _, _ = await resolve(deck.get("commanders", []))
+    identity = _deck_identity(list(data.values()))
+    in_deck = {c["name"] for c in deck.get("cards", [])} | set(deck.get("commanders", []))
+    banned = blacklist.names_lower()
+    currency = deck.get("currency", "eur")
+    tag = _ROLE_QUERY[role].split(":", 1)[1]
+    if carddb.available() and carddb.tag_counts([tag]).get(tag):
+        found = carddb.search(color_identity=identity, tags=[tag], max_price=max_price, currency=currency, limit=limit * 3)
+    else:
+        price = f" {'usd' if currency == 'usd' else 'eur'}<={max_price:g}" if max_price else ""
+        res = await scryfall.search(f"{_ROLE_QUERY[role]} id<={identity or 'C'} f:commander -t:land{price}", max_results=limit * 3)
+        found = [scryfall.compact(c) for c in res["cards"]]
+    keep = ("name", "type_line", "mana_cost", "cmc", "image", "image_back", "price_eur", "price_usd", "game_changer", "oracle_text")
+    out = [{**{k: c.get(k) for k in keep}, "reason": ROLE_LABELS.get(role, role)} for c in found
+           if c.get("name") not in in_deck and c.get("name", "").lower() not in banned
+           and "Land" not in (c.get("type_line") or "").split("//")[0]]  # fmt: skip
+    return out[:limit]

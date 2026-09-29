@@ -532,6 +532,7 @@ async function openDeck(slug) {
   printLoadedFor = null;
   renderDeckHead(d);
   renderValidation(d.validation);
+  renderHealth(d);
   renderStats(d.validation?.stats, d.validation);
   renderCards(d);
   $("#retune-form").querySelector(`[name="rbracket"][value="${d.bracket || 3}"]`).checked = true;
@@ -1041,9 +1042,63 @@ $("#token-list").addEventListener("click", (e) => {
 });
 
 // ---------- replacement suggestions ----------
+// deck check: traffic light per area; "fix" offers role candidates (no AI) or upgrade suggestions with a focus
+const STATUS_TEXT = { green: "passt", yellow: "prüfen", red: "Problem" };
+const ROLE_CATEGORY = { ramp: "Ramp", card_draw: "Draw", removal: "Removal", board_wipe: "Board Wipe" };
+function renderHealth(d) {
+  const h = d.health;
+  $("#health-panel").hidden = !h;
+  if (!h) return;
+  $("#health-summary").textContent = h.summary;
+  $("#health-list").innerHTML = h.items.map((it) => `<li><details data-key="${esc(it.key)}">
+      <summary><span class="light ${esc(it.status)}" role="img" aria-label="${STATUS_TEXT[it.status]}"></span>
+        <span class="h-label">${esc(it.label)}</span><span class="h-val">${esc(fmtNum(it.value))} · Ziel ${esc(it.target)}</span></summary>
+      <div class="h-body"><p>${esc(it.text)}</p><p class="why"><strong>Warum wichtig?</strong> ${esc(it.why)}</p>
+        ${it.cards.length ? `<p class="why">Erkannt: ${it.cards.slice(0, 12).map(esc).join(", ")}${it.cards.length > 12 ? " …" : ""}</p>` : ""}
+        ${it.fix ? `<div class="btn-group">
+          ${it.fix.role ? `<button type="button" class="btn small" data-role="${esc(it.fix.role)}" data-label="${esc(it.label)}">Karten vorschlagen</button>` : ""}
+          ${it.fix.focus ? `<button type="button" class="btn small ghost" data-focus="${esc(it.fix.focus)}">${icon("spark")}Upgrades mit KI</button>` : ""}
+        </div>` : ""}</div></details></li>`).join("");
+}
+$("#health-list").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.role) return openRoleCandidates(b.dataset.role, b.dataset.label);
+  if (b.dataset.focus) {
+    selectTab("anpassen");
+    const f = $("#upgrade-form");
+    f.elements.focus.value = b.dataset.focus;
+    f.scrollIntoView({ behavior: "smooth", block: "center" });
+    $("#upgrade-btn").focus({ preventScroll: true });
+    toast("Fokus eingetragen – mit „Vorschläge holen“ startest du die Suche.");
+  }
+});
+
+let similarRole = null;
+async function openRoleCandidates(role, label) {
+  similarFor = null;
+  similarRole = role;
+  $("#similar-title").textContent = `${label} ergänzen`;
+  $("#similar-hint").textContent = "Suche beliebte Karten in deinen Farben …";
+  $("#similar-grid").innerHTML = "";
+  $("#similar").showModal();
+  try {
+    const items = await api(`/api/decks/${enc(currentDeck.slug)}/role-candidates?role=${enc(role)}`);
+    const cur = (currentDeck.currency || "eur") === "usd" ? "price_usd" : "price_eur";
+    $("#similar-hint").textContent = items.length
+      ? "Klick merkt die Karte im Bearbeiten-Modus vor. Nimm für jede neue Karte eine andere heraus, damit es 100 bleiben."
+      : "Keine passenden Karten gefunden.";
+    $("#similar-grid").innerHTML = items.map((c) => `<button type="button" class="similar" data-name="${esc(c.name)}">
+      ${c.image ? `<img src="${esc(c.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(c.name)}</div>`}
+      <span class="sim-name">${esc(c.name)}</span>
+      <span class="muted small">${esc(c.type_line || "")}${c[cur] ? ` · ${esc(c[cur])}` : ""}${ownershipBadge(c.name, 1) ? " · " + ownershipBadge(c.name, 1) : ""}</span></button>`).join("");
+  } catch (err) { $("#similar-hint").textContent = err.message; }
+}
+
 let similarFor = null;
 async function openSimilar(name) {
   similarFor = name;
+  similarRole = null;
   $("#similar-title").textContent = `Ersatz für ${name}`;
   $("#similar-hint").textContent = "Suche Karten mit gleicher Rolle in deinen Farben …";
   $("#similar-grid").innerHTML = "";
@@ -1060,6 +1115,18 @@ async function openSimilar(name) {
 }
 $("#similar-grid").addEventListener("click", async (e) => {
   const b = e.target.closest(".similar");
+  if (b && similarRole) {
+    if (b.classList.contains("picked")) return;
+    try {
+      if (!edit) setEditing(true);
+      const added = await addCard(b.dataset.name, 1, ROLE_CATEGORY[similarRole] || "");
+      b.classList.add("picked");
+      b.querySelector(".sim-name").textContent = "✓ " + added;
+      renderCards(currentDeck);
+      toast(`${added} vorgemerkt – entferne dafür eine andere Karte und speichere.`);
+    } catch (err) { fail(err); }
+    return;
+  }
   if (!b || !edit || !similarFor) return;
   const old = similarFor;
   const category = edit.add.get(old)?.category || edit.cat.get(old) || currentDeck.cards.find((c) => c.name === old)?.category || "";
