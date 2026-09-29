@@ -70,5 +70,5 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 
 ## Abschluss
 
-- [ ] README, CLAUDE.md, Skill-Dokumentation.
-- [ ] Browser-Prüfung aller neuen Abläufe (hell, dunkel, Handy), Tests offline grün.
+- [x] README, CLAUDE.md, Skill-Dokumentation.
+- [x] Browser-Prüfung aller neuen Abläufe (hell, dunkel, Handy), Tests offline grün.

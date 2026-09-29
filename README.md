@@ -10,7 +10,8 @@ Du ──► Claude Code ──► Skill: commander-deckbuilder (Workflow, Brack
                   └──► MCP-Server "mtg" ──► Scryfall API + Bulk-Daten (lokale SQLite-DB)
                                         ├─► EDHREC (Empfehlungen, nach Bracket/Budget/Thema)
                                         ├─► Commander Spellbook (Combos, Bracket-Schätzung)
-                                        └─► Archidekt / Moxfield (Deck-Import)
+                                        ├─► Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats (Deck-Import)
+                                        └─► MTGJSON (Starterdecks / Precons)
 GUI (Browser) ──► FastAPI ──► Claude Agent SDK ──► gleiche Skills + MCP-Server
 ```
 
@@ -193,43 +194,74 @@ uv run mtg-gui              # → http://127.0.0.1:8765
 Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
 - **Seitenleiste:** „+ Neues Deck“, deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
-  legale), unten Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
+  legale), unten Meine Sammlung, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
   hinter ☰ weg.
-- **Neues Deck** – ein Formular in vier Schritten: 1 Commander (Autovervollständigung, Kartenbild,
-  optional Partner/Background) · 2 Stärke (Bracket 1–5 mit Erklärung, „Feinabstimmung“ für Stufe,
-  Hausregeln, Stil) · 3 Budget oder Proxy-Deck · 4 Wünsche. Das KI-Modell steckt unter „Erweitert“.
-  Oben umschalten auf **„Commander vorschlagen lassen“**: Wunsch beschreiben → Vorschlagskarten mit
-  Bild und Begründung → „Übernehmen“ oder direkt „Deck bauen“.
+- **Neues Deck** – drei Einstiege:
+  - **Ich habe einen Commander:** ein Formular in vier Schritten: 1 Commander (Autovervollständigung,
+    Kartenbild, optional Partner/Background) · 2 Stärke (Bracket 1–5 mit Erklärung, „Feinabstimmung“ für
+    Stufe, Hausregeln, Stil) · 3 Budget oder Proxy-Deck · 4 Wünsche. Das KI-Modell steckt unter „Erweitert“.
+  - **Commander vorschlagen lassen** – ein kurzes Quiz: was dir Spaß macht (große Kreaturen, Tokens,
+    Friedhof …), Lieblingsfarben mit ihrer Bedeutung, deine Erfahrung, Lieblingsthemen, optional Freitext.
+    Die Vorschläge zeigen „Warum passt der zu dir?“ und wie leicht der Commander zu spielen ist; Einsteiger
+    bekommen einfache Commander bevorzugt. Dann „Übernehmen“ oder direkt „Deck bauen“.
+  - **Ich habe schon ein Deck:** per **Link** (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats,
+    EDHREC-Durchschnittsdeck), als **eingefügte Liste** (Moxfield-/Arena-/Text-Export, auch deutsche
+    Namen) oder als **Starterdeck** (Precons von MTGJSON, Suche nach Name, Set-Kürzel, Jahr). Vor dem Import
+    zeigt eine Vorschau Name, Quelle, Kartenzahl und nicht erkannte Karten; markiert die Seite den Commander
+    nicht, wählst du ihn aus den legendären Karten der Liste. Das Bracket wird geschätzt oder gewählt, die
+    Kategorien der Quelle werden übernommen, wo sie passen. Moxfield blockt fremde Zugriffe oft – dann
+    „Export“ → „Copy Plain Text“ und die Liste einfügen.
 - **Während Claude arbeitet:** Status in Klartext („Claude prüft EDHREC-Empfehlungen …“), Laufzeit,
   Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich.
-- **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und fünf Tabs –
+- **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und acht Tabs –
   die Adresse merkt sich den Tab, der Zurück-Button des Browsers funktioniert:
   - **Karten:** gruppiert nach Kategorie, Typ, Manawert, Farbe oder Besitz, sortiert nach Name, Manawert
-    oder Preis, als Liste (Bild beim Hovern) oder Bildraster; daneben Prüfung, Statistik, Sammlungs-Abgleich
-    und „Tokens & Marker“. Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten beide Seiten.
+    oder Preis, als Liste (Bild beim Hovern) oder Bildraster; daneben der **Deck-Check**, Prüfung, Statistik,
+    Sammlungs-Abgleich und „Tokens & Marker“. Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten
+    beide Seiten – mit dem **Kartentext auf Deutsch** (gedruckter Text der neuesten deutschen Ausgabe,
+    umschaltbar auf den englischen Oracle-Text), Manasymbolen und markierten Schlüsselwörtern samt Erklärung;
+    „Erklär mir die Karte“ fragt Claude im Tab „Fragen“, was sie tut und wann du sie spielst.
+    **Deck-Check (Ampel):** Länder (Richtwert abhängig von Kurve und Ramp), Ramp, Kartenzug, Removal, Board
+    Wipes, Manakurve und Siegbedingungen – je grün/gelb/rot mit „Warum wichtig?“. „Karten vorschlagen“ zeigt
+    beliebte Karten dieser Rolle in deinen Farben (ohne KI) und merkt sie im Bearbeiten-Modus vor;
+    „Upgrades mit KI“ trägt den passenden Fokus bei den Upgrade-Vorschlägen ein.
     **Bearbeiten** (ohne Claude): Karten hinzufügen, Anzahl ±, entfernen, Kategorie ändern und über ⇄
     „Ähnliche Karten“ (gleiche Rolle, passende Farben) tauschen – gespeichert wird alles zusammen als neue,
     geprüfte Version.
+  - **Anleitung:** der **Rule-0-Text** für die Runde (Stufe, Spielweise, Tempo, Game Changer, Combos,
+    Tutoren, Extra Turns, Land-Zerstörung, Proxys, Hausregeln – ohne KI aus der Prüfung; kopieren oder
+    „Am Tisch zeigen“ im Vollbild) und eine **Deck-Anleitung** von Claude: Spielplan, früh/mitte/spät,
+    Starthand behalten?, Schlüsselkarten, Siegwege, worauf achten, Tipps. Sie wird im Deck gespeichert
+    (mit der Version, für die sie gilt). „Drucken / als PDF“ ergibt einen einseitigen Spickzettel.
   - **Testen:** Starthand ziehen, London-Mulligan (der erste ist in Commander frei), Zug für Zug nachziehen,
     auf dem Play oder Draw; dazu exakte Wahrscheinlichkeiten: Länder in der Starthand, Landdrops bis Zug 5,
     Ramp bis Zug 2, Kartenzug bis Zug 3, Interaktion bis Zug 4.
   - **Anpassen:** „Mit eigenen Worten ändern“ (Freitext + Schnellwahl), **Upgrade-Vorschläge** (Budget und
     Fokus angeben → Claude liefert Tausche mit Preis und Grund, Karten aus der Sammlung zählen als kostenlos;
-    ankreuzen und übernehmen, ohne weiteren KI-Lauf) und „Stärke ändern“ (Retune).
+    ankreuzen und übernehmen, ohne weiteren KI-Lauf), der **Upgrade-Plan in Stufen** (z. B. 20 € · 50 € · 100 €
+    insgesamt; jede Stufe mit Thema, Tauschen und Kosten, Stufe für Stufe übernehmen – ideal für
+    Starterdecks) und „Stärke ändern“ (Retune).
   - **Fragen:** Fragen in natürlicher Sprache – Strategie, Mulligan, ist es zu stark für meine Runde, wie
     schlägt es sich gegen Commander XY (Claude holt sich dessen typisches Deck von EDHREC), Schwächen,
     warum ist Karte X drin. Anschlussfragen („und gegen Kinnan?“) kennen den bisherigen Verlauf.
     Claude darf dabei nur lesen (kein Speichern); Fragen und Antworten liegen pro Deck in
     `decks/.questions/<slug>.json`, Kartennamen in Antworten zeigen beim Hovern das Bild.
+  - **Partien:** nach dem Spiel festhalten – Ergebnis, Gegner-Commander, letzter Zug, was schiefging
+    (Schnellwahl wie „zu wenige Länder“, „kein Weg zu gewinnen“), beste Karte, Notiz. Die Bilanz zeigt
+    Siegquote, Ø Zug, häufigste Probleme, Ergebnis pro Version, beste Karten und Gegner.
+    „Aus den Partien lernen“ trägt die häufigsten Probleme als Fokus für Upgrade-Vorschläge ein; Fragen und
+    Upgrades kennen die Partien auch (`deck_games`). Gespeichert in `decks/.games/<slug>.json`.
   - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren.
   - **Drucken:** Bilder prüfen/tauschen, optional „Tokens mitdrucken“ und „Nur fehlende Karten“, dann
     1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung übernehmen.
   - „Liste kopieren“ steht oben rechts; im ⋯-Menü: „Als neues Deck kopieren“, „Neu prüfen“, Export für
     Cockatrice (.cod) und Tabletop Simulator (.json), Decklist als Textdatei, „Löschen“.
-- **Meine Sammlung** (eigene Seite, siehe unten), **Blacklist** und **Einstellungen** (Kartendatenbank,
+- **Meine Sammlung** (eigene Seite, siehe unten), **Glossar** (Schlüsselwörter, Aktionen und
+  Commander-Begriffe in einem Satz, mit Suche), **Blacklist** und **Einstellungen** (Kartendatenbank,
   Proxy-Druck, KI-Hochskalierung) als eigene Seiten.
-- **Schnellsuche Strg+K** (⌘K): Decks, Seiten, Deck-Tabs und Aktionen wie „Sammlung importieren“.
+- **Schnellsuche Strg+K** (⌘K): Decks, Seiten, Deck-Tabs, Glossar-Begriffe und Aktionen wie „Sammlung
+  importieren“, „Deck per Link importieren“ oder „Partie festhalten“.
 - Hell/Dunkel folgt dem Betriebssystem; bedienbar mit Tastatur (Pfeiltasten in den Tabs, Esc schließt
   Dialoge und Menüs).
 - Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
@@ -262,8 +294,10 @@ Für keine der Quellen ist ein API-Key oder Account nötig.
 | **Scryfall Bulk Data** | tägliche `jsonl.gz`-Exporte über `/bulk-data` | lokale DB: **All Cards** (alle Drucke, alle Sprachen) + **Oracle Tags** (Tagger) |
 | **EDHREC** | öffentliche JSON-Dateien (`json.edhrec.com`), inoffiziell | Empfehlungen, Synergie, Themen, Average Deck – auch gefiltert nach Bracket und Budget |
 | **Commander Spellbook** | offizielle Backend-API, kein Key | Combos im Deck / fast im Deck, Bracket-Schätzung |
-| **Archidekt** | öffentliche Deck-API, kein Key | Decks importieren |
+| **Archidekt** | öffentliche Deck-API, kein Key | Decks importieren (inkl. Kategorien) |
 | **Moxfield** | *keine* öffentliche API (Cloudflare, User-Agent-Whitelist) | Import nur „best effort“ – sonst Text-Export einfügen |
+| **MTGGoldfish / TappedOut / Deckstats** | öffentliche Text-Exporte der Deckseiten | Decks importieren |
+| **MTGJSON** | öffentliche JSON-Dateien (`DeckList.json`, `decks/<Datei>.json`), kein Key | Starterdecks (Precons) |
 
 Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 
@@ -295,7 +329,9 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `save_deck` / `load_deck` / `list_decks` / `export_deck` | Decks speichern, laden, exportieren |
 | `edit_deck` / `similar_cards` | gezielte Tausche ohne die ganze Liste neu zu schicken; Ersatzkarten für eine Karte |
 | `collection_search` / `collection_status` / `update_collection` | Sammlung durchsuchen, Deck mit Sammlung abgleichen, Karten eintragen |
-| `import_deck` | Archidekt-/Moxfield-URL importieren |
+| `import_deck` | Deck-Link importieren (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats, EDHREC) |
+| `search_precons` / `import_precon` | Starterdecks (Precons) von MTGJSON suchen / als Deck speichern |
+| `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
 | `restore_deck_version` / `copy_deck` | alte Version wiederherstellen, Deck (oder alte Version) kopieren |
@@ -327,7 +363,12 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 - EDHREC hat keine offizielle API; ändert sich das JSON-Format, liefern die EDHREC-Tools Fehler, der Rest funktioniert weiter.
 - Die Bracket-Prüfung deckt die harten Regeln ab (Game Changer, MLD, Extra Turns, 2-Karten-Combos).
   „Wie schnell/konsistent ist das Deck?“ bleibt eine Einschätzung – Claude begründet sie in der Deckbeschreibung.
-- Die Rollen-Zählung (Ramp, Draw, Removal …) ist heuristisch (Tagger-Tags bzw. Textmuster).
+- Die Rollen-Zählung (Ramp, Draw, Removal …) ist heuristisch (Tagger-Tags bzw. Textmuster) – das gilt auch
+  für den Deck-Check.
+- Moxfield, MTGGoldfish, TappedOut, Deckstats und MTGJSON bieten keine offiziell dokumentierte Deck-API;
+  ändern sie ihre Exporte, schlägt der Link-Import fehl – eine eingefügte Liste geht immer.
+- Deutsche Kartentexte gibt es nur für Karten mit deutscher Ausgabe (sonst der englische Oracle-Text); bei
+  alten Drucken kann der gedruckte Text vom aktuellen Oracle-Text abweichen.
 
 ## Entwicklung
 

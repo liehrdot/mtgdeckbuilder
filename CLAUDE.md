@@ -27,8 +27,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - The single shared `httpx.AsyncClient` for every data source.
   - Rate limits are per host, or per host plus path prefix (Scryfall search, named and collection lookups: 500 ms; everything else: 100 ms).
   - Disk cache keyed by the request, 24 h TTL by default.
-  - Always go through `get_json` / `post_json`. Never create another client.
-- **Data sources:** `scryfall.py`, `edhrec.py`, `spellbook.py`, `importers.py`.
+  - Always go through `get_json` / `get_text` / `post_json`. Never create another client.
+- **Data sources:** `scryfall.py`, `edhrec.py`, `spellbook.py`, `importers.py`, `precons.py`.
   - None of them needs an API key.
   - EDHREC is its public JSON (`json.edhrec.com`), which is unofficial, so parse it defensively. A missing EDHREC page returns 403, not 404.
   - EDHREC page paths are `<commander-slug>[/<theme>][/<bracket-slug>][/budget|expensive]`.
@@ -61,6 +61,15 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `validate_deck()` orchestrates everything above: 100 cards, singleton, color identity, banned cards, role minimums and the bracket check.
   - It returns a private `_card_data` key that callers must pop before serializing or returning it.
   - A Spellbook outage degrades to a warning and does not fail validation.
+- **Import:** `importers.py` turns a link (Archidekt incl. categories, Moxfield v3→v2 best effort, MTGGoldfish/TappedOut/Deckstats text exports, EDHREC average decks) or pasted text into one shape `{source, site, name, commanders, cards: ["N Name"], categories, commander_hint}`; `map_category()` maps site categories to ours. `deckimport.preview()` resolves names, offers `commander_candidates` and `suggested` (hint/slug match); `deckimport.save()` validates (bracket `None` = Spellbook/heuristic estimate), fills categories and saves a new deck. Routes `/api/import/preview`, `/api/import`. `precons.py` reads MTGJSON `DeckList.json` + `decks/<file>.json` (cached, defensive) and imports via `deckimport.save` (`deck["precon"]`). None of these sites was reachable from the dev container; formats follow the public endpoints and are covered by mocks.
+- **Beginner helpers:**
+  - `glossary.py`: `TERMS` (English term → German name, one-line explanation, kind keyword/action/concept), `find_terms()` for card texts. `cards.card_text(name, lang)` returns per-face Oracle text, the newest printing in `lang` (`printed`) and the terms (route `/api/cards/text`, `/api/glossary`).
+  - `health.py`: `check(deck)` → traffic light per area from the stored validation stats (no network); returned by `GET /api/decks/{slug}` as `health`. `deckedit.role_candidates()` + `/role-candidates?role=` fix a role without AI.
+  - `rule0.py`: `build(deck)` → Rule-0 rows + copyable text (route `/rule0`).
+  - Guide: `guide_prompt` / `GUIDE_SCHEMA` / `_clean_guide`, stored as `deck["guide"]` via `storage.set_extra()` (no new version; keeps the version it was written for).
+  - `games.py`: game log in `decks/.games/<slug>.json`, `stats()`, `learn_focus()`, `ISSUES` quick picks; routes `/api/decks/{slug}/games`, MCP `deck_games` (read-only, also in `READ_ONLY_TOOLS`); the upgrade prompt mentions the record.
+  - Staged upgrade plan: `PLAN_SCHEMA` / `plan_prompt` / `_enrich_plan` (each stage validated like upgrades, no card added/removed twice), stored as `deck["upgrade_plan"]`; the GUI applies one stage at a time via `POST /cards`.
+  - Guided finder: `FinderRequest` takes `feel`/`colors`/`themes`/`experience` (`FINDER_*` wordings); suggestions carry `difficulty` + `difficulty_note`.
 - **`deckedit.py`**: `edit_deck()` changes a saved deck directly (add/remove/set_qty/set_category), re-validates via `revalidate()` and saves one version with a "Manuell: …" note (route `POST /api/decks/{slug}/cards`, MCP `edit_deck`). `similar_cards()` suggests replacements (local DB tags, else Scryfall `otag:` search).
 - **`collection.py`**: the user's collection in `collection.json` (`MTG_COLLECTION_FILE`, gitignored).
   - One entry per printing: name, qty, proxy, foil, lang, `set`/`set_name`/`collector_number`/`scryfall_id`/`image` (artwork), price at import, note. Identical entries are merged.
@@ -80,7 +89,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Stored as `deck["power_profile"]`.
 - **Budget / proxy:** `validate_deck(budget=, proxy=)` warns on budget overruns unless `proxy=True`. `price_total` includes the commanders. Decks store `proxy`, and a proxy deck has `budget: None`.
 - **`storage.py`**: saves decks to `decks/<slug>.json` plus a `.txt` export (Moxfield format). The `decks/` contents are gitignored.
-  - Questions about a deck: `questions()` / `add_question()` / `delete_questions()` in `decks/.questions/<slug>.json`. `delete()` removes them too.
+  - Questions about a deck: `questions()` / `add_question()` / `delete_questions()` in `decks/.questions/<slug>.json`. `delete()` removes them and the game log too.
+  - `set_extra(slug, key, value)` stores non-content data (guide, upgrade plan) in the current file without a new version.
   - **Versioning:** a new version is created when content changes (`_CONTENT_KEYS`) or a `change_note` is given. Re-validation alone does not create one.
   - Each version gets a full snapshot in `decks/.versions/<slug>/vNNNN.json` and a `history` entry: diff, from/to level, price, power.
   - `restore()` saves the old snapshot as a *new* version.
@@ -114,7 +124,9 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `save_deck` re-validates before writing and stores the validation result inside the deck JSON.
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
   - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
-    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|testen|anpassen|fragen|verlauf|drucken`) · `#/collection` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`).
+    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/glossary[/<term>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
+    - „Neues Deck“ has three modes (`buildForm.dataset.mode` build|find|import); import has sub-modes link|text|precon (`#import-box[data-imode]`).
+    - Function names are global in `app.js`: check for an existing name before adding one (`renderPlan` is the print plan, the upgrade plan is `renderUpgradePlan`).
     - Card list edits are collected in `edit` (add/qty/remove/cat) and saved in one request; test-hand odds are computed client-side (`renderOdds`, hypergeometric). Views are `<section class="view" data-view=…>`; tab switches use `history.replaceState`.
     - One job panel (`#job`) is moved into the slot of the view that started it (`startJob(id, title, {kind, slot, route, slug})`); the sidebar shows `#job-indicator` while it runs. `TOOL_LABELS` turns tool calls into plain-language status.
     - Use the design tokens in `style.css` (`--space-*`, `--fs-*`, `--radius*`, semantic colours incl. `--input-border` ≥ 3:1) for light and dark. Surfaces are `.panel`; `.card` is reserved for card rows (hover preview uses `.card[data-img]`).
@@ -131,6 +143,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Version routes: `/api/decks/{slug}/versions[/{v}[/restore]]`, `/diff?a=&b=` and `/copy`.
   - Deck questions (`/api/decks/{slug}/ask`, `ask_prompt`, panel „Fragen zum Deck“) run `_run_claude(read_only=True, finish=)`: only `READ_ONLY_TOOLS` are allowed, `WRITE_TOOLS` plus Write/Edit/Bash are disallowed. The final answer (`ResultMessage.result`) goes to `storage.add_question()` (`decks/.questions/<slug>.json`), with images for its `[[Card]]` references (`_card_refs`). The last `ASK_HISTORY` Q&As go into the prompt for follow-ups. The skill side is `references/deck-questions.md`.
   - Upgrade jobs (`/api/decks/{slug}/upgrades`, `upgrade_prompt`, `UPGRADE_SCHEMA`) are read-only with structured output; `_enrich_upgrades()` drops invalid swaps and adds current prices/ownership. The GUI applies the chosen ones through `POST /api/decks/{slug}/cards`. `finish` callbacks receive `(job, ok, final_text, structured_output)`.
+  - Guide (`/guide`) and upgrade-plan (`/upgrade-plan`) jobs are read-only with structured output and store their result in the deck via `storage.set_extra()`; they emit `guide` / `plan` SSE events.
   - Commander-finder jobs pass `output_format` (JSON schema `SUGGESTION_SCHEMA`) to the SDK. They read `ResultMessage.structured_output`, enrich it with card data (`_enrich_suggestions`) and emit a `suggestions` SSE event instead of a deck.
 
 **Skill ↔ tools contract:**
@@ -141,6 +154,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 ## Tests
 
 - Tests must never hit the network.
+- The mock also fakes MTGJSON (`GraveTroupe_C99`), Archidekt deck 4242, Moxfield (v3 blocked, v2 answers; `blocked` ids fail), MTGGoldfish 777, TappedOut, Deckstats, the EDHREC average deck for Meren and German printings (`GERMAN`, `lang:de` searches).
 - `tests/conftest.py` sets up an autouse fixture that:
   - replaces `http._client` with an `httpx.MockTransport` that fakes Scryfall, EDHREC and Spellbook;
   - redirects the cache, DB, decks, blacklist, collection and proxies to `tmp_path`;

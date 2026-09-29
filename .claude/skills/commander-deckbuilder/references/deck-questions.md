@@ -34,7 +34,7 @@ as `[[Card Name]]`. Keep it short enough to read at the table.
 **Matchups / "Wie schlägt es sich gegen XY?"**
 - XY is a commander → `edhrec_average_deck` (with the deck's bracket if sensible) and
   `edhrec_recommendations` for its typical cards and themes. XY is a saved deck → `load_deck`.
-  XY is an Archidekt/Moxfield URL → `import_deck`. XY is an archetype ("Stax", "Voltron",
+  XY is a deck link (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats, EDHREC) → `import_deck`. XY is an archetype ("Stax", "Voltron",
   "cEDH-Turbo") → reason from the archetype, say so.
 - Compare speed (curve, ramp, combo turn), interaction (removal, wipes, counters, graveyard hate,
   artifact/enchantment removal) and resilience (recursion, protection) on both sides.

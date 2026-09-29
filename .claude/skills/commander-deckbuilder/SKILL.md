@@ -144,7 +144,9 @@ cards. Individual images can be swapped in the GUI's Druckstudio.
 ## Deck überarbeiten (refine)
 
 For "make it cheaper / stronger / bracket X / more draw / swap Y":
-1. `load_deck` the deck (or `import_deck` an Archidekt/Moxfield URL, or parse a pasted list).
+1. `load_deck` the deck (or `import_deck` a deck link – Archidekt, Moxfield, MTGGoldfish, TappedOut,
+   Deckstats, EDHREC average deck –, `import_precon` a starter deck found with `search_precons`, or parse a
+   pasted list). `deck_games` shows logged games and their most common problems – use them to decide what to change.
 2. `validate_deck` to see the current state.
 3. Make targeted swaps (keep the count at 100, keep what works), research replacements as above;
    `similar_cards` lists replacements for one card (same role, fits the colours, not in the deck).
