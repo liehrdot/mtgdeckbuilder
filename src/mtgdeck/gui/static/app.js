@@ -195,6 +195,7 @@ function setMode(mode) {
   // only the fields of the active mode take part in validation and submission
   for (const el of buildForm.querySelectorAll(".mode-build :is(input, textarea, select)")) el.disabled = mode !== "build";
   for (const el of buildForm.querySelectorAll(".mode-find :is(input, textarea, select)")) el.disabled = mode !== "find";
+  if (mode === "precon" && !preconItems) searchPrecons();
 }
 buildForm.addEventListener("change", (e) => { if (e.target.name === "mode") setMode(e.target.value); });
 
@@ -245,6 +246,7 @@ function buildSettings() {
 
 buildForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (buildForm.dataset.mode === "precon") { searchPrecons(); return; }  // Enter in the search field
   if (currentJob) { toast("Es läuft schon ein Auftrag – warte kurz oder brich ihn ab.", "error"); return; }
   const f = Object.fromEntries(new FormData(buildForm));
   try {
@@ -272,6 +274,52 @@ buildForm.addEventListener("submit", async (e) => {
       go("#/job");
     }
   } catch (err) { fail(err); }
+});
+
+// ---------- starter deck (precon) import ----------
+let preconItems = null;
+async function searchPrecons() {
+  const q = $("#precon-q").value.trim();
+  $("#precon-msg").textContent = "Suche …";
+  try {
+    const items = await api(`/api/precons?q=${enc(q)}`);
+    if ($("#precon-q").value.trim() !== q) return;
+    preconItems = items;
+    $("#precon-msg").textContent = items.length ? (q ? `${items.length} Treffer` : "Die neuesten Commander-Decks – oder oben suchen.") : "Kein Starterdeck gefunden.";
+    $("#precon-list").innerHTML = items.map((p, i) => `<li><button type="button" data-i="${i}">
+      <span>${esc(p.name)}</span><span class="muted small">${esc(p.code)} · ${esc(p.released.slice(0, 4))}</span></button></li>`).join("");
+  } catch (err) { $("#precon-msg").textContent = err.message; $("#precon-list").innerHTML = ""; }
+}
+$("#precon-q").addEventListener("input", debounce(searchPrecons, 300));
+$("#precon-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-i]");
+  if (!b) return;
+  const item = preconItems[Number(b.dataset.i)];
+  const box = $("#precon-pick");
+  box.hidden = false;
+  box.innerHTML = `<p class="muted small">Lade ${esc(item.name)} …</p>`;
+  try {
+    const p = await api(`/api/precons/${enc(item.file)}`);
+    const img = p.commander_images?.[p.commanders[0]];
+    box.innerHTML = `${img ? `<img src="${esc(img)}" alt="${esc(p.commanders[0])}">` : ""}
+      <div><h3>${esc(p.name)}</h3>
+        <p class="muted small">${esc(p.code)} · ${esc(p.released)} · ${p.card_count} Karten</p>
+        <p>Commander: <b>${p.commanders.map(esc).join(" + ")}</b></p>
+        <button type="button" class="btn primary" id="precon-import" data-file="${esc(p.file)}">Importieren &amp; prüfen</button></div>`;
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) { box.innerHTML = `<p class="bad small">${esc(err.message)}</p>`; }
+});
+$("#precon-pick").addEventListener("click", async (e) => {
+  const b = e.target.closest("#precon-import");
+  if (!b) return;
+  b.disabled = true;
+  b.textContent = "Importiere und prüfe …";
+  try {
+    const r = await api("/api/precons/import", { method: "POST", body: { file: b.dataset.file, currency: buildForm.elements.currency.value || "eur" } });
+    await refreshDeckList();
+    go(`#/deck/${enc(r.slug)}/karten`);
+    toast("Starterdeck importiert. Tipp: Unter „Anpassen“ erstellt Claude dir einen Upgrade-Plan in Stufen.", "info", 8000);
+  } catch (err) { b.disabled = false; b.textContent = "Importieren & prüfen"; fail(err); }
 });
 
 const COLOR_NAMES = { W: "Weiß", U: "Blau", B: "Schwarz", R: "Rot", G: "Grün" };
@@ -423,7 +471,7 @@ function tickElapsed() {
 }
 
 function setBusy(busy) {
-  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn"]) {
+  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn", "#plan-btn"]) {
     const b = $(sel);
     b.disabled = busy;
     b.title = busy ? "Es läuft gerade ein Auftrag" : "";
@@ -449,6 +497,7 @@ function handleEvent(ev) {
     case "suggestions": renderSuggestions(ev.items); break;
     case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
     case "guide": onGuide(ev.guide, jobInfo?.slug); break;
+    case "plan": onUpgradePlan(ev.plan, jobInfo?.slug); break;
     case "progress": {
       const bar = $("#progress");
       bar.hidden = false;
@@ -500,6 +549,7 @@ async function finishJob(ev) {
     case "finder":
     case "upgrade":
     case "guide":
+    case "plan":
       info.dismissed = true;
       break;
     case "print":
@@ -557,6 +607,7 @@ async function openDeck(slug) {
   renderHistory(d);
   renderQuestions(d);
   renderGuide(d);
+  renderUpgradePlan(d);
   loadGames(d);
   loadOwnership(d);
   loadTokens(d);
@@ -1393,13 +1444,10 @@ $("#upgrade-form").addEventListener("submit", async (e) => {
   } catch (err) { fail(err); }
 });
 
-function renderUpgrades(ev, slug) {
-  upgrades = { ...(upgrades || {}), slug, items: ev.items, currency: (ev.currency || "eur").toUpperCase() };
-  if (currentDeck?.slug !== slug) return;
-  $("#upgrade-result").hidden = false;
-  $("#upgrade-summary").textContent = ev.summary || "";
-  $("#upgrade-list").innerHTML = ev.items.map((u, i) => `<li>
-    <label class="up-check"><input type="checkbox" data-i="${i}" checked aria-label="${esc(u.add)} statt ${esc(u.remove)} übernehmen"></label>
+// one swap (− out → + in) with images, reason and price; ``i`` adds the selection checkbox
+function upgradeRow(u, currency, i = null) {
+  return `<li>
+    ${i !== null ? `<label class="up-check"><input type="checkbox" data-i="${i}" checked aria-label="${esc(u.add)} statt ${esc(u.remove)} übernehmen"></label>` : ""}
     <span class="up-imgs">
       ${u.image_remove ? `<img class="card out" data-img="${esc(u.image_remove)}" data-name="${esc(u.remove)}" src="${esc(u.image_remove)}" alt="">` : ""}
       ${u.image ? `<img class="card in" data-img="${esc(u.image)}" data-name="${esc(u.add)}" src="${esc(u.image)}" alt="">` : ""}
@@ -1409,8 +1457,16 @@ function renderUpgrades(ev, slug) {
         ${u.impact ? `<span class="tagb">${esc(u.impact)}</span>` : ""}${u.owned ? '<span class="own ok" title="Schon in deiner Sammlung">✓ Sammlung</span>' : ""}</div>
       <div class="muted small">${esc(u.reason)}</div>
     </div>
-    <span class="up-price">${u.owned ? "0 (hast du)" : u.price != null ? esc(fmtPrice(u.price, upgrades.currency)) : "–"}</span>
-  </li>`).join("");
+    <span class="up-price">${u.owned ? "0 (hast du)" : u.price != null ? esc(fmtPrice(u.price, currency)) : "–"}</span>
+  </li>`;
+}
+
+function renderUpgrades(ev, slug) {
+  upgrades = { ...(upgrades || {}), slug, items: ev.items, currency: (ev.currency || "eur").toUpperCase() };
+  if (currentDeck?.slug !== slug) return;
+  $("#upgrade-result").hidden = false;
+  $("#upgrade-summary").textContent = ev.summary || "";
+  $("#upgrade-list").innerHTML = ev.items.map((u, i) => upgradeRow(u, upgrades.currency, i)).join("");
   updateUpgradeTotal();
   $("#upgrade-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1444,6 +1500,75 @@ $("#upgrade-apply").addEventListener("click", async () => {
     go(`#/deck/${enc(slug)}/verlauf`);
     toast(`${sel.length} Upgrades übernommen (v${r.version}).${r.legal ? "" : " Achtung: Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
   } catch (err) { fail(err); }
+});
+
+// staged upgrade plan: one AI run, every stage applied on its own (stored in the deck)
+function planStageApplied(stage, deck) {
+  const names = new Set(deck.cards.map((c) => c.name));
+  return stage.upgrades.every((u) => names.has(u.add) && !names.has(u.remove));
+}
+function renderUpgradePlan(d) {
+  const plan = d.upgrade_plan;
+  const cur = (d.currency || "eur").toUpperCase();
+  $$(".plan-cur").forEach((el) => { el.textContent = cur; });
+  $("#plan-budgets").hidden = !!d.proxy;
+  $("#plan-btn span").textContent = plan ? "Neuen Plan erstellen" : "Plan erstellen";
+  $("#plan-result").hidden = !plan;
+  if (!plan) return;
+  $("#plan-meta").textContent = `Erstellt ${fmtDate(plan.created)} für v${plan.version}`;
+  $("#plan-summary").textContent = plan.summary || "";
+  let blocked = false;  // later stages build on earlier ones
+  $("#plan-stages").innerHTML = plan.stages.map((st, i) => {
+    const applied = planStageApplied(st, d);
+    const canApply = !applied && !blocked;
+    if (!applied) blocked = true;
+    const budget = st.budget != null ? ` / ${fmtPrice(st.budget, cur)}` : "";
+    return `<li class="${applied ? "applied" : ""}">
+      <div class="plan-head"><h3>Stufe ${i + 1}: ${esc(st.title)}<span class="cost">${esc(fmtPrice(st.cost, cur))}${esc(budget)}</span></h3>
+        ${applied ? '<span class="done">✓ übernommen</span>'
+          : `<button type="button" class="btn small${canApply ? " primary" : ""}" data-stage="${i}"${canApply ? "" : ' disabled title="Erst die vorige Stufe übernehmen"'}>Stufe übernehmen</button>`}</div>
+      ${st.goal ? `<p class="muted small">${esc(st.goal)}</p>` : ""}
+      <ul class="upgrade-list">${st.upgrades.map((u) => upgradeRow(u, cur)).join("")}</ul></li>`;
+  }).join("");
+}
+$("#plan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentDeck || currentJob) return;
+  const f = new FormData(e.target);
+  const { slug, name } = currentDeck;
+  if (currentDeck.upgrade_plan && !(await ask({ title: "Neuen Plan erstellen?", text: "Der bisherige Plan wird ersetzt.", ok: "Neu erstellen" }))) return;
+  const stages = currentDeck.proxy ? [1, 2, 3] : ["s1", "s2", "s3"].map((k) => Number(f.get(k))).filter((v) => v > 0);
+  if (!stages.length) { toast("Gib mindestens für eine Stufe ein Budget an.", "error"); return; }
+  try {
+    const { job } = await api(`/api/decks/${enc(slug)}/upgrade-plan`, { method: "POST", body: { stages, focus: f.get("focus") || null } });
+    startJob(job, `Claude plant Upgrades für ${name}`, { kind: "plan", slug, slot: "#plan-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
+  } catch (err) { fail(err); }
+});
+function onUpgradePlan(plan, slug) {
+  if (currentDeck?.slug !== slug) return;
+  currentDeck.upgrade_plan = plan;
+  renderUpgradePlan(currentDeck);
+  toast("Der Upgrade-Plan ist fertig.");
+  $("#plan-result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("#plan-stages").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-stage]");
+  if (!b || !currentDeck?.upgrade_plan) return;
+  const i = Number(b.dataset.stage);
+  const st = currentDeck.upgrade_plan.stages[i];
+  const body = {
+    add: st.upgrades.map((u) => ({ name: u.add, qty: 1 })), remove: st.upgrades.map((u) => u.remove),
+    note: `Upgrade-Plan Stufe ${i + 1} (${st.title}): ${st.upgrades.map((u) => `${u.remove} → ${u.add}`).join(", ")}`,
+  };
+  b.disabled = true;
+  try {
+    const r = await api(`/api/decks/${enc(currentDeck.slug)}/cards`, { method: "POST", body });
+    const slug = currentDeck.slug;
+    currentDeck = null;
+    await refreshDeckList();
+    go(`#/deck/${enc(slug)}/anpassen`);
+    toast(`Stufe ${i + 1} übernommen (v${r.version}).${r.legal ? "" : " Achtung: Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
+  } catch (err) { b.disabled = false; fail(err); }
 });
 
 function retuneTarget() {
@@ -2679,6 +2804,7 @@ function paletteItems() {
   const items = [
     { label: "Neues Deck", hint: "Seite", run: () => { go("#/new"); setMode("build"); } },
     { label: "Commander vorschlagen lassen", hint: "Neues Deck", run: () => { go("#/new"); setMode("find"); } },
+    { label: "Starterdeck (Precon) importieren", hint: "Neues Deck", run: () => { go("#/new"); setMode("precon"); } },
     { label: "Meine Sammlung", hint: "Seite", run: () => go("#/collection") },
     { label: "Karte zur Sammlung hinzufügen", hint: "Sammlung", run: () => { go("#/collection"); openCollAdd(); } },
     { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },

@@ -80,6 +80,7 @@
         <div class="segmented" role="radiogroup" aria-label="Wie willst du starten?">
           <label><input type="radio" name="mode" value="build" checked><span>Ich habe einen Commander</span></label>
           <label><input type="radio" name="mode" value="find"><span><svg class="icon"><use href="#i-spark"/></svg>Commander vorschlagen lassen</span></label>
+          <label><input type="radio" name="mode" value="precon"><span><svg class="icon"><use href="#i-box"/></svg>Ich habe ein Starterdeck</span></label>
         </div>
 
         <section class="step">
@@ -87,6 +88,15 @@
           <div class="step-body">
             <h2 class="step-title mode-build">Commander</h2>
             <h2 class="step-title mode-find">Was für ein Spieler bist du?</h2>
+            <h2 class="step-title mode-precon">Welches Starterdeck hast du?</h2>
+            <div class="mode-precon">
+              <p class="muted small">Vorgefertigte Commander-Decks (Precons) von MTGJSON. Das Deck wird importiert und geprüft –
+                danach hilft dir der Upgrade-Plan unter „Anpassen“, es Schritt für Schritt zu verbessern.</p>
+              <input id="precon-q" type="search" placeholder="Name, Set-Kürzel oder Jahr, z. B. „Lorehold“ oder 2024" aria-label="Starterdeck suchen">
+              <p id="precon-msg" class="muted small" aria-live="polite"></p>
+              <div id="precon-pick" class="precon-pick" hidden></div>
+              <ul id="precon-list" class="precon-list"></ul>
+            </div>
             <div class="mode-build commander-row">
               <div class="grow">
                 <label class="field">Name
@@ -162,7 +172,7 @@
           </div>
         </section>
 
-        <section class="step">
+        <section class="step not-precon">
           <span class="step-num" aria-hidden="true">2</span>
           <div class="step-body">
             <h2 class="step-title">Stärke (Bracket)</h2>
@@ -175,7 +185,7 @@
           </div>
         </section>
 
-        <section class="step">
+        <section class="step not-precon">
           <span class="step-num" aria-hidden="true">3</span>
           <div class="step-body">
             <h2 class="step-title">Budget</h2>
@@ -210,7 +220,7 @@
           </div>
         </section>
 
-        <details class="more advanced">
+        <details class="more advanced not-precon">
           <summary>Erweitert</summary>
           <label class="field">KI-Modell
             <select name="model">
@@ -222,7 +232,7 @@
           </label>
         </details>
 
-        <div class="form-actions">
+        <div class="form-actions not-precon">
           <button type="submit" id="build-btn" class="btn primary lg">
             <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span></button>
           <p class="muted small"><span class="mode-build">Dauert ein paar Minuten – du kannst währenddessen andere Decks ansehen.</span>
@@ -443,6 +453,34 @@
               <span id="upgrade-total" class="small"></span>
               <button type="button" class="btn primary" id="upgrade-apply">Ausgewählte übernehmen</button>
             </div>
+          </div>
+        </section>
+
+        <section class="panel" id="plan-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Upgrade-Plan in Stufen</h2>
+              <p class="muted small">Ein Plan, den du Schritt für Schritt umsetzt – ideal für Starterdecks. Jede Stufe übernimmst du einzeln.</p>
+            </div>
+          </div>
+          <form id="plan-form" class="plan-form" autocomplete="off">
+            <div class="field-block" id="plan-budgets">
+              <span class="field-label">Budget je Stufe <span class="muted">(insgesamt, <span class="plan-cur">EUR</span>)</span></span>
+              <div class="plan-stages">
+                <label><span class="sr-only">Stufe 1</span><input name="s1" type="number" min="0" step="5" value="20" inputmode="numeric" aria-label="Budget Stufe 1"></label>
+                <label><span class="sr-only">Stufe 2</span><input name="s2" type="number" min="0" step="5" value="50" inputmode="numeric" aria-label="Budget Stufe 2"></label>
+                <label><span class="sr-only">Stufe 3</span><input name="s3" type="number" min="0" step="5" value="100" inputmode="numeric" aria-label="Budget Stufe 3"></label>
+              </div>
+            </div>
+            <label class="field"><span>Fokus <span class="muted">(optional)</span></span>
+              <input name="focus" placeholder="z. B. stärker gegen Flieger, mehr Tokens"></label>
+            <button type="submit" class="btn" id="plan-btn"><svg class="icon"><use href="#i-spark"/></svg><span>Plan erstellen</span></button>
+          </form>
+          <div id="plan-job-slot"></div>
+          <div id="plan-result" hidden>
+            <p id="plan-meta" class="muted small"></p>
+            <p id="plan-summary"></p>
+            <ol id="plan-stages" class="plan-list"></ol>
           </div>
         </section>
 

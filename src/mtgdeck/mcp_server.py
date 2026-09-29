@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, edhrec, games, importers, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, collection, deckedit, edhrec, games, importers, precons, proxy, scryfall, spellbook, storage
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -541,6 +541,29 @@ async def proxy_settings(
     return {**cfg, "autofill_found": str(found) if found else None,
             "upscaler_found": str(upscaler) if upscaler else None,
             "upscale_models": proxy.upscale_models(upscaler), "stocks": proxy.STOCKS}  # fmt: skip
+
+
+@mcp.tool()
+async def search_precons(query: Annotated[str, Field(description="Words in the name, set code or year, e.g. 'lorehold' or '2024'")] = "") -> dict[str, Any]:
+    """Preconstructed Commander decks (starter decks) from MTGJSON, newest first: file, name, code, release date."""
+    try:
+        return {"precons": await precons.search(query, limit=40)}
+    except Exception as exc:
+        return {"error": f"MTGJSON nicht erreichbar: {exc}"}
+
+
+@mcp.tool()
+async def import_precon(
+    file: Annotated[str, Field(description="MTGJSON file name from search_precons")],
+    bracket: Bracket = 2,
+) -> dict[str, Any]:
+    """Save a precon as a new deck (validated, categories guessed). Returns the saved paths incl. slug."""
+    try:
+        return await precons.import_precon(file, bracket=bracket)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"MTGJSON nicht erreichbar: {exc}"}
 
 
 @mcp.tool()

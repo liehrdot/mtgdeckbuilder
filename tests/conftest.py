@@ -183,6 +183,20 @@ def handler(request: httpx.Request) -> httpx.Response:
                 data = [c for c in CARDS.values() if c["game_changer"]]
                 return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})
             return httpx.Response(404, json={"details": "no cards"})
+    if url.host == "mtgjson.com":
+        if url.path.endswith("/DeckList.json"):
+            return httpx.Response(200, json={"meta": {}, "data": [
+                {"code": "C99", "fileName": "GraveTroupe_C99", "name": "Grave Troupe", "releaseDate": "2024-05-01", "type": "Commander Deck"},
+                {"code": "C98", "fileName": "OldGuard_C98", "name": "Old Guard", "releaseDate": "2019-02-01", "type": "Commander Deck"},
+                {"code": "XYZ", "fileName": "Intro_XYZ", "name": "Grave Intro", "releaseDate": "2024-06-01", "type": "Intro Pack"},
+                {"name": "kaputt"}]})  # fmt: skip
+        if url.path.endswith("/decks/GraveTroupe_C99.json"):
+            main = [{"name": n, "count": 1} for n in ("Sol Ring", "Cultivate", "Pitiless Plunderer")]
+            main += [{"name": f"Filler {i}", "count": 1} for i in range(60)] + [{"name": "Forest", "count": 18}, {"name": "Swamp", "count": 18}]
+            return httpx.Response(200, json={"data": {"name": "Grave Troupe", "code": "C99", "releaseDate": "2024-05-01", "type": "Commander Deck",
+                                                      "commander": [{"name": "Meren of Clan Nel Toth", "count": 1}], "mainBoard": main + [{"bad": 1}],
+                                                      "sideBoard": []}})  # fmt: skip
+        return httpx.Response(404)
     if url.host == "json.edhrec.com":
         if "meren-of-clan-nel-toth" in url.path:
             return httpx.Response(200, json={

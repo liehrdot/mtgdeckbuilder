@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, exports, games, glossary, health, proxy, rule0, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, exports, games, glossary, health, precons, proxy, rule0, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -100,11 +100,11 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
                    "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck", "deck_games",
-                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck",
+                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons",
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
-               "edit_deck", "update_collection"]  # fmt: skip
+               "edit_deck", "update_collection", "import_precon"]  # fmt: skip
 Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
 
 
@@ -866,6 +866,149 @@ async def api_guide(slug: str, req: GuideRequest) -> dict[str, str]:
 
     output_format = {"type": "json_schema", "schema": GUIDE_SCHEMA}
     return _start(guide_prompt(deck), req.model, output_format, read_only=True, finish=finish)
+
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "One or two sentences: where the plan takes the deck"},
+        "stages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short stage title (German), e.g. 'Manabasis & Ramp'"},
+                    "goal": {"type": "string", "description": "What this stage improves, one sentence (German)"},
+                    "upgrades": UPGRADE_SCHEMA["properties"]["upgrades"],
+                },
+                "required": ["title", "upgrades"],
+            },
+        },
+    },
+    "required": ["stages"],
+}
+
+
+class PlanRequest(BaseModel):
+    stages: list[float] = Field(default_factory=lambda: [20, 50, 100], min_length=1, max_length=4)
+    focus: str | None = None
+    model: str | None = None
+
+
+def plan_prompt(deck: dict[str, Any], req: PlanRequest, has_collection: bool) -> str:
+    cur = deck.get("currency", "eur").upper()
+    stages = sorted(b for b in req.stages if b >= 0)
+    if deck.get("proxy"):
+        money = [f"- Proxy-Deck: Preise spielen keine Rolle. Mache {len(stages)} Stufen nach Wirkung (wichtigste zuerst)."]
+    else:
+        money = [f"- {len(stages)} Stufen mit kumuliertem Budget: " + ", ".join(f"Stufe {i + 1} bis {b:g} {cur} insgesamt"
+                 for i, b in enumerate(stages)) + ". Die Summe der neuen Karten aller Stufen bis einschließlich Stufe n "
+                 "bleibt unter dem Betrag von Stufe n."]  # fmt: skip
+    lines = [
+        f"Erstelle einen Upgrade-Plan in Stufen für das gespeicherte Commander-Deck `{deck['slug']}` (lade es mit `load_deck`, "
+        f"{storage.level_text(deck)}). Recherchiere wie beim Bauen (Skill `commander-deckbuilder`): "
+        "`edhrec_recommendations`, `similar_cards`, `find_combos`, `get_cards`, und schau in `deck_games`, ob Partien festgehalten sind.",
+        "",
+        *money,
+        "- Jede Stufe hat ein klares Thema (z. B. erst Manabasis und Ramp, dann Kartenzug und Removal, dann Synergie) und 3–8 Tausche: "
+        "genau eine Karte rein (`add`), eine raus (`remove`, muss im aktuellen Deck sein).",
+        "- Die Stufen bauen aufeinander auf: keine Karte zweimal hinzufügen, keine Karte entfernen, die eine frühere Stufe erst "
+        "hinzugefügt hat, jede Karte nur einmal entfernen.",
+        "- Bracket, Hausregeln, Farbidentität und Blacklist (`get_blacklist`) einhalten.",
+    ]
+    if deck.get("precon"):
+        lines.append(f"- Das Deck ist das Precon „{deck['precon'].get('name')}“: raus zuerst die schwächsten Karten des Precons.")
+    if req.focus:
+        lines.append(f"- Fokus des Nutzers: {req.focus}")
+    if has_collection:
+        lines.append("- Karten aus der Sammlung (`collection_search`) kosten nichts – bevorzuge sie und setze `owned` auf true.")
+    lines += ["", "Du läufst im GUI-Modus: keine Rückfragen und nichts speichern. Texte auf Deutsch."]
+    return "\n".join(lines)
+
+
+async def _enrich_plan(deck: dict[str, Any], structured: Any, budgets: list[float]) -> dict[str, Any] | None:
+    """Validate every stage like single upgrade suggestions; a card is added or removed only once."""
+    stages = (structured or {}).get("stages") if isinstance(structured, dict) else None
+    if not isinstance(stages, list):
+        return None
+    added: set[str] = set()
+    removed: set[str] = set()
+    out = []
+    for i, st in enumerate(stages[:4]):
+        if not isinstance(st, dict):
+            continue
+        items = [u for u in await _enrich_upgrades(deck, {"upgrades": st.get("upgrades") or []})
+                 if u["add"] not in added and u["remove"] not in removed]  # fmt: skip
+        if not items:
+            continue
+        added |= {u["add"] for u in items}
+        removed |= {u["remove"] for u in items}
+        budget = sorted(budgets)[i] if i < len(budgets) and not deck.get("proxy") else None
+        out.append({"title": str(st.get("title") or f"Stufe {i + 1}"), "goal": str(st.get("goal") or ""), "budget": budget,
+                    "cost": round(sum(u["price"] or 0 for u in items if not u["owned"]), 2), "upgrades": items})  # fmt: skip
+    if not out:
+        return None
+    return {"summary": str((structured or {}).get("summary") or ""), "stages": out, "currency": deck.get("currency", "eur"),
+            "version": deck.get("version"), "created": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())}  # fmt: skip
+
+
+@app.post("/api/decks/{slug}/upgrade-plan")
+async def api_upgrade_plan(slug: str, req: PlanRequest) -> dict[str, str]:
+    deck = _not_found(storage.load, slug)
+
+    async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
+        plan = await _enrich_plan(deck, structured, req.stages) if ok else None
+        if plan:
+            storage.set_extra(slug, "upgrade_plan", plan)
+            job.emit(type="plan", plan=plan)
+        elif ok:
+            job.emit(type="error", text="Kein verwertbarer Plan erhalten.")
+        job.emit(type="done", ok=bool(plan), deck=None)
+
+    prompt = plan_prompt(deck, req, bool(collection.load()))
+    return _start(prompt, req.model, {"type": "json_schema", "schema": PLAN_SCHEMA}, read_only=True, finish=finish)
+
+
+@app.get("/api/precons")
+async def api_precons(q: str = "", limit: int = 60) -> list[dict[str, Any]]:
+    try:
+        return await precons.search(q, limit=min(limit, 200))
+    except Exception as exc:  # offline or MTGJSON down
+        raise HTTPException(502, f"MTGJSON nicht erreichbar: {exc}") from exc
+
+
+@app.get("/api/precons/{file_name}")
+async def api_precon(file_name: str) -> dict[str, Any]:
+    try:
+        p = await precons.load(file_name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except HttpError as exc:
+        raise HTTPException(404 if exc.status == 404 else 502, f"MTGJSON: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(502, f"MTGJSON nicht erreichbar: {exc}") from exc
+    try:  # commander images for the preview
+        data, _, _ = await resolve(p["commanders"])
+        p["commander_images"] = {n: c.get("image") for n, c in data.items()}
+    except Exception:
+        p["commander_images"] = {}
+    return p
+
+
+class PreconImport(BaseModel):
+    file: str
+    bracket: int = Field(2, ge=1, le=5)
+    currency: str = Field("eur", pattern="^(eur|usd)$")
+
+
+@app.post("/api/precons/import")
+async def api_precon_import(req: PreconImport) -> dict[str, Any]:
+    try:
+        return await precons.import_precon(req.file, bracket=req.bracket, currency=req.currency)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"MTGJSON nicht erreichbar: {exc}") from exc
 
 
 @app.get("/api/decks/{slug}/questions")

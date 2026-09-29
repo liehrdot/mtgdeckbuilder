@@ -51,9 +51,11 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 
 ## Phase F – Einstieg über Precons
 
-- [ ] Precon-Liste von MTGJSON (DeckList + Deck-Dateien, gecacht), Suche nach Name, Commander, Jahr.
-- [ ] Dritter Einstieg in „Neues Deck“: „Ich habe ein Starterdeck“ → Deck wird importiert und geprüft.
-- [ ] Upgrade-Plan in Stufen (z. B. 20 € · 50 € · 100 €): eine KI-Anfrage, pro Stufe Tausche mit
+- [x] Precon-Liste von MTGJSON (DeckList + Deck-Dateien, gecacht), Suche nach Name, Set-Kürzel, Jahr
+      (die DeckList enthält keine Commander; die zeigt die Vorschau). MTGJSON war aus der Entwicklungsumgebung
+      nicht erreichbar – das Format ist nach MTGJSON v5 umgesetzt und defensiv geparst.
+- [x] Dritter Einstieg in „Neues Deck“: „Ich habe ein Starterdeck“ → Deck wird importiert und geprüft.
+- [x] Upgrade-Plan in Stufen (z. B. 20 € · 50 € · 100 €): eine KI-Anfrage, pro Stufe Tausche mit
       Begründung; stufenweise übernehmen.
 
 ## Abschluss

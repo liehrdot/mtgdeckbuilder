@@ -236,7 +236,8 @@ details.more[open] > summary { margin-bottom: var(--space-3); }
 .step-title { font-size: var(--fs-md); margin: 3px 0 var(--space-3); }
 .step-title .muted { font-weight: 400; font-size: 14px; }
 .step .field:last-child, .step .switch:last-child { margin-bottom: 0; }
-.form-card[data-mode="build"] .mode-find, .form-card[data-mode="find"] .mode-build { display: none !important; }
+.form-card[data-mode="build"] .mode-find, .form-card[data-mode="find"] .mode-build,
+.form-card:not([data-mode="precon"]) .mode-precon, .form-card[data-mode="precon"] :is(.mode-build, .mode-find, .not-precon) { display: none !important; }
 .commander-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: var(--space-5); align-items: start; }
 .commander-preview img { width: 100%; border-radius: 7px; box-shadow: var(--shadow); display: block; }
 .commander-preview:empty { display: none; }
@@ -822,3 +823,31 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .difficulty.anspruchsvoll { background: var(--bad-soft); color: var(--bad); }
 .suggestion .why-label { font-weight: 650; font-size: var(--fs-sm); }
 @media (max-width: 700px) { .color-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); } .color-picks label:last-child { grid-column: 1 / -1; } }
+
+/* ---------- precon entry + staged upgrade plan ---------- */
+.precon-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; max-height: 360px; overflow-y: auto; border-top: 1px solid var(--border); }
+.precon-list button { display: flex; justify-content: space-between; gap: var(--space-3); width: 100%; padding: 9px 4px; border: none; border-bottom: 1px solid var(--border); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.precon-list button:hover, .precon-list button:focus-visible { background: var(--surface-2); }
+.precon-list .muted { white-space: nowrap; }
+.precon-pick { display: flex; gap: var(--space-4); align-items: flex-start; padding: var(--space-4); margin-top: var(--space-2); border: 1px solid var(--accent); border-radius: var(--radius-lg); background: var(--accent-soft); }
+.precon-pick img { width: 140px; border-radius: 8px; flex: none; }
+.precon-pick h3 { font-size: var(--fs-md); margin-bottom: 4px; }
+.precon-pick p { margin: 0 0 var(--space-3); }
+.plan-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: end; }
+.plan-form .field, .plan-form .field-block { margin: 0; }
+.plan-stages { display: flex; gap: var(--space-2); }
+.plan-stages input { width: 84px; }
+.plan-list { list-style: none; margin: var(--space-3) 0 0; padding: 0; counter-reset: stage; }
+.plan-list > li { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); }
+.plan-list > li.applied { border-color: var(--ok); }
+.plan-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.plan-head h3 { font-size: var(--fs-md); }
+.plan-head .cost { color: var(--muted); font-size: var(--fs-sm); font-weight: 500; margin-left: var(--space-2); }
+.plan-list .upgrade-list li { grid-template-columns: 88px minmax(0, 1fr) auto; }
+.plan-list .done { color: var(--ok); font-weight: 650; font-size: var(--fs-sm); }
+@media (max-width: 760px) {
+  .plan-form { grid-template-columns: 1fr; }
+  .precon-pick { flex-direction: column; }
+  .precon-pick img { width: 120px; }
+  .plan-list .upgrade-list li { grid-template-columns: minmax(0, 1fr) auto; }
+}
