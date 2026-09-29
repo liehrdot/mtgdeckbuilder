@@ -26,12 +26,12 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 
 ## Phase C – Deck-Anleitung, Spickzettel und Rule-0-Text
 
-- [ ] Rule-0-Text ohne KI (`rule0.py`) aus der Prüfung: Stufe, Spielweise, Game Changer, Combos,
+- [x] Rule-0-Text ohne KI (`rule0.py`) aus der Prüfung: Stufe, Spielweise, Game Changer, Combos,
       Tutoren, Extra Turns, Tempo – zum Kopieren und als Vollbild zum Vorzeigen.
-- [ ] Deck-Anleitung per Claude (strukturierte Antwort, nur lesend): Spielplan in drei Sätzen, frühes/
+- [x] Deck-Anleitung per Claude (strukturierte Antwort, nur lesend): Spielplan in drei Sätzen, frühes/
       mittleres/spätes Spiel, Mulligan-Regeln, Schlüsselkarten mit Grund, Siegwege, Combos, worauf man
       achten muss, Tipps. Gespeichert im Deck (mit Version, für die sie gilt).
-- [ ] Neuer Tab „Anleitung“ mit Rule-0-Karte und Anleitung; „Drucken / als PDF“ druckt genau eine
+- [x] Neuer Tab „Anleitung“ mit Rule-0-Karte und Anleitung; „Drucken / als PDF“ druckt genau eine
       Spickzettel-Seite (Druck-Stylesheet).
 
 ## Phase D – Spiele festhalten

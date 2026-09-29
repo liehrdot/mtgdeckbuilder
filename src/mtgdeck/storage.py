@@ -143,6 +143,20 @@ def save(deck: dict[str, Any]) -> dict[str, Any]:
     return _write_current(deck)
 
 
+def set_extra(deck_slug: str, key: str, value: Any) -> dict[str, Any]:
+    """Store data that belongs to the deck but is not deck content (e.g. the play guide) in the
+    current file – no new version, ``updated`` stays as it is."""
+    if key in _CONTENT_KEYS or key in ("slug", "version", "history", "cards"):
+        raise ValueError(f"{key} ist Deck-Inhalt")
+    deck = load(deck_slug)
+    if value is None:
+        deck.pop(key, None)
+    else:
+        deck[key] = value
+    _write_current(deck)
+    return deck
+
+
 def load(deck_slug: str) -> dict[str, Any]:
     path = DECKS_DIR / f"{slug(deck_slug)}.json"
     if not path.exists():

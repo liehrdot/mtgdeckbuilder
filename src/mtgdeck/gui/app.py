@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, exports, glossary, health, proxy, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, exports, glossary, health, proxy, rule0, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -681,6 +681,97 @@ async def api_upgrades(slug: str, req: UpgradeRequest) -> dict[str, str]:
     prompt = upgrade_prompt(deck, req, bool(collection.load()))
     output_format = {"type": "json_schema", "schema": UPGRADE_SCHEMA}
     return _start(prompt, req.model, output_format, read_only=True, finish=finish)
+
+
+_STR_LIST = {"type": "array", "items": {"type": "string"}}
+GUIDE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "plan": {"type": "string", "description": "Game plan in at most three sentences, for a beginner"},
+        "early": {**_STR_LIST, "description": "Early game (turns 1-3): what to do, 2-4 bullets"},
+        "mid": {**_STR_LIST, "description": "Mid game: 2-4 bullets"},
+        "late": {**_STR_LIST, "description": "Late game / closing: 2-4 bullets"},
+        "mulligan": {**_STR_LIST, "description": "Keep/mulligan rules for the opening hand, 2-4 bullets"},
+        "key_cards": {"type": "array", "description": "4-8 most important cards of the deck", "items": {
+            "type": "object", "properties": {"name": {"type": "string", "description": "English card name"},
+                                             "why": {"type": "string", "description": "One sentence: role and when to play it"}},
+            "required": ["name", "why"]}},
+        "win_conditions": {**_STR_LIST, "description": "How the deck actually wins, 1-4 bullets"},
+        "watch_out": {**_STR_LIST, "description": "Weaknesses, threats to respect, common mistakes, 2-4 bullets"},
+        "tips": {**_STR_LIST, "description": "Play tips and interactions that are easy to miss, 2-5 bullets"},
+    },
+    "required": ["plan", "early", "mid", "late", "mulligan", "key_cards", "win_conditions"],
+}  # fmt: skip
+
+
+class GuideRequest(BaseModel):
+    model: str | None = None
+
+
+def guide_prompt(deck: dict[str, Any]) -> str:
+    return "\n".join([
+        f"Schreibe eine Spielanleitung für das gespeicherte Commander-Deck `{deck['slug']}` ({storage.level_text(deck)}). "
+        "Lade es mit `load_deck`, lies die Schlüsselkarten mit `get_cards` und prüfe Combos mit `find_combos`. "
+        "Nutze den Skill `commander-deckbuilder` (Abschnitt „Deck-Anleitung“).",
+        "",
+        "Zielgruppe: Einsteiger, die das Deck zum ersten Mal spielen. Die Anleitung passt auf eine gedruckte Seite – "
+        "kurze, konkrete Stichpunkte, keine Floskeln. Nenne Karten beim englischen Namen als [[Kartenname]].",
+        "Du läufst im GUI-Modus: keine Rückfragen, nichts speichern. Alle Texte auf Deutsch.",
+    ])  # fmt: skip
+
+
+async def _clean_guide(deck: dict[str, Any], structured: Any) -> dict[str, Any] | None:
+    """Keep the schema fields, drop key cards that are not in the deck, add images for [[refs]]."""
+    if not isinstance(structured, dict) or not structured.get("plan"):
+        return None
+    lists = ("early", "mid", "late", "mulligan", "win_conditions", "watch_out", "tips")
+    guide: dict[str, Any] = {"plan": str(structured["plan"]).strip()}
+    for key in lists:
+        guide[key] = [str(x).strip() for x in structured.get(key) or [] if str(x).strip()][:6]
+    in_deck = {c["name"] for c in deck.get("cards", [])} | set(deck.get("commanders", []))
+    names = [k.get("name", "") for k in structured.get("key_cards") or [] if isinstance(k, dict)]
+    try:
+        data, renames, _ = await resolve(names) if names else ({}, {}, [])
+    except Exception:
+        data, renames = {}, {}
+    guide["key_cards"] = []
+    for k in structured.get("key_cards") or []:
+        name = renames.get(k.get("name", ""), k.get("name", "")) if isinstance(k, dict) else ""
+        if name in in_deck:
+            guide["key_cards"].append({"name": name, "why": k.get("why", ""), "image": (data.get(name) or {}).get("image")})
+    text = " ".join([guide["plan"], *(x for key in lists for x in guide[key])])
+    guide["cards"] = await _card_refs(text)
+    guide["version"] = deck.get("version")
+    guide["created"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    return guide
+
+
+@app.get("/api/decks/{slug}/rule0")
+async def api_rule0(slug: str) -> dict[str, Any]:
+    try:
+        return rule0.build(storage.load(slug))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/decks/{slug}/guide")
+async def api_guide(slug: str, req: GuideRequest) -> dict[str, str]:
+    try:
+        deck = storage.load(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
+        guide = await _clean_guide(deck, structured) if ok else None
+        if guide:
+            storage.set_extra(slug, "guide", guide)
+            job.emit(type="guide", guide=guide)
+        elif ok:
+            job.emit(type="error", text="Keine verwertbare Anleitung erhalten.")
+        job.emit(type="done", ok=bool(guide), deck=None)
+
+    output_format = {"type": "json_schema", "schema": GUIDE_SCHEMA}
+    return _start(guide_prompt(deck), req.model, output_format, read_only=True, finish=finish)
 
 
 @app.get("/api/decks/{slug}/questions")

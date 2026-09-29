@@ -725,3 +725,45 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .light.green::before { content: "✓"; } .light.yellow::before { content: "!"; } .light.red::before { content: "✕"; }
 @media (prefers-color-scheme: dark) { .light { color: #111; } }
 .similar.picked { border-color: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); cursor: default; }
+
+/* ---------- guide tab: rule 0 + play guide, one printable sheet ---------- */
+.sheet-actions { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+.sheet-actions p { margin: 0; }
+.print-only { display: none; }
+.rule0-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--space-4); margin: 0; }
+.rule0-rows dt { color: var(--muted); font-size: var(--fs-sm); padding-top: 1px; }
+.rule0-rows dd { margin: 0; }
+.rule0-rows dd.flag { font-weight: 650; }
+.rule0-rows dd.flag::before { content: "● "; color: var(--warn); }
+.rule0-full { width: min(900px, 96vw); }
+.rule0-rows.big { gap: var(--space-3) var(--space-5); font-size: clamp(17px, 2.6vw, 24px); }
+.rule0-rows.big dt { font-size: .75em; }
+.rule0-ask { font-size: clamp(17px, 2.6vw, 24px); font-weight: 650; margin: var(--space-5) 0 0; }
+.guide .plan { font-size: var(--fs-md); margin: 0 0 var(--space-4); }
+.guide-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin-bottom: var(--space-4); }
+.guide-cols.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.guide h3 { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: var(--space-2); }
+.guide ul { margin: 0; padding-left: 1.1em; }
+.guide li { margin-bottom: 4px; }
+.guide .key-block { margin-bottom: var(--space-4); }
+.guide .key-cards li { list-style: none; margin-left: -1.1em; }
+.guide .key-cards .card-ref { font-weight: 650; }
+.guide-note { color: var(--warn); font-size: var(--fs-sm); }
+@media (max-width: 760px) {
+  .guide-cols, .guide-cols.two { grid-template-columns: 1fr; }
+  .rule0-rows { grid-template-columns: 1fr; gap: 0; }
+  .rule0-rows dd { margin-bottom: var(--space-2); }
+}
+@media print {
+  @page { size: A4; margin: 12mm; }
+  :root { color-scheme: light; --text: #000; --muted: #444; --surface: #fff; --surface-2: #fff; --border: #bbb; --warn: #8f5b00; }
+  body { background: #fff; font-size: 10.5pt; line-height: 1.35; }
+  .sidebar, .topbar, .deck-head, .tabs, .no-print, #job, .toasts, .skip-link, .page-head { display: none !important; }
+  .app, .main { display: block; padding: 0; margin: 0; }
+  .print-only { display: block; font-size: 15pt; margin-bottom: 6pt; }
+  .panel { border: 1px solid #bbb; box-shadow: none; padding: 8pt 10pt; margin-bottom: 8pt; break-inside: avoid; }
+  .panel-head { margin-bottom: 4pt; }
+  .guide-cols { gap: 8pt; margin-bottom: 6pt; }
+  .guide .plan { font-size: 11pt; margin-bottom: 6pt; }
+  .card-ref { border: none; background: none; padding: 0; }
+}

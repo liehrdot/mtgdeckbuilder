@@ -225,6 +225,7 @@
 
       <div class="tabs" role="tablist" id="deck-tabs" aria-label="Deckbereiche">
         <button type="button" role="tab" id="tab-karten" aria-controls="panel-karten" data-tab="karten">Karten</button>
+        <button type="button" role="tab" id="tab-anleitung" aria-controls="panel-anleitung" data-tab="anleitung">Anleitung</button>
         <button type="button" role="tab" id="tab-testen" aria-controls="panel-testen" data-tab="testen">Testen</button>
         <button type="button" role="tab" id="tab-anpassen" aria-controls="panel-anpassen" data-tab="anpassen">Anpassen</button>
         <button type="button" role="tab" id="tab-fragen" aria-controls="panel-fragen" data-tab="fragen">Fragen <span class="count" id="qa-count"></span></button>
@@ -288,6 +289,43 @@
             </section>
             <section class="panel"><h2>Statistik</h2><div id="stats"></div></section>
           </aside>
+        </div>
+      </div>
+
+      <!-- guide: rule 0 + play guide, printable as one cheat sheet -->
+      <div role="tabpanel" id="panel-anleitung" aria-labelledby="tab-anleitung" class="tabpanel" hidden>
+        <div class="sheet-actions no-print">
+          <p class="muted small">Rule 0 und Anleitung passen zusammen auf eine Seite – zum Ausdrucken oder als PDF fürs Handy.</p>
+          <button type="button" class="btn" id="sheet-print">Drucken / als PDF</button>
+        </div>
+        <div class="sheet">
+          <h1 class="print-only" id="sheet-title"></h1>
+          <section class="panel rule0">
+            <div class="panel-head">
+              <div>
+                <h2>Rule 0 – das sagst du vor dem Spiel</h2>
+                <p class="muted small no-print">Automatisch aus der Deck-Prüfung. Markierte Punkte sollte die Runde vorher wissen.</p>
+              </div>
+              <div class="btn-group no-print">
+                <button type="button" class="btn small" id="rule0-copy"><svg class="icon"><use href="#i-copy"/></svg>Kopieren</button>
+                <button type="button" class="btn small" id="rule0-show">Am Tisch zeigen</button>
+              </div>
+            </div>
+            <dl id="rule0-rows" class="rule0-rows"></dl>
+          </section>
+          <section class="panel guide-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Deck-Anleitung</h2>
+                <p id="guide-meta" class="muted small"></p>
+              </div>
+              <button type="button" class="btn primary no-print" id="guide-btn"><svg class="icon"><use href="#i-spark"/></svg><span>Anleitung erstellen</span></button>
+            </div>
+            <div id="guide-job-slot" class="no-print"></div>
+            <p id="guide-empty" class="empty-inline no-print">Claude schreibt dir einen Spickzettel: Spielplan, was du früh, mittel und spät tust,
+              wann du die Starthand behältst, die wichtigsten Karten und worauf du achten musst. Dauert etwa ein bis zwei Minuten.</p>
+            <div id="guide" class="guide" hidden></div>
+          </section>
         </div>
       </div>
 
@@ -870,6 +908,15 @@
       <p id="card-view-explain-hint" class="muted small" hidden>Claude erklärt im Tab „Fragen“, was die Karte macht, wofür sie in diesem Deck ist und wann du sie spielst.</p>
     </div>
   </div>
+</dialog>
+
+<dialog id="rule0-full" class="dialog rule0-full" aria-labelledby="rule0-full-title">
+  <div class="dialog-head">
+    <h2 id="rule0-full-title"></h2>
+    <button type="button" class="icon-btn" id="rule0-full-close" aria-label="Schließen" autofocus><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <dl id="rule0-full-rows" class="rule0-rows big"></dl>
+  <p class="rule0-ask">Passt das für eure Runde?</p>
 </dialog>
 
 <template id="profile-template">

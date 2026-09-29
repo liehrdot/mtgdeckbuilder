@@ -82,7 +82,7 @@ let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
 const VIEWS = ["new", "job", "deck", "collection", "glossary", "blacklist", "settings"];
-const TABS = ["karten", "testen", "anpassen", "fragen", "verlauf", "drucken"];
+const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "verlauf", "drucken"];
 let lastView = null;
 
 function parseHash() {
@@ -414,7 +414,7 @@ function tickElapsed() {
 }
 
 function setBusy(busy) {
-  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn"]) {
+  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn"]) {
     const b = $(sel);
     b.disabled = busy;
     b.title = busy ? "Es läuft gerade ein Auftrag" : "";
@@ -439,6 +439,7 @@ function handleEvent(ev) {
     case "result": logLine("result", ev.text); break;
     case "suggestions": renderSuggestions(ev.items); break;
     case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
+    case "guide": onGuide(ev.guide, jobInfo?.slug); break;
     case "progress": {
       const bar = $("#progress");
       bar.hidden = false;
@@ -489,6 +490,7 @@ async function finishJob(ev) {
       break;
     case "finder":
     case "upgrade":
+    case "guide":
       info.dismissed = true;
       break;
     case "print":
@@ -530,6 +532,7 @@ async function openDeck(slug) {
   currentDeck = d;
   if (ownership && ownership.slug !== d.slug) ownership = null;
   printLoadedFor = null;
+  rule0For = null;
   renderDeckHead(d);
   renderValidation(d.validation);
   renderHealth(d);
@@ -544,6 +547,7 @@ async function openDeck(slug) {
   if (upgrades?.slug !== d.slug) $("#upgrade-result").hidden = true;
   renderHistory(d);
   renderQuestions(d);
+  renderGuide(d);
   loadOwnership(d);
   loadTokens(d);
   resetHand();
@@ -586,6 +590,7 @@ function selectTab(tab, updateHash = true, focus = false) {
   }
   for (const p of $$("#view-deck [role=tabpanel]")) p.hidden = p.id !== `panel-${tab}`;
   if (updateHash && currentDeck) history.replaceState(null, "", `#/deck/${enc(currentDeck.slug)}/${tab}`);
+  if (tab === "anleitung" && currentDeck && rule0For !== currentDeck.slug) loadRule0();
   if (tab === "drucken" && currentDeck && printLoadedFor !== currentDeck.slug) {
     printLoadedFor = currentDeck.slug;
     loadPlan();
@@ -1484,6 +1489,78 @@ $("#retune-form").addEventListener("submit", async (e) => {
     startJob(job, `Claude stimmt ${name} ab: ${levelText(bracket, profile.tier)}`, { kind: "deck", slug, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
     $("#tune-job-slot").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (err) { fail(err); }
+});
+
+// ============================================================================================
+// tab "Anleitung": rule 0 (no AI) + play guide (Claude, stored in the deck), one printable sheet
+// ============================================================================================
+let rule0For = null;
+let rule0 = null;
+const rule0Rows = (rows) => rows.map((r) => `<dt>${esc(r.label)}</dt><dd${r.flag ? ' class="flag"' : ""}>${esc(r.value)}</dd>`).join("");
+
+async function loadRule0() {
+  const slug = currentDeck.slug;
+  rule0For = slug;
+  try {
+    const r = await api(`/api/decks/${enc(slug)}/rule0`);
+    if (currentDeck?.slug !== slug) return;
+    rule0 = r;
+    $("#rule0-rows").innerHTML = rule0Rows(r.rows);
+  } catch (err) { rule0For = null; $("#rule0-rows").innerHTML = `<p class="empty-inline">${esc(err.message)}</p>`; }
+}
+$("#rule0-copy").addEventListener("click", async () => {
+  if (!rule0) return;
+  try { await navigator.clipboard.writeText(rule0.text); toast("Rule-0-Text kopiert."); }
+  catch { toast("Kopieren nicht möglich – markiere den Text von Hand.", "error"); }
+});
+$("#rule0-show").addEventListener("click", () => {
+  if (!rule0) return;
+  $("#rule0-full-title").textContent = rule0.title;
+  $("#rule0-full-rows").innerHTML = rule0Rows(rule0.rows);
+  $("#rule0-full").showModal();
+});
+$("#rule0-full-close").addEventListener("click", () => $("#rule0-full").close());
+$("#sheet-print").addEventListener("click", () => window.print());
+
+const bullets = (items, refs) => items?.length ? md(items.map((x) => "- " + x).join("\n"), refs) : '<p class="muted small">–</p>';
+function renderGuide(d) {
+  const g = d.guide;
+  $("#sheet-title").textContent = `${d.name} · ${d.commanders.join(" + ")}`;
+  $("#guide").hidden = !g;
+  $("#guide-empty").hidden = !!g;
+  $("#guide-btn span").textContent = g ? "Neu erstellen" : "Anleitung erstellen";
+  $("#guide-btn").classList.toggle("primary", !g);
+  if (!g) { $("#guide-meta").textContent = ""; return; }
+  const stale = g.version && d.version && g.version !== d.version;
+  $("#guide-meta").innerHTML = `Erstellt ${esc(fmtDate(g.created))} für v${esc(g.version)}`
+    + (stale ? ` · <span class="guide-note">Das Deck hat sich seitdem geändert (jetzt v${esc(d.version)}).</span>` : "");
+  const refs = g.cards || {};
+  const section = (title, items) => `<div><h3>${esc(title)}</h3>${bullets(items, refs)}</div>`;
+  $("#guide").innerHTML = `${md(g.plan, refs).replace("<p>", '<p class="plan">')}
+    <div class="guide-cols">${section("Früh (Zug 1–3)", g.early)}${section("Mitte", g.mid)}${section("Spät", g.late)}</div>
+    <div class="guide-cols two">${section("Starthand behalten?", g.mulligan)}${section("So gewinnst du", g.win_conditions)}</div>
+    <div class="key-block"><h3>Schlüsselkarten</h3><ul class="key-cards">${(g.key_cards || []).map((k) =>
+      `<li>${cardRef(k.name, { [k.name]: { image: k.image } })} – ${esc(k.why)}</li>`).join("")}</ul></div>
+    <div class="guide-cols two">${section("Worauf achten", g.watch_out)}${section("Tipps", g.tips)}</div>`;
+}
+function onGuide(guide, slug) {
+  if (currentDeck?.slug !== slug) return;
+  currentDeck.guide = guide;
+  renderGuide(currentDeck);
+  toast("Die Anleitung ist fertig.");
+}
+$("#guide-btn").addEventListener("click", async () => {
+  if (!currentDeck || currentJob) return;
+  const { slug, name } = currentDeck;
+  if (currentDeck.guide && !(await ask({ title: "Anleitung neu erstellen?", text: "Die bisherige Anleitung wird ersetzt.", ok: "Neu erstellen" }))) return;
+  try {
+    const { job } = await api(`/api/decks/${enc(slug)}/guide`, { method: "POST", body: {} });
+    startJob(job, `Claude schreibt die Anleitung für ${name}`, { kind: "guide", slug, slot: "#guide-job-slot", route: `#/deck/${enc(slug)}/anleitung` });
+  } catch (err) { fail(err); }
+});
+$("#guide").addEventListener("click", (e) => {
+  const ref = e.target.closest(".card-ref");
+  if (ref) showCardView(ref.dataset.name, { image: ref.dataset.img, image_back: ref.dataset.imgBack, scryfall_uri: ref.dataset.uri });
 });
 
 // ============================================================================================
@@ -2522,7 +2599,7 @@ function paletteItems() {
   ];
   if (currentDeck && parseHash().view === "deck") {
     const d = currentDeck;
-    const tabNames = { karten: "Karten", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", fragen: "Fragen zum Deck", verlauf: "Verlauf", drucken: "Drucken" };
+    const tabNames = { karten: "Karten", anleitung: "Anleitung & Rule 0", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", fragen: "Fragen zum Deck", verlauf: "Verlauf", drucken: "Drucken" };
     for (const [tab, label] of Object.entries(tabNames)) items.push({ label, hint: d.name, run: () => selectTab(tab) });
     items.push({ label: "Karten bearbeiten", hint: d.name, run: () => { selectTab("karten"); if (!edit) setEditing(true); } });
     items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });

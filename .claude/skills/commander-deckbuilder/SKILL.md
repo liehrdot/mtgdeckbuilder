@@ -174,3 +174,17 @@ For questions about a saved deck — strategy, how to pilot or mulligan it, win 
 it is too strong for a table, matchups against a commander/deck/archetype, weaknesses, why a card
 is in, rules interactions — follow [references/deck-questions.md](references/deck-questions.md).
 Read-only: never save; suggest swaps as `+ in` / `- out` instead.
+
+## Deck-Anleitung (Spickzettel)
+
+For a play guide of a saved deck (the GUI tab „Anleitung“ asks for it with a JSON schema): load the
+deck, read the key cards with `get_cards` and check combos with `find_combos`. Write for a
+beginner who pilots the deck for the first time and keep it to one printed page:
+
+- **plan**: the game plan in at most three sentences.
+- **early / mid / late**: 2–4 concrete bullets each (what to cast or hold, when the commander comes down).
+- **mulligan**: keep/mulligan rules (lands, ramp, a piece of the engine; Commander's first mulligan is free).
+- **key_cards**: 4–8 cards *from the deck* with their role and when to play them.
+- **win_conditions**, **watch_out** (weaknesses, threats, easy mistakes), **tips** (interactions that are easy to miss).
+
+Card names as `[[English Name]]`, German text, read-only (never save).
