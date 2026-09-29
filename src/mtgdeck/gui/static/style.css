@@ -767,3 +767,41 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
   .guide .plan { font-size: 11pt; margin-bottom: 6pt; }
   .card-ref { border: none; background: none; padding: 0; }
 }
+
+/* ---------- game log ---------- */
+.games-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.games-layout .panel { margin-bottom: var(--space-4); }
+.game-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); align-items: end; }
+.game-row.two { grid-template-columns: 120px minmax(0, 1fr); }
+.game-row .field { margin-bottom: var(--space-4); }
+.game-row datalist { display: none; }
+.pick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pick-chips input { position: absolute; opacity: 0; pointer-events: none; }
+.pick-chips span { display: inline-block; border: 1px solid var(--border-strong); border-radius: 99px; padding: 4px 12px; font-size: var(--fs-sm); cursor: pointer; background: var(--surface); }
+.pick-chips span:hover { border-color: var(--accent); }
+.pick-chips input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--on-accent-soft); font-weight: 600; }
+.pick-chips input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); margin-bottom: var(--space-4); }
+.kpis div { background: var(--surface-2); border-radius: var(--radius); padding: var(--space-2) var(--space-3); }
+.kpis b { display: block; font-size: var(--fs-lg); }
+.kpis span { color: var(--muted); font-size: var(--fs-xs); }
+.issue-bars { list-style: none; margin: 0 0 var(--space-4); padding: 0; font-size: var(--fs-sm); }
+.issue-bars li { display: grid; grid-template-columns: minmax(0, 1fr) 90px 24px; gap: var(--space-2); align-items: center; margin-bottom: 4px; }
+.issue-bars .bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.issue-bars .bar i { display: block; height: 100%; background: var(--bar); }
+.game-stats-more { font-size: var(--fs-sm); color: var(--muted); margin: 0 0 4px; }
+.game-list { list-style: none; margin: 0; padding: 0; }
+.game-list li { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: var(--space-3); padding: var(--space-3) 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.game-list li:first-child { border-top: none; }
+.game-list .res { font-weight: 700; }
+.game-list .res.win { color: var(--ok); } .game-list .res.loss { color: var(--bad); } .game-list .res.draw { color: var(--muted); }
+.game-list .meta { color: var(--muted); }
+.game-list .issues { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.game-list .issues span { background: var(--warn-soft); color: var(--warn); border-radius: 99px; padding: 1px 8px; font-size: var(--fs-xs); }
+@media (max-width: 860px) {
+  .games-layout, .game-row, .game-row.two { grid-template-columns: 1fr; }
+  .game-row .field { margin-bottom: var(--space-3); }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .game-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .game-list li .when { grid-column: 1 / -1; }
+}

@@ -36,11 +36,11 @@ können und gezielt besser werden. Jede Phase wird einzeln getestet, committet u
 
 ## Phase D – Spiele festhalten
 
-- [ ] Partien pro Deck (`decks/.games/<slug>.json`): Ergebnis, gegnerische Commander, Zug, Probleme als
+- [x] Partien pro Deck (`decks/.games/<slug>.json`): Ergebnis, gegnerische Commander, Zug, Probleme als
       Schnellwahl („zu wenig Länder“, „kein Removal“, „zu langsam“, …), beste Karte, Notiz, Deck-Version.
-- [ ] Statistik: Siege/Niederlagen, häufigste Probleme, Bilanz pro Version.
-- [ ] „Aus den Partien lernen“: Upgrade-Vorschläge mit Fokus aus den häufigsten Problemen.
-- [ ] MCP-Tool `deck_games` (lesend), damit Fragen und Upgrades die Partien kennen.
+- [x] Statistik: Siege/Niederlagen, häufigste Probleme, Bilanz pro Version.
+- [x] „Aus den Partien lernen“: Upgrade-Vorschläge mit Fokus aus den häufigsten Problemen.
+- [x] MCP-Tool `deck_games` (lesend), damit Fragen und Upgrades die Partien kennen.
 
 ## Phase E – Geführter Commander-Finder
 

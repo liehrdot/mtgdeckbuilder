@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, exports, glossary, health, proxy, rule0, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, exports, games, glossary, health, proxy, rule0, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -99,7 +99,7 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 # Tools for questions about a deck: research only, nothing that saves or changes anything.
 READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
-                   "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck",
+                   "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck", "deck_games",
                    "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck",
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
@@ -485,6 +485,8 @@ def ask_prompt(question: str, deck: dict[str, Any], history: list[dict[str, Any]
         "- Du läufst im GUI-Modus: keine Rückfragen. Triff sinnvolle Annahmen und nenne sie kurz.",
         "- Stütze Aussagen auf die Tools (Oracle-Text über `get_cards`, Combos über `find_combos`, "
         "Gegner-Commander über `edhrec_average_deck`/`edhrec_recommendations`) statt auf dein Gedächtnis.",
+        "- Festgehaltene Partien (Ergebnisse, Probleme, Gegner) liefert `deck_games` – nutze sie bei Fragen zu "
+        "Schwächen, Matchups oder Verbesserungen.",
         "- Schreibe Kartennamen als [[Kartenname]] (englischer Oracle-Name).",
         "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze oder Listen. "
         "Keine Vorrede über deine Arbeitsschritte.",
@@ -625,6 +627,11 @@ def upgrade_prompt(deck: dict[str, Any], req: UpgradeRequest, has_collection: bo
     ]
     if req.focus:
         lines.append(f"- Fokus des Nutzers: {req.focus}")
+    record = games.stats(games.games(deck["slug"]))
+    if record["games"]:
+        common = ", ".join(f"{i['label']} ({i['count']}×)" for i in record["issues"][:4]) or "keine notiert"
+        lines.append(f"- Festgehaltene Partien: {record['wins']} Siege, {record['losses']} Niederlagen; häufigste Probleme: "
+                     f"{common}. Details über `deck_games` – die Tausche sollen genau diese Probleme angehen.")
     if has_collection:
         lines.append("- Sammlung: Karten, die der Nutzer schon besitzt (`collection_search`), kosten nichts – bevorzuge sie "
                      "bei gleicher Wirkung und setze `owned` auf true.")
@@ -744,6 +751,48 @@ async def _clean_guide(deck: dict[str, Any], structured: Any) -> dict[str, Any] 
     guide["version"] = deck.get("version")
     guide["created"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
     return guide
+
+
+class GameIn(BaseModel):
+    result: str = Field(pattern="^(win|loss|draw)$")
+    opponents: list[str] = Field(default_factory=list, max_length=5)
+    turn: int | None = Field(default=None, ge=1, le=60)
+    issues: list[str] = Field(default_factory=list)
+    mvp: str | None = None
+    note: str = Field(default="", max_length=2000)
+
+
+@app.get("/api/decks/{slug}/games")
+async def api_games(slug: str) -> dict[str, Any]:
+    _not_found(storage.load, slug)
+    return games.summary(slug)
+
+
+@app.post("/api/decks/{slug}/games")
+async def api_game_add(slug: str, req: GameIn) -> dict[str, Any]:
+    deck = _not_found(storage.load, slug)
+    mvp, opponents = req.mvp, req.opponents
+    names = [n for n in [mvp or "", *opponents] if n.strip()]
+    if names:  # English Oracle names where they resolve (German input works too)
+        try:
+            _, renames, _ = await resolve(names)
+        except Exception:
+            renames = {}
+        mvp = renames.get(mvp or "", mvp)
+        opponents = [renames.get(o, o) for o in opponents]
+    try:
+        entry = games.add(slug, result=req.result, opponents=opponents, turn=req.turn, issues=req.issues, mvp=mvp,
+                          note=req.note, version=deck.get("version"))  # fmt: skip
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"game": entry, **games.summary(slug)}
+
+
+@app.delete("/api/decks/{slug}/games/{game_id}")
+async def api_game_delete(slug: str, game_id: str) -> dict[str, Any]:
+    if not games.delete(slug, game_id):
+        raise HTTPException(404, "Partie nicht gefunden")
+    return games.summary(slug)
 
 
 @app.get("/api/decks/{slug}/rule0")

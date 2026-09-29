@@ -229,6 +229,7 @@
         <button type="button" role="tab" id="tab-testen" aria-controls="panel-testen" data-tab="testen">Testen</button>
         <button type="button" role="tab" id="tab-anpassen" aria-controls="panel-anpassen" data-tab="anpassen">Anpassen</button>
         <button type="button" role="tab" id="tab-fragen" aria-controls="panel-fragen" data-tab="fragen">Fragen <span class="count" id="qa-count"></span></button>
+        <button type="button" role="tab" id="tab-partien" aria-controls="panel-partien" data-tab="partien">Partien <span class="count" id="game-count"></span></button>
         <button type="button" role="tab" id="tab-verlauf" aria-controls="panel-verlauf" data-tab="verlauf">Verlauf <span class="count" id="version-count"></span></button>
         <button type="button" role="tab" id="tab-drucken" aria-controls="panel-drucken" data-tab="drucken">Drucken</button>
       </div>
@@ -454,6 +455,59 @@
       </div>
 
       <!-- history -->
+      <!-- game log -->
+      <div role="tabpanel" id="panel-partien" aria-labelledby="tab-partien" class="tabpanel" hidden>
+        <div class="games-layout">
+          <section class="panel">
+            <h2>Partie festhalten</h2>
+            <p class="muted small">Nach dem Spiel kurz eintragen – aus den Problemen werden gezielte Verbesserungen.</p>
+            <form id="game-form" autocomplete="off">
+              <div class="field-block">
+                <span class="field-label">Ergebnis</span>
+                <div class="segmented" role="radiogroup" aria-label="Ergebnis">
+                  <label><input type="radio" name="result" value="win" required><span>Sieg</span></label>
+                  <label><input type="radio" name="result" value="loss"><span>Niederlage</span></label>
+                  <label><input type="radio" name="result" value="draw"><span>Unentschieden</span></label>
+                </div>
+              </div>
+              <div class="field-block">
+                <span class="field-label" id="opp-label">Gegner-Commander <span class="muted">(optional)</span></span>
+                <div class="game-row" role="group" aria-labelledby="opp-label">
+                  <input name="opp1" list="ac-opp1" placeholder="z. B. Atraxa" aria-label="Erster Gegner"><datalist id="ac-opp1"></datalist>
+                  <input name="opp2" list="ac-opp2" placeholder="2. Gegner" aria-label="Zweiter Gegner"><datalist id="ac-opp2"></datalist>
+                  <input name="opp3" list="ac-opp3" placeholder="3. Gegner" aria-label="Dritter Gegner"><datalist id="ac-opp3"></datalist>
+                </div>
+              </div>
+              <div class="field-block">
+                <span class="field-label">Was lief schief? <span class="muted">(Mehrfachwahl)</span></span>
+                <div id="game-issues" class="pick-chips"></div>
+              </div>
+              <div class="game-row two">
+                <label class="field"><span>Letzter Zug</span>
+                  <input name="turn" type="number" min="1" max="60" inputmode="numeric" placeholder="z. B. 9"></label>
+                <label class="field"><span>Beste Karte</span>
+                  <input name="mvp" list="game-deck-cards" placeholder="Karte aus dem Deck"><datalist id="game-deck-cards"></datalist></label>
+              </div>
+              <label class="field"><span>Notiz <span class="muted">(optional)</span></span>
+                <textarea name="note" rows="2" placeholder="Was ist dir aufgefallen?"></textarea></label>
+              <button type="submit" class="btn primary">Partie speichern</button>
+            </form>
+          </section>
+          <section class="panel" id="game-stats-panel">
+            <div class="panel-head">
+              <h2>Bilanz</h2>
+              <button type="button" class="btn" id="game-learn" hidden><svg class="icon"><use href="#i-spark"/></svg>Aus den Partien lernen</button>
+            </div>
+            <div id="game-stats"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <h2>Gespielte Partien</h2>
+          <ol id="game-list" class="game-list" reversed></ol>
+          <p id="game-empty" class="empty-inline">Noch keine Partie festgehalten.</p>
+        </section>
+      </div>
+
       <div role="tabpanel" id="panel-verlauf" aria-labelledby="tab-verlauf" class="tabpanel" hidden>
         <section class="panel" id="history-panel">
           <div class="panel-head">

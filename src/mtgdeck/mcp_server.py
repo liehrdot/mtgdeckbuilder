@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, edhrec, importers, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, collection, deckedit, edhrec, games, importers, proxy, scryfall, spellbook, storage
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -397,6 +397,20 @@ async def load_deck(slug: str) -> dict[str, Any]:
     deck["validation"] = {k: v.get(k) for k in ("legal", "errors", "warnings", "bracket", "price_total")}
     deck["history"] = (deck.get("history") or [])[-5:]  # latest changes are enough for context
     return deck
+
+
+@mcp.tool()
+async def deck_games(slug: str) -> dict[str, Any]:
+    """Games the user logged with a saved deck: result, opponents' commanders, end turn, problems
+    (e.g. 'zu wenige Länder'), best card, note, deck version – plus win/loss record, most common
+    problems and a focus text for upgrades. Use it for questions and upgrades about the deck."""
+    try:
+        storage.load(slug)
+    except FileNotFoundError as exc:
+        return {"error": str(exc)}
+    data = games.summary(slug)
+    data["games"] = data["games"][-30:]  # recent games are enough for context
+    return data
 
 
 # --- versions ---------------------------------------------------------------------------------

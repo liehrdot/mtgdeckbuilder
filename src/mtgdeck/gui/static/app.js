@@ -82,7 +82,7 @@ let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
 const VIEWS = ["new", "job", "deck", "collection", "glossary", "blacklist", "settings"];
-const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "verlauf", "drucken"];
+const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
 function parseHash() {
@@ -363,7 +363,7 @@ const TOOL_LABELS = {
   get_cards: "liest Kartentexte", find_commanders: "sucht Commander", find_combos: "sucht Combos",
   validate_deck: "prüft das Deck (Legalität, Bracket, Budget)", save_deck: "speichert das Deck",
   load_deck: "lädt das Deck", bracket_rules: "liest die Bracket-Regeln", game_changers: "prüft Game Changer",
-  get_blacklist: "liest deine Blacklist", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
+  get_blacklist: "liest deine Blacklist", deck_games: "liest deine Partien", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
   list_deck_versions: "liest den Verlauf", compare_deck_versions: "vergleicht Versionen",
 };
 const toolText = (name) => `Claude ${TOOL_LABELS[name] || `nutzt ${name}`} …`;
@@ -548,6 +548,7 @@ async function openDeck(slug) {
   renderHistory(d);
   renderQuestions(d);
   renderGuide(d);
+  loadGames(d);
   loadOwnership(d);
   loadTokens(d);
   resetHand();
@@ -1561,6 +1562,85 @@ $("#guide-btn").addEventListener("click", async () => {
 $("#guide").addEventListener("click", (e) => {
   const ref = e.target.closest(".card-ref");
   if (ref) showCardView(ref.dataset.name, { image: ref.dataset.img, image_back: ref.dataset.imgBack, scryfall_uri: ref.dataset.uri });
+});
+
+// ============================================================================================
+// tab "Partien": game log, record and "learn from your games"
+// ============================================================================================
+let gameData = null;  // { slug, games, stats, learn_focus, issue_labels, result_labels }
+
+async function loadGames(d) {
+  $("#game-deck-cards").innerHTML = [...d.commanders, ...d.cards.map((c) => c.name)].map((n) => `<option value="${esc(n)}">`).join("");
+  try {
+    const data = await api(`/api/decks/${enc(d.slug)}/games`);
+    if (currentDeck?.slug !== d.slug) return;
+    renderGames(d.slug, data);
+  } catch { /* the tab shows the empty state */ }
+}
+
+function renderGames(slug, data) {
+  const first = !gameData;
+  gameData = { slug, ...data };
+  if (first || !$("#game-issues").children.length) {
+    $("#game-issues").innerHTML = Object.entries(data.issue_labels).map(([k, label]) =>
+      `<label><input type="checkbox" name="issues" value="${esc(k)}"><span>${esc(label)}</span></label>`).join("");
+  }
+  const st = data.stats;
+  $("#game-count").textContent = st.games || "";
+  $("#game-learn").hidden = !data.learn_focus;
+  const pct = st.win_rate === null ? "–" : `${Math.round(st.win_rate * 100)} %`;
+  const maxIssue = Math.max(1, ...st.issues.map((i) => i.count));
+  $("#game-stats").innerHTML = !st.games ? '<p class="empty-inline">Die Bilanz erscheint nach der ersten Partie.</p>' : `
+    <div class="kpis"><div><b>${st.games}</b><span>Partien</span></div><div><b>${st.wins}–${st.losses}${st.draws ? "–" + st.draws : ""}</b><span>Siege–Niederlagen</span></div>
+      <div><b>${pct}</b><span>Siegquote</span></div><div><b>${st.avg_turn ?? "–"}</b><span>Ø Zug am Ende</span></div></div>
+    ${st.issues.length ? `<h3 class="small muted">Häufigste Probleme</h3><ul class="issue-bars">${st.issues.slice(0, 6).map((i) =>
+      `<li><span>${esc(i.label)}</span><span class="bar"><i style="width:${(i.count / maxIssue) * 100}%"></i></span><span>${i.count}×</span></li>`).join("")}</ul>` : ""}
+    ${st.per_version.length > 1 ? `<p class="game-stats-more">Pro Version: ${st.per_version.map((v) => `v${v.version} ${v.wins}/${v.games}`).join(" · ")}</p>` : ""}
+    ${st.mvps.length ? `<p class="game-stats-more">Beste Karten: ${st.mvps.map((m) => `${esc(m.name)}${m.count > 1 ? ` (${m.count}×)` : ""}`).join(", ")}</p>` : ""}
+    ${st.opponents.length ? `<p class="game-stats-more">Häufigste Gegner: ${st.opponents.map((o) => esc(o.name)).join(", ")}</p>` : ""}`;
+  $("#game-empty").hidden = !!data.games.length;
+  $("#game-list").innerHTML = data.games.slice().reverse().map((g) => `<li data-id="${esc(g.id)}">
+      <div class="when"><span class="res ${esc(g.result)}">${esc(data.result_labels[g.result] || g.result)}</span><br><span class="meta">${esc(fmtDate(g.played))}${g.version ? ` · v${esc(g.version)}` : ""}</span></div>
+      <div>${g.opponents.length ? `gegen ${g.opponents.map(esc).join(", ")}` : '<span class="meta">Gegner nicht notiert</span>'}${g.turn ? ` · Zug ${esc(g.turn)}` : ""}
+        ${g.mvp ? `<br>Beste Karte: <strong>${esc(g.mvp)}</strong>` : ""}${g.note ? `<br><span class="meta">${esc(g.note)}</span>` : ""}
+        ${g.issues.length ? `<div class="issues">${g.issues.map((i) => `<span>${esc(data.issue_labels[i] || i)}</span>`).join("")}</div>` : ""}</div>
+      <button type="button" class="icon-btn game-del" aria-label="Partie löschen" title="Partie löschen">${icon("x")}</button></li>`).join("");
+}
+
+for (const n of [1, 2, 3]) wireAutocomplete($(`#game-form [name=opp${n}]`), $(`#ac-opp${n}`));
+$("#game-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentDeck) return;
+  const f = new FormData(e.target);
+  const body = {
+    result: f.get("result"), turn: f.get("turn") ? Number(f.get("turn")) : null, mvp: f.get("mvp") || null,
+    opponents: [f.get("opp1"), f.get("opp2"), f.get("opp3")].filter((o) => o && o.trim()),
+    issues: f.getAll("issues"), note: f.get("note") || "",
+  };
+  const slug = currentDeck.slug;
+  try {
+    const data = await api(`/api/decks/${enc(slug)}/games`, { method: "POST", body });
+    e.target.reset();
+    if (currentDeck?.slug === slug) renderGames(slug, data);
+    toast(body.result === "win" ? "Sieg gespeichert – Glückwunsch!" : "Partie gespeichert.");
+  } catch (err) { fail(err); }
+});
+$("#game-list").addEventListener("click", async (e) => {
+  const b = e.target.closest(".game-del");
+  if (!b || !currentDeck) return;
+  if (!(await ask({ title: "Partie löschen?", ok: "Löschen", danger: true }))) return;
+  const slug = currentDeck.slug;
+  try { renderGames(slug, await api(`/api/decks/${enc(slug)}/games/${enc(b.closest("li").dataset.id)}`, { method: "DELETE" })); }
+  catch (err) { fail(err); }
+});
+$("#game-learn").addEventListener("click", () => {
+  if (!gameData?.learn_focus) return;
+  selectTab("anpassen");
+  const f = $("#upgrade-form");
+  f.elements.focus.value = gameData.learn_focus;
+  f.scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#upgrade-btn").focus({ preventScroll: true });
+  toast("Fokus aus deinen Partien eingetragen – „Vorschläge holen“ startet die Suche.");
 });
 
 // ============================================================================================
@@ -2599,10 +2679,11 @@ function paletteItems() {
   ];
   if (currentDeck && parseHash().view === "deck") {
     const d = currentDeck;
-    const tabNames = { karten: "Karten", anleitung: "Anleitung & Rule 0", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", fragen: "Fragen zum Deck", verlauf: "Verlauf", drucken: "Drucken" };
+    const tabNames = { karten: "Karten", anleitung: "Anleitung & Rule 0", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", fragen: "Fragen zum Deck", partien: "Partien & Bilanz", verlauf: "Verlauf", drucken: "Drucken" };
     for (const [tab, label] of Object.entries(tabNames)) items.push({ label, hint: d.name, run: () => selectTab(tab) });
     items.push({ label: "Karten bearbeiten", hint: d.name, run: () => { selectTab("karten"); if (!edit) setEditing(true); } });
     items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });
+    items.push({ label: "Partie festhalten", hint: d.name, run: () => { selectTab("partien"); $("#game-form input[name=result]").focus(); } });
   }
   for (const d of deckIndex) items.push({ label: d.name, hint: `Deck · ${d.commanders.join(" + ")} · ${d.level || ""}`, run: () => go(`#/deck/${enc(d.slug)}`) });
   for (const t of glossaryItems || []) items.push({ label: t.de ? `${t.de} (${t.term})` : t.term, hint: "Glossar", run: () => go(`#/glossary/${enc(t.term)}`) });

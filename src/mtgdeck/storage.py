@@ -239,6 +239,7 @@ def delete(deck_slug: str) -> None:
     for ext in ("json", "txt"):
         (DECKS_DIR / f"{s}.{ext}").unlink(missing_ok=True)
     _questions_file(s).unlink(missing_ok=True)
+    (DECKS_DIR / ".games" / f"{s}.json").unlink(missing_ok=True)  # games.GAMES_DIRNAME
     vdir = _versions_dir(s)
     if vdir.exists():
         for f in vdir.glob("*.json"):
