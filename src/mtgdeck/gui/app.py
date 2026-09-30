@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, exports, importers, games, glossary, health, precons, proxy, rule0, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, precons, proxy, rule0, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -104,7 +104,7 @@ READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_comma
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
-               "edit_deck", "update_collection", "import_precon"]  # fmt: skip
+               "edit_deck", "update_collection", "import_precon", "create_deskmat"]  # fmt: skip
 Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
 
 
@@ -1018,6 +1018,205 @@ async def api_import(req: ImportRequest) -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
 
 
+# --- deskmat studio -------------------------------------------------------------------------------
+
+DESKMAT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "description": "Short German title for the motif (2-5 words)"},
+        "prompt": {"type": "string", "description": "English text-to-image prompt, max. 550 characters"},
+    },
+    "required": ["title", "prompt"],
+}
+
+
+class DeskmatGenerateRequest(BaseModel):
+    setting: str = Field(min_length=3, max_length=1500)
+    style: str = "painting"
+    deck: str | None = None
+    format: str = "playmat"
+    variants: int = Field(3, ge=1, le=4)
+    model: str | None = None
+
+
+def deskmat_prompt(req: DeskmatGenerateRequest, deck: dict[str, Any] | None) -> str:
+    style = deskmat.STYLES.get(req.style, deskmat.STYLES["painting"])[1]
+    label, w_mm, h_mm = deskmat.FORMATS[req.format]
+    lines = [
+        "Schreibe einen Bild-Prompt für einen Text-zu-Bild-Generator (Flux). Daraus wird eine Deskmat/Playmat "
+        f"für Magic: The Gathering ({label}, Querformat {w_mm}:{h_mm}).",
+        "",
+        f"- Setting des Nutzers: {req.setting.strip()}",
+        f"- Stil: {style}",
+    ]
+    if deck:
+        lines.append(f"- Stimmung aus dem Deck „{deck.get('name')}“ (Commander: {' + '.join(deck.get('commanders') or [])}"
+                     + (f"; {deck.get('description')}" if deck.get("description") else "") + "). Lies das Aussehen des "
+                     "Commanders bei Bedarf mit `get_cards` nach, nenne im Prompt aber keine Kartennamen, sondern beschreibe.")
+    lines += [
+        "",
+        "Regeln für den Prompt (Englisch, höchstens 550 Zeichen, ein Absatz):",
+        "- breite Panorama-Komposition; das Hauptmotiv eher seitlich, ruhigere Flächen dort, wo Karten liegen;",
+        "- sehr detailliert, stimmiges Licht, hohe Qualität;",
+        "- ausdrücklich: no text, no letters, no logos, no card frame, no border, no watermark.",
+        "",
+        "Du läufst im GUI-Modus: keine Rückfragen, nichts speichern. Gib Titel (deutsch) und Prompt strukturiert zurück.",
+    ]
+    return "\n".join(lines)
+
+
+@app.get("/api/deskmat/options")
+async def api_deskmat_options() -> dict[str, Any]:
+    return deskmat.formats()
+
+
+@app.get("/api/deskmats")
+async def api_deskmats() -> list[dict[str, Any]]:
+    return deskmat.projects()
+
+
+@app.get("/api/deskmat/mpc")
+async def api_deskmat_mpc(name: str) -> list[dict[str, Any]]:
+    try:
+        return await deskmat.mpc_options(name)
+    except Exception as exc:
+        raise HTTPException(502, f"MPC Autofill nicht erreichbar: {exc}") from exc
+
+
+class DeskmatCardRequest(BaseModel):
+    name: str = Field(min_length=1)
+    scryfall_id: str | None = Field(None, pattern="^[0-9a-f-]{36}$")
+    face: str = Field("front", pattern="^(front|back)$")
+    mpc_id: str | None = Field(None, pattern="^[A-Za-z0-9_-]{5,120}$")
+
+
+@app.post("/api/deskmat/card")
+async def api_deskmat_card(req: DeskmatCardRequest) -> dict[str, Any]:
+    try:
+        return await deskmat.from_card(req.name, scryfall_id=req.scryfall_id, face=req.face, mpc_id=req.mpc_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except HttpError as exc:
+        raise HTTPException(502, f"Bild nicht erreichbar: {exc}") from exc
+
+
+@app.post("/api/deskmat/upload")
+async def api_deskmat_upload(request: Request, filename: str = "") -> dict[str, Any]:
+    try:
+        return deskmat.from_upload(await request.body(), filename)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/deskmat/generate")
+async def api_deskmat_generate(req: DeskmatGenerateRequest) -> dict[str, str]:
+    if req.format not in deskmat.FORMATS:
+        raise HTTPException(400, "Unbekanntes Format")
+    deck = None
+    if req.deck:
+        deck = _not_found(storage.load, req.deck)
+
+    async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
+        prompt = str((structured or {}).get("prompt") or "").strip() if isinstance(structured, dict) else ""
+        if not ok or not prompt:
+            if ok:
+                job.emit(type="error", text="Claude hat keinen Bild-Prompt geliefert.")
+            job.emit(type="done", ok=False, deck=None)
+            return
+        job.emit(type="status", text=f"Prompt: {prompt[:160]}{'…' if len(prompt) > 160 else ''}")
+        try:
+            project = await deskmat.generate(
+                str(structured.get("title") or req.setting[:40]), prompt[:900], req.format, variants=req.variants,
+                setting=req.setting, style=req.style, progress=lambda t: job.emit(type="status", text=t),
+            )  # fmt: skip
+        except Exception as exc:
+            job.emit(type="error", text=str(exc))
+            job.emit(type="done", ok=False, deck=None)
+            return
+        for e in project.get("errors") or []:
+            job.emit(type="status", text=f"Eine Variante fehlte: {e}")
+        job.emit(type="deskmat", project=project)
+        job.emit(type="done", ok=True, deck=None)
+
+    output_format = {"type": "json_schema", "schema": DESKMAT_SCHEMA}
+    return _start(deskmat_prompt(req, deck), req.model, output_format, read_only=True, finish=finish)
+
+
+@app.get("/api/deskmat/{pid}")
+async def api_deskmat(pid: str) -> dict[str, Any]:
+    return _not_found(deskmat.load, pid)
+
+
+@app.delete("/api/deskmat/{pid}")
+async def api_deskmat_delete(pid: str) -> dict[str, bool]:
+    _not_found(deskmat.load, pid)
+    deskmat.delete(pid)
+    return {"deleted": True}
+
+
+class ChooseVariant(BaseModel):
+    n: int = Field(ge=0, le=3)
+
+
+@app.post("/api/deskmat/{pid}/choose")
+async def api_deskmat_choose(pid: str, req: ChooseVariant) -> dict[str, Any]:
+    _not_found(deskmat.load, pid)
+    try:
+        return deskmat.choose(pid, req.n)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class DeskmatRender(BaseModel):
+    format: str = "playmat"
+    long_px: int = deskmat.DEFAULT_LONG
+    fit: str = Field("fill", pattern="^(fill|fit)$")
+    crop: dict[str, float] | None = None
+    upscale: bool = True
+
+
+@app.post("/api/deskmat/{pid}/render")
+async def api_deskmat_render(pid: str, req: DeskmatRender) -> dict[str, str]:
+    _not_found(deskmat.load, pid)
+    if req.format not in deskmat.FORMATS or req.long_px not in deskmat.SIZES:
+        raise HTTPException(400, "Unbekanntes Format oder Auflösung")
+
+    async def runner(job: Job) -> None:
+        job.emit(type="status", text="Bereite das Motiv vor …")
+        project = await deskmat.render(pid, fmt=req.format, long_px=req.long_px, fit=req.fit, crop=req.crop,
+                                       upscale=req.upscale, progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
+        res = project["result"]
+        for w in res["warnings"]:
+            job.emit(type="status", text=w)
+        job.emit(type="result", text=f"Fertig: {res['size'][0]} × {res['size'][1]} px (≈ {res['dpi']} DPI)"
+                 + (" · KI-hochskaliert" if res["ai_upscaled"] else ""))  # fmt: skip
+        job.emit(type="deskmat", project=project)
+        job.emit(type="done", ok=True)
+
+    return _start_runner(runner)
+
+
+@app.api_route("/api/deskmat/{pid}/image", methods=["GET", "HEAD"])
+async def api_deskmat_image(pid: str, kind: str = "source", n: int | None = None, download: bool = False) -> FileResponse:
+    path = _not_found(deskmat.file, pid, kind, n)
+    if download:
+        meta = deskmat.load(pid)
+        safe = re.sub(r"[^\w\- ]+", "", meta.get("title") or "deskmat").strip().replace(" ", "-") or "deskmat"
+        return FileResponse(path, filename=f"{safe}-{path.stem.removeprefix('deskmat-')}{path.suffix}")
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/deskmat/{pid}/open-folder")
+async def api_deskmat_open_folder(pid: str) -> dict[str, Any]:
+    _not_found(deskmat.load, pid)
+    folder = deskmat._dir(pid)
+    try:
+        open_in_file_manager(folder)
+    except Exception as exc:
+        return {"opened": False, "path": str(folder), "error": str(exc)}
+    return {"opened": True, "path": str(folder)}
+
+
 @app.get("/api/precons")
 async def api_precons(q: str = "", limit: int = 60) -> list[dict[str, Any]]:
     try:
@@ -1438,6 +1637,7 @@ class SettingsUpdate(BaseModel):
     upscaler_path: str | None = None
     upscale_model: str | None = None
     descreen: str | None = None
+    image_generator_url: str | None = None
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -1459,6 +1659,9 @@ async def api_settings() -> dict[str, Any]:
 
 @app.post("/api/settings")
 async def api_settings_update(req: SettingsUpdate) -> dict[str, Any]:
+    url = (req.image_generator_url or "").strip()
+    if url and ("{prompt}" not in url or not url.startswith(("http://", "https://"))):
+        raise HTTPException(400, "Bildgenerator: eine http(s)-Adresse mit {prompt} angeben (optional {width} {height} {seed}).")
     return _settings_view(settings_mod.update(req.model_dump(exclude_none=True)))
 
 

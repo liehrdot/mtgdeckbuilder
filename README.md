@@ -194,7 +194,7 @@ uv run mtg-gui              # → http://127.0.0.1:8765
 Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
 - **Seitenleiste:** „+ Neues Deck“, deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
-  legale), unten Meine Sammlung, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
+  legale), unten Meine Sammlung, Deskmat-Studio, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
   hinter ☰ weg.
 - **Neues Deck** – drei Einstiege:
@@ -266,6 +266,31 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
   Dialoge und Menüs).
 - Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
 
+## Deskmat-Studio
+
+Eine Druckdatei für Deskmat oder Playmat mit **etwa 4K** (lange Seite 4096 px; wahlweise 3840 oder 5120):
+
+1. **Motiv** – drei Wege:
+   - **Kartenartwork:** das reine Artwork (Scryfall „art crop“, ohne Rahmen und Text) in jedem Druck, auch Rückseiten;
+     mit eingetragenem MPC-Autofill-Server auch hochaufgelöste Scans (automatisch auf die Artwork-Box zugeschnitten).
+   - **Setting beschreiben:** Claude schreibt aus deiner Beschreibung (plus Stil und optional der Stimmung eines
+     Decks) einen Bild-Prompt; der kostenlose Generator pollinations.ai malt 1–4 Varianten, du wählst eine.
+     Der Prompt wird dorthin geschickt. In den Einstellungen lässt sich ein anderer Generator eintragen (URL mit
+     `{prompt}`, `{width}`, `{height}`, `{seed}`), etwa ein eigener lokaler.
+   - **Eigenes Bild** hochladen.
+2. **Format & Zuschnitt:** Playmat 61 × 35,5 cm, Deskmat 80 × 30 / 90 × 40 / 120 × 60 cm oder 16:9. Den
+   Ausschnitt ziehst du mit Maus oder Finger zurecht, Zoom per Regler, Mausrad oder +/−. „Einpassen“ zeigt das
+   ganze Bild und füllt die Ränder mit einer unscharfen, abgedunkelten Erweiterung. Angezeigt werden Pixel,
+   effektive DPI und der Vergrößerungsfaktor.
+3. **Deskmat erstellen:** Karten-Scans werden entrastert, dann skaliert **Real-ESRGAN ×4** (dasselbe Programm wie
+   im Druckstudio, siehe Einstellungen) hoch, den Rest erledigt Lanczos mit leichtem Nachschärfen – exakt auf die
+   Zielgröße. Ohne Real-ESRGAN wird ohne KI vergrößert (mit Hinweis). Ergebnis als PNG mit DPI-Angabe zum Download,
+   alles liegt in `deskmats/<id>/`.
+
+Erreichbar über die Seitenleiste, Strg+K oder im Deck über ⋯ → „Deskmat aus diesem Deck“ (Commander vorausgefüllt).
+Hinweis: Scryfall-Artworks sind klein (oft ~600 px breit) – für 4K ist das ein Faktor um 6,5. Schärfer werden
+MPC-Scans, generierte oder eigene große Bilder. 4096 px auf 61 cm sind ≈ 170 DPI, für Stoffmatten üblich.
+
 ## Meine Sammlung
 
 Die Seite „Meine Sammlung“ merkt sich, welche Karten du hast (`collection.json`, lokal):
@@ -297,6 +322,7 @@ Für keine der Quellen ist ein API-Key oder Account nötig.
 | **Archidekt** | öffentliche Deck-API, kein Key | Decks importieren (inkl. Kategorien) |
 | **Moxfield** | *keine* öffentliche API (Cloudflare, User-Agent-Whitelist) | Import nur „best effort“ – sonst Text-Export einfügen |
 | **MTGGoldfish / TappedOut / Deckstats** | öffentliche Text-Exporte der Deckseiten | Decks importieren |
+| **pollinations.ai** | kostenloser Bildgenerator, kein Key (austauschbar in den Einstellungen) | Deskmat-Motive aus einem Setting |
 | **MTGJSON** | öffentliche JSON-Dateien (`DeckList.json`, `decks/<Datei>.json`), kein Key | Starterdecks (Precons) |
 
 Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
@@ -331,6 +357,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `collection_search` / `collection_status` / `update_collection` | Sammlung durchsuchen, Deck mit Sammlung abgleichen, Karten eintragen |
 | `import_deck` | Deck-Link importieren (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats, EDHREC) |
 | `search_precons` / `import_precon` | Starterdecks (Precons) von MTGJSON suchen / als Deck speichern |
+| `create_deskmat` | Deskmat/Playmat (~4K) aus einem Kartenartwork oder einem Bild-Prompt erstellen |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
@@ -354,6 +381,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
 | `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
+| `MTG_DESKMAT_DIR` | `./deskmats` | Deskmat-Projekte und fertige Dateien |
 | `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` / `MTG_UPSCALER_PATH` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
 | `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |

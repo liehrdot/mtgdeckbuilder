@@ -34,6 +34,8 @@ DEFAULTS: dict[str, Any] = {
     "upscale_model": "realesrgan-x4plus",
     # remove the print halftone of scanned cards before upscaling: off | light | normal | strong
     "descreen": "normal",
+    # Deskmat studio: image generator as URL template ({prompt} {width} {height} {seed}); empty = pollinations.ai (free)
+    "image_generator_url": "",
 }
 _ENV = {
     "autofill_path": "MTG_AUTOFILL_PATH",

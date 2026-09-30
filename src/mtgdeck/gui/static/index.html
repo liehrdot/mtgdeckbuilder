@@ -29,6 +29,7 @@
   <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
   <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h7"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
 
@@ -57,6 +58,7 @@
 
     <nav class="nav-bottom" aria-label="Weitere Bereiche">
       <a href="#/collection" data-nav="collection"><svg class="icon"><use href="#i-box"/></svg>Meine Sammlung <span id="coll-count" class="count"></span></a>
+      <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
       <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
       <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
@@ -299,6 +301,8 @@
               <a id="export-cod" role="menuitem" href="#" download>Export für Cockatrice (.cod)</a>
               <a id="export-tts" role="menuitem" href="#" download>Export für Tabletop Simulator (.json)</a>
               <a id="export-txt" role="menuitem" href="#" download>Decklist als Textdatei</a>
+              <hr>
+              <button type="button" id="deskmat-from-deck" role="menuitem">Deskmat aus diesem Deck …</button>
               <hr>
               <button type="button" id="delete-btn" role="menuitem" class="danger">Deck löschen …</button>
             </div>
@@ -774,6 +778,122 @@
       </section>
     </section>
 
+    <!-- ============ deskmat studio ============ -->
+    <section id="view-deskmat" class="view" data-view="deskmat" hidden>
+      <header class="page-head">
+        <div>
+          <h1>Deskmat-Studio</h1>
+          <p class="lead">Aus einem Kartenartwork, einem beschriebenen Setting oder einem eigenen Bild wird eine Druckdatei für
+            deine Deskmat oder Playmat – zugeschnitten aufs Format und mit Real-ESRGAN auf etwa 4K hochskaliert.</p>
+        </div>
+      </header>
+
+      <section class="panel" id="dm-source-panel">
+        <h2><span class="step-num" aria-hidden="true">1</span> Motiv</h2>
+        <div class="segmented" role="radiogroup" aria-label="Woher kommt das Motiv?" id="dm-kind">
+          <label><input type="radio" name="dmkind" value="card" checked><span>Kartenartwork</span></label>
+          <label><input type="radio" name="dmkind" value="gen"><span><svg class="icon"><use href="#i-spark"/></svg>Setting beschreiben</span></label>
+          <label><input type="radio" name="dmkind" value="upload"><span>Eigenes Bild</span></label>
+        </div>
+
+        <form id="dm-card-form" class="dm-block" data-kind="card" autocomplete="off">
+          <p class="muted small">Das reine Artwork der Karte (ohne Rahmen und Text) von Scryfall – in jedem Druck. Hochaufgelöste
+            Scans gibt es über MPC Autofill, wenn in den Einstellungen ein Server eingetragen ist.</p>
+          <div class="dm-card-row">
+            <label class="field"><span>Karte</span>
+              <input id="dm-card" list="ac-dm-card" placeholder="z. B. Meren of Clan Nel Toth" required><datalist id="ac-dm-card"></datalist></label>
+            <label class="field"><span>Seite</span><select id="dm-face"><option value="front">Vorderseite</option><option value="back">Rückseite</option></select></label>
+          </div>
+          <p id="dm-art-choice" class="muted small">Artwork: Standard-Druck</p>
+          <div class="btn-group">
+            <button type="button" class="btn" id="dm-art-btn">Anderes Artwork wählen …</button>
+            <button type="button" class="btn" id="dm-mpc-btn" hidden>Hochaufgelöster Scan (MPC) …</button>
+            <button type="submit" class="btn primary">Artwork laden</button>
+          </div>
+          <div id="dm-mpc-grid" class="similar-grid dm-mpc" hidden></div>
+        </form>
+
+        <form id="dm-gen-form" class="dm-block" data-kind="gen" autocomplete="off" hidden>
+          <label class="field"><span>Beschreibe das Setting</span>
+            <textarea name="setting" rows="3" required minlength="3" placeholder="z. B. Eine verfallene Burg im Nebel über einem Drachenfriedhof, Sonnenuntergang, Raben am Himmel"></textarea></label>
+          <div class="dm-gen-row">
+            <label class="field"><span>Stil</span><select name="style" id="dm-style"></select></label>
+            <label class="field"><span>Stimmung aus Deck <span class="muted">(optional)</span></span><select name="deck" id="dm-deck"><option value="">–</option></select></label>
+            <label class="field"><span>Varianten</span><select name="variants"><option>1</option><option>2</option><option selected>3</option><option>4</option></select></label>
+          </div>
+          <p class="muted small" id="dm-gen-note">Claude schreibt daraus einen Bild-Prompt; das Bild erzeugt der kostenlose Generator
+            <b id="dm-gen-host">pollinations.ai</b> (der Prompt wird dorthin geschickt). Danach wählst du eine Variante.</p>
+          <button type="submit" class="btn primary" id="dm-gen-btn"><svg class="icon"><use href="#i-spark"/></svg>Bild erzeugen lassen</button>
+          <div id="dm-job-slot"></div>
+        </form>
+
+        <div class="dm-block" data-kind="upload" hidden>
+          <p class="muted small">Ein eigenes Bild (PNG, JPG, WebP) – je größer, desto schärfer die Deskmat.</p>
+          <label class="btn" for="dm-file">Bild auswählen …</label>
+          <input id="dm-file" type="file" accept="image/*" class="sr-only">
+        </div>
+
+        <div id="dm-candidates" hidden>
+          <h3 class="small muted">Varianten – wähle eine aus</h3>
+          <div id="dm-cand-grid" class="dm-cands"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="dm-edit-panel" hidden>
+        <div class="panel-head">
+          <h2><span class="step-num" aria-hidden="true">2</span> Format &amp; Zuschnitt</h2>
+          <span id="dm-title" class="muted small"></span>
+        </div>
+        <div class="dm-controls">
+          <label class="field"><span>Format</span><select id="dm-format"></select></label>
+          <label class="field"><span>Auflösung (lange Seite)</span><select id="dm-size"></select></label>
+          <div class="field-block">
+            <span class="field-label">Anpassen</span>
+            <div class="segmented small" role="radiogroup" aria-label="Anpassen">
+              <label><input type="radio" name="dmfit" value="fill" checked><span>Füllen (zuschneiden)</span></label>
+              <label><input type="radio" name="dmfit" value="fit"><span>Einpassen</span></label>
+            </div>
+          </div>
+        </div>
+        <div id="dm-frame" class="dm-frame" tabindex="0" aria-label="Zuschnitt – ziehen zum Verschieben, Pfeiltasten und +/− zum Zoomen">
+          <img id="dm-bg" class="dm-bg" alt="">
+          <img id="dm-img" class="dm-img" alt="Motiv" draggable="false">
+        </div>
+        <div class="dm-zoom">
+          <label for="dm-zoom" class="small">Zoom</label>
+          <input id="dm-zoom" type="range" min="1" max="4" step="0.01" value="1">
+          <button type="button" class="btn small ghost" id="dm-reset">Zurücksetzen</button>
+        </div>
+        <p id="dm-info" class="small muted"></p>
+        <label class="check small" id="dm-upscale-row"><input type="checkbox" id="dm-upscale" checked> KI-Hochskalierung (Real-ESRGAN ×4)</label>
+        <p id="dm-upscale-hint" class="small warn" hidden>Real-ESRGAN ist nicht eingerichtet – das Bild wird ohne KI vergrößert und wirkt weicher.
+          Einrichten unter <a href="#/settings">Einstellungen → Proxy-Druck</a>.</p>
+        <div class="form-actions">
+          <button type="button" class="btn primary lg" id="dm-render-btn">Deskmat erstellen</button>
+        </div>
+        <div id="dm-render-slot"></div>
+      </section>
+
+      <section class="panel" id="dm-result-panel" hidden>
+        <div class="panel-head">
+          <h2><span class="step-num" aria-hidden="true">3</span> Ergebnis</h2>
+          <div class="btn-group">
+            <button type="button" class="btn" id="dm-open">Ordner öffnen</button>
+            <a class="btn primary" id="dm-download" href="#" download>PNG herunterladen</a>
+          </div>
+        </div>
+        <img id="dm-result" class="dm-result" alt="Fertige Deskmat">
+        <p id="dm-result-info" class="small muted"></p>
+        <ul id="dm-result-warn" class="small warn"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Meine Deskmats <span class="count" id="dm-count"></span></h2>
+        <div id="dm-list" class="dm-list"></div>
+        <p id="dm-empty" class="empty-inline">Noch keine Deskmat erstellt.</p>
+      </section>
+    </section>
+
     <!-- ============ glossary ============ -->
     <section id="view-glossary" class="view narrow" data-view="glossary" hidden>
       <header class="page-head">
@@ -867,6 +987,15 @@
           </div>
           <p class="muted small">Scryfall-Bilder sind Scans gedruckter Karten – ohne Entrastern macht die KI das Druckraster als Linien sichtbar.</p>
           <label class="check"><input type="checkbox" name="upscale"> im Druckstudio standardmäßig aktivieren</label>
+        </section>
+
+        <section class="panel">
+          <h2>Deskmat-Studio</h2>
+          <label class="field">Bildgenerator <span class="muted">(leer = pollinations.ai, kostenlos)</span>
+            <input name="image_generator_url" placeholder="https://image.pollinations.ai/prompt/{prompt}?width={width}&amp;height={height}&amp;seed={seed}&amp;nologo=true&amp;model=flux">
+          </label>
+          <p class="muted small">Adresse, die ein Bild zurückgibt; <code>{prompt}</code> wird durch den Bild-Prompt ersetzt, optional
+            <code>{width}</code>, <code>{height}</code>, <code>{seed}</code>. Die KI-Hochskalierung nutzt das Real-ESRGAN von oben.</p>
         </section>
 
         <div class="form-actions">

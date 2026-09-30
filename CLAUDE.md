@@ -70,6 +70,10 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `games.py`: game log in `decks/.games/<slug>.json`, `stats()`, `learn_focus()`, `ISSUES` quick picks; routes `/api/decks/{slug}/games`, MCP `deck_games` (read-only, also in `READ_ONLY_TOOLS`); the upgrade prompt mentions the record.
   - Staged upgrade plan: `PLAN_SCHEMA` / `plan_prompt` / `_enrich_plan` (each stage validated like upgrades, no card added/removed twice), stored as `deck["upgrade_plan"]`; the GUI applies one stage at a time via `POST /cards`.
   - Guided finder: `FinderRequest` takes `feel`/`colors`/`themes`/`experience` (`FINDER_*` wordings); suggestions carry `difficulty` + `difficulty_note`.
+- **`deskmat.py`** (Deskmat-Studio): projects in `deskmats/<id>/` (`MTG_DESKMAT_DIR`, gitignored) with `meta.json`, `source.*`, `candidates/`, `deskmat-<W>x<H>.png`, `preview.jpg`.
+  - Sources: `from_card()` (Scryfall `art_crop` via `scryfall.image_url(id, "art_crop")` or derived from the image URL; `mpc_id` = MPC Autofill full scan with `ART_BOX` as default crop), `from_upload()`, `generate()` (URL template setting `image_generator_url`, default pollinations.ai, throttled, 1–4 seeds) + `choose()`.
+  - `FORMATS` (mm), `SIZES` (long side 3840/4096/5120), `target_size()`, `crop_box()` (the GUI preview mirrors it in `dmCropBox`), `render()`: fill = crop window (cx, cy, zoom) / fit = blurred extension → descreen for scans → `proxy._upscale()` (Real-ESRGAN ×4, falls back with a warning) → Lanczos + unsharp to the exact size.
+  - Routes `/api/deskmat…` (options, card, mpc, upload, generate = read-only Claude job with `DESKMAT_SCHEMA` then generator, choose, render = runner job, image, open-folder, delete); MCP `create_deskmat` (write tool). SSE event `deskmat`.
 - **`deckedit.py`**: `edit_deck()` changes a saved deck directly (add/remove/set_qty/set_category), re-validates via `revalidate()` and saves one version with a "Manuell: …" note (route `POST /api/decks/{slug}/cards`, MCP `edit_deck`). `similar_cards()` suggests replacements (local DB tags, else Scryfall `otag:` search).
 - **`collection.py`**: the user's collection in `collection.json` (`MTG_COLLECTION_FILE`, gitignored).
   - One entry per printing: name, qty, proxy, foil, lang, `set`/`set_name`/`collector_number`/`scryfall_id`/`image` (artwork), price at import, note. Identical entries are merged.
@@ -124,7 +128,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `save_deck` re-validates before writing and stores the validation result inside the deck JSON.
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
   - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
-    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/glossary[/<term>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
+    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/deskmat[/<id>]` · `#/glossary[/<term>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
     - „Neues Deck“ has three modes (`buildForm.dataset.mode` build|find|import); import has sub-modes link|text|precon (`#import-box[data-imode]`).
     - Function names are global in `app.js`: check for an existing name before adding one (`renderPlan` is the print plan, the upgrade plan is `renderUpgradePlan`).
     - Card list edits are collected in `edit` (add/qty/remove/cat) and saved in one request; test-hand odds are computed client-side (`renderOdds`, hypergeometric). Views are `<section class="view" data-view=…>`; tab switches use `history.replaceState`.
@@ -154,6 +158,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 ## Tests
 
 - Tests must never hit the network.
+- The mock also fakes the image generator (`image.pollinations.ai`, returns an image of the requested size; `fail` in the path → 500). Deskmat tests reuse `test_proxy._fake_esrgan` for the upscaler.
 - The mock also fakes MTGJSON (`GraveTroupe_C99`), Archidekt deck 4242, Moxfield (v3 blocked, v2 answers; `blocked` ids fail), MTGGoldfish 777, TappedOut, Deckstats, the EDHREC average deck for Meren and German printings (`GERMAN`, `lang:de` searches).
 - `tests/conftest.py` sets up an autouse fixture that:
   - replaces `http._client` with an `httpx.MockTransport` that fakes Scryfall, EDHREC and Spellbook;
@@ -170,6 +175,6 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`
+- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_DESKMAT_DIR`
 - `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`, `MTG_UPSCALER_PATH`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`

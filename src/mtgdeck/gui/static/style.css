@@ -863,3 +863,39 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .mode-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
 .mode-switch span { justify-content: center; text-align: center; height: 100%; }
 @media (max-width: 700px) { .mode-switch { grid-template-columns: 1fr; } }
+
+/* ---------- deskmat studio ---------- */
+#view-deskmat { max-width: 1100px; }
+#view-deskmat .panel > h2, #view-deskmat .panel-head h2 { display: flex; align-items: center; gap: var(--space-2); }
+#view-deskmat .panel > h2 { margin-bottom: var(--space-4); }
+#dm-kind { margin-bottom: var(--space-4); }
+#dm-candidates { margin-top: var(--space-5); }
+.dm-block .btn-group { flex-wrap: wrap; }
+.dm-card-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: var(--space-3); }
+.dm-gen-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.dm-mpc { margin-top: var(--space-4); }
+.dm-cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
+.dm-cands button { padding: 0; border: 2px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; overflow: hidden; }
+.dm-cands button:hover, .dm-cands button:focus-visible, .dm-cands button[aria-pressed="true"] { border-color: var(--accent); }
+.dm-cands img { display: block; width: 100%; }
+.dm-controls { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: var(--space-3); align-items: end; }
+.dm-controls .field, .dm-controls .field-block { margin-bottom: var(--space-3); }
+.dm-frame { position: relative; width: 100%; overflow: hidden; border-radius: var(--radius); background: #111; cursor: grab; touch-action: none; user-select: none; box-shadow: inset 0 0 0 1px var(--border); }
+.dm-frame.dragging { cursor: grabbing; }
+.dm-frame.fit { cursor: default; }
+.dm-frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dm-img { position: absolute; max-width: none; pointer-events: none; }
+.dm-bg { position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover; filter: blur(18px) brightness(.55); display: none; }
+.dm-frame.fit .dm-bg { display: block; }
+.dm-zoom { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0; }
+.dm-zoom input { flex: 1; max-width: 360px; }
+.dm-result { width: 100%; border-radius: var(--radius); display: block; margin-bottom: var(--space-3); }
+.dm-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
+.dm-item { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); display: flex; flex-direction: column; }
+.dm-item a.thumb { display: block; aspect-ratio: 16 / 9; background: var(--surface-2); }
+.dm-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dm-item .meta { padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; gap: var(--space-2); align-items: center; font-size: var(--fs-sm); }
+.dm-item .meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  .dm-card-row, .dm-gen-row, .dm-controls { grid-template-columns: 1fr; }
+}

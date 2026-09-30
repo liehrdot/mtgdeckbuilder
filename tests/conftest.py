@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from mtgdeck import blacklist, carddb, collection, http, proxy, settings, storage
+from mtgdeck import blacklist, carddb, collection, deskmat, http, proxy, settings, storage
 
 
 def card(name: str, *, ci: str = "", type_line: str = "Creature — Human", text: str = "", cmc: float = 2,
@@ -126,6 +126,11 @@ def handler(request: httpx.Request) -> httpx.Response:
     url = request.url
     if url.host == "cards.scryfall.io":
         return httpx.Response(200, content=_image_bytes("PNG"), headers={"Content-Type": "image/png"})
+    if url.host == "image.pollinations.ai":  # free image generator: an image of the requested size
+        if "fail" in url.path:
+            return httpx.Response(500, text="boom")
+        size = (int(url.params.get("width", 1024)), int(url.params.get("height", 1024)))
+        return httpx.Response(200, content=_image_bytes("JPEG", size), headers={"Content-Type": "image/jpeg"})
     if url.host == "cdn.mpcautofill.com":
         return httpx.Response(200, content=_image_bytes("JPEG", (1644, 2244)), headers={"Content-Type": "image/jpeg"})
     if url.host == "mpc.test":
@@ -267,6 +272,7 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(collection, "COLLECTION_FILE", tmp_path / "collection.json")
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(proxy, "PROXIES_DIR", tmp_path / "proxies")
+    monkeypatch.setattr(deskmat, "DESKMAT_DIR", tmp_path / "deskmats")
     for env in ("MTG_AUTOFILL_PATH", "MTG_MPCFILL_SERVER", "MTG_CARDBACK"):
         monkeypatch.delenv(env, raising=False)
     http._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), headers={"User-Agent": http.USER_AGENT})

@@ -81,7 +81,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "collection", "glossary", "blacklist", "settings"];
+const VIEWS = ["new", "job", "deck", "collection", "deskmat", "glossary", "blacklist", "settings"];
 const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
@@ -107,6 +107,7 @@ async function route() {
   if (r.view === "settings") refreshDbStatus();
   if (r.view === "collection") loadCollection();
   if (r.view === "glossary") showGlossary(r.slug);
+  if (r.view === "deskmat") showDeskmat(r.slug);
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -118,7 +119,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", glossary: "Glossar", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", deskmat: "Deskmat-Studio", glossary: "Glossar", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -560,7 +561,7 @@ function tickElapsed() {
 }
 
 function setBusy(busy) {
-  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn", "#plan-btn"]) {
+  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn", "#plan-btn", "#dm-gen-btn", "#dm-render-btn"]) {
     const b = $(sel);
     b.disabled = busy;
     b.title = busy ? "Es läuft gerade ein Auftrag" : "";
@@ -587,6 +588,7 @@ function handleEvent(ev) {
     case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
     case "guide": onGuide(ev.guide, jobInfo?.slug); break;
     case "plan": onUpgradePlan(ev.plan, jobInfo?.slug); break;
+    case "deskmat": onDeskmat(ev.project); break;
     case "progress": {
       const bar = $("#progress");
       bar.hidden = false;
@@ -639,6 +641,7 @@ async function finishJob(ev) {
     case "upgrade":
     case "guide":
     case "plan":
+    case "deskmat":
       info.dismissed = true;
       break;
     case "print":
@@ -2804,7 +2807,7 @@ async function loadSettings() {
   const MODEL_HINTS = { "realesrgan-x4plus": " (empfohlen)", "realesrgan-x4plus-anime": " (für Zeichnungen, glättet stärker)" };
   f.upscale_model.innerHTML = appSettings.upscale_models.map((m) => `<option value="${esc(m)}">${esc(m + (MODEL_HINTS[m] || ""))}</option>`).join("")
     || '<option value="">– Programm nicht gefunden –</option>';
-  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model", "descreen"]) if (f[k]) f[k].value = appSettings[k] ?? "";
+  for (const k of ["autofill_path", "mpcfill_server", "cardback_path", "browser", "site", "upscaler_path", "upscale_model", "descreen", "image_generator_url"]) if (f[k]) f[k].value = appSettings[k] ?? "";
   f.upscale.checked = !!appSettings.upscale;
   $("#upscaler-status").innerHTML = appSettings.upscaler_found
     ? `<span class="ok">✓ gefunden:</span> ${esc(appSettings.upscaler_found)}`
@@ -2825,6 +2828,7 @@ $("#settings-form").addEventListener("submit", async (e) => {
   try {
     await api("/api/settings", { method: "POST", body });
     await loadSettings();
+    dm.opts = null;  // the deskmat studio re-reads generator and upscaler
     toast("Einstellungen gespeichert.");
   } catch (err) { $("#settings-msg").textContent = err.message; }
 });
@@ -2849,6 +2853,323 @@ async function refreshDbStatus() {
 $("#db-btn").addEventListener("click", async () => {
   await api("/api/carddb/refresh", { method: "POST" }).catch(fail);
   refreshDbStatus();
+});
+
+// ============================================================================================
+// deskmat studio: motif (card art, generated, upload) -> crop to the mat format -> ~4K file
+// ============================================================================================
+const dm = { opts: null, project: null, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, printing: null, prefill: null };
+
+async function deskmatOptions() {
+  if (dm.opts) return dm.opts;
+  const o = await api("/api/deskmat/options");
+  dm.opts = o;
+  $("#dm-format").innerHTML = o.formats.map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("");
+  $("#dm-size").innerHTML = o.sizes.map((px) => `<option value="${px}"${px === o.default_size ? " selected" : ""}>${px} px${px === 4096 ? " (4K)" : px === 3840 ? " (UHD)" : px === 5120 ? " (5K)" : ""}</option>`).join("");
+  $("#dm-style").innerHTML = o.styles.map((st) => `<option value="${esc(st.key)}">${esc(st.label)}</option>`).join("");
+  $("#dm-gen-host").textContent = o.generator;
+  $("#dm-mpc-btn").hidden = !o.mpc;
+  $("#dm-upscale").checked = o.upscaler;
+  $("#dm-upscale").disabled = !o.upscaler;
+  $("#dm-upscale-hint").hidden = o.upscaler;
+  return o;
+}
+
+function setDmKind(kind) {
+  $(`#dm-kind [value="${kind}"]`).checked = true;
+  for (const b of $$("#view-deskmat .dm-block")) b.hidden = b.dataset.kind !== kind;
+}
+$("#dm-kind").addEventListener("change", (e) => setDmKind(e.target.value));
+
+async function showDeskmat(id) {
+  try { await deskmatOptions(); } catch (err) { return fail(err); }
+  $("#dm-deck").innerHTML = '<option value="">–</option>' + deckIndex.map((d) => `<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join("");
+  if (dm.prefill) {
+    setDmKind("card");
+    $("#dm-card").value = dm.prefill.card || "";
+    $("#dm-deck").value = dm.prefill.deck || "";
+    dm.printing = null;
+    $("#dm-art-choice").textContent = "Artwork: Standard-Druck";
+    dm.prefill = null;
+  }
+  loadDeskmatList();
+  if (!id) { dm.project = null; renderDeskmat(); return; }
+  if (dm.project?.id !== id) {
+    try { dm.project = await api(`/api/deskmat/${enc(id)}`); dm.crop = null; }
+    catch (err) { fail(err); go("#/deskmat"); return; }
+  }
+  renderDeskmat();
+}
+
+function dmFormat() { return dm.opts.formats.find((f) => f.key === $("#dm-format").value) || dm.opts.formats[0]; }
+function dmTarget() { return dmFormat().sizes[$("#dm-size").value]; }
+const dmFit = () => $("#view-deskmat [name=dmfit]:checked").value;
+
+// same maths as deskmat.crop_box on the server
+function dmCropBox(w, h, aspect, { cx, cy, zoom }) {
+  let [ww, wh] = w / h > aspect ? [h * aspect, h] : [w, w / aspect];
+  zoom = Math.max(1, Math.min(zoom, 8));
+  ww /= zoom; wh /= zoom;
+  const x0 = Math.min(Math.max(cx * w - ww / 2, 0), w - ww);
+  const y0 = Math.min(Math.max(cy * h - wh / 2, 0), h - wh);
+  return { x0, y0, ww, wh };
+}
+function dmDefaultCrop(p, aspect) {
+  const box = p.source.art_box;
+  if (!box) return { cx: 0.5, cy: 0.5, zoom: 1 };
+  const [w, h] = p.source.size;
+  const full = dmCropBox(w, h, aspect, { cx: 0.5, cy: 0.5, zoom: 1 });
+  const winW = Math.min((box[2] - box[0]) * w, (box[3] - box[1]) * h * aspect);
+  return { cx: (box[0] + box[2]) / 2, cy: (box[1] + box[3]) / 2, zoom: full.ww / winW };
+}
+
+function renderDeskmat() {
+  const p = dm.project;
+  const cands = p?.candidates || [];
+  $("#dm-candidates").hidden = !cands.length;
+  $("#dm-cand-grid").innerHTML = cands.map((c, i) => `<button type="button" data-n="${i}" aria-pressed="${p.source.chosen === i}"
+      title="Variante ${i + 1}"><img src="/api/deskmat/${enc(p.id)}/image?kind=candidate&n=${i}" alt="Variante ${i + 1}" loading="lazy"></button>`).join("");
+  if (cands.length) setDmKind("gen");
+  const ready = !!p?.source?.file;
+  $("#dm-edit-panel").hidden = !ready;
+  $("#dm-result-panel").hidden = !p?.result;
+  if (!ready) return;
+  $("#dm-title").textContent = p.title + (p.source.card && !p.source.card.startsWith(p.title) ? ` · ${p.source.card}` : "")
+    + (p.source.kind === "mpc" ? " · MPC-Scan" : p.source.kind === "card" ? " · Scryfall-Artwork" : "");
+  const r = p.render;
+  if (r && !dm.crop) {
+    $("#dm-format").value = r.format;
+    $("#dm-size").value = String(r.long_px);
+    $(`#view-deskmat [name=dmfit][value="${r.fit}"]`).checked = true;
+    $("#dm-upscale").checked = r.upscale && dm.opts.upscaler;
+  } else if (!r && p.format) $("#dm-format").value = p.format;
+  if (!dm.crop) dm.crop = r?.crop && r.format === $("#dm-format").value ? { ...r.crop } : dmDefaultCrop(p, dmFormat().aspect);
+  const src = `/api/deskmat/${enc(p.id)}/image?kind=source&v=${enc(`${p.source.file}-${p.source.chosen ?? ""}-${p.source.size}`)}`;
+  if ($("#dm-img").dataset.src !== src) { $("#dm-img").src = src; $("#dm-bg").src = src; $("#dm-img").dataset.src = src; }
+  layoutDeskmat();
+  if (p.result) {
+    const res = p.result;
+    $("#dm-result").src = `/api/deskmat/${enc(p.id)}/image?kind=preview&v=${enc(res.created)}`;
+    $("#dm-download").href = `/api/deskmat/${enc(p.id)}/image?kind=result&download=true`;
+    $("#dm-result-info").textContent = `${res.size[0]} × ${res.size[1]} px · ≈ ${res.dpi} DPI · ${res.format_label} · `
+      + `${(res.bytes / 1048576).toFixed(1)} MB PNG · ${res.ai_upscaled ? "mit Real-ESRGAN hochskaliert" : res.factor > 1.15 ? "ohne KI vergrößert" : "ohne Vergrößerung"}`;
+    $("#dm-result-warn").innerHTML = res.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
+  }
+}
+
+function layoutDeskmat() {
+  const p = dm.project;
+  if (!p?.source?.file || $("#dm-edit-panel").hidden) return;
+  const f = dmFormat();
+  const frame = $("#dm-frame");
+  frame.style.aspectRatio = `${f.mm[0]} / ${f.mm[1]}`;
+  const F = frame.clientWidth, H = F / f.aspect;
+  const [w, h] = p.source.size;
+  const fit = dmFit() === "fit";
+  frame.classList.toggle("fit", fit);
+  $("#dm-zoom").disabled = fit;
+  const img = $("#dm-img");
+  let s, left, top, region;
+  if (fit) {
+    s = Math.min(F / w, H / h);
+    left = (F - w * s) / 2; top = (H - h * s) / 2;
+    region = [w, h];
+  } else {
+    const b = dmCropBox(w, h, f.aspect, dm.crop);
+    dm.crop.cx = (b.x0 + b.ww / 2) / w; dm.crop.cy = (b.y0 + b.wh / 2) / h;  // keep the centre inside
+    s = F / b.ww; left = -b.x0 * s; top = -b.y0 * s;
+    region = [Math.round(b.ww), Math.round(b.wh)];
+  }
+  Object.assign(img.style, { width: `${w * s}px`, height: `${h * s}px`, left: `${left}px`, top: `${top}px` });
+  $("#dm-zoom").value = dm.crop.zoom;
+  const [tw, th] = dmTarget();
+  const factor = fit ? Math.min(tw / w, th / h) : tw / region[0];
+  const dpiVal = Math.round(tw / (f.mm[0] / 25.4));
+  const ai = $("#dm-upscale").checked && dm.opts.upscaler && factor > 1.15;
+  $("#dm-info").innerHTML = `Ausgabe <b>${tw} × ${th} px</b> · ≈ ${dpiVal} DPI auf ${f.mm[0] / 10} × ${f.mm[1] / 10} cm · Ausschnitt `
+    + `${region[0]} × ${region[1]} px → Faktor ${factor.toFixed(1)}${factor > 1.15 ? (ai ? " (KI ×4, Rest per Lanczos)" : " (ohne KI)") : ""}`
+    + (factor > (ai ? 6 : 2.5) ? ' · <span class="warn">wird weich – größeres Motiv oder weniger Zoom</span>' : "");
+}
+window.addEventListener("resize", debounce(layoutDeskmat, 100));
+$("#dm-format").addEventListener("change", () => { if (dm.project) dm.crop = dmDefaultCrop(dm.project, dmFormat().aspect); layoutDeskmat(); });
+$("#dm-size").addEventListener("change", layoutDeskmat);
+$("#dm-upscale").addEventListener("change", layoutDeskmat);
+$("#view-deskmat").addEventListener("change", (e) => { if (e.target.name === "dmfit") layoutDeskmat(); });
+$("#dm-zoom").addEventListener("input", (e) => { dm.crop.zoom = Number(e.target.value); layoutDeskmat(); });
+$("#dm-reset").addEventListener("click", () => { dm.crop = dmDefaultCrop(dm.project, dmFormat().aspect); layoutDeskmat(); });
+
+// drag (mouse, touch, pen) and keyboard to move the crop window
+let dmDrag = null;
+$("#dm-frame").addEventListener("pointerdown", (e) => {
+  if (dmFit() === "fit" || !dm.project) return;
+  dmDrag = { x: e.clientX, y: e.clientY, crop: { ...dm.crop } };
+  $("#dm-frame").setPointerCapture(e.pointerId);
+  $("#dm-frame").classList.add("dragging");
+});
+$("#dm-frame").addEventListener("pointermove", (e) => {
+  if (!dmDrag) return;
+  const [w, h] = dm.project.source.size;
+  const s = parseFloat($("#dm-img").style.width) / w;
+  dm.crop.cx = dmDrag.crop.cx - (e.clientX - dmDrag.x) / (w * s);
+  dm.crop.cy = dmDrag.crop.cy - (e.clientY - dmDrag.y) / (h * s);
+  layoutDeskmat();
+});
+const dmDragEnd = () => { dmDrag = null; $("#dm-frame").classList.remove("dragging"); };
+$("#dm-frame").addEventListener("pointerup", dmDragEnd);
+$("#dm-frame").addEventListener("pointercancel", dmDragEnd);
+$("#dm-frame").addEventListener("wheel", (e) => {
+  if (dmFit() === "fit" || !dm.project) return;
+  e.preventDefault();
+  dm.crop.zoom = Math.max(1, Math.min(4, dm.crop.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08)));
+  layoutDeskmat();
+}, { passive: false });
+$("#dm-frame").addEventListener("keydown", (e) => {
+  if (dmFit() === "fit" || !dm.project) return;
+  const step = 0.02 / dm.crop.zoom;
+  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+  if (moves[e.key]) { dm.crop.cx += moves[e.key][0]; dm.crop.cy += moves[e.key][1]; }
+  else if (e.key === "+" || e.key === "=") dm.crop.zoom = Math.min(4, dm.crop.zoom * 1.1);
+  else if (e.key === "-") dm.crop.zoom = Math.max(1, dm.crop.zoom / 1.1);
+  else return;
+  e.preventDefault();
+  layoutDeskmat();
+});
+
+function openDeskmat(p) {
+  dm.project = p;
+  dm.crop = null;
+  if (location.hash === `#/deskmat/${p.id}`) renderDeskmat();
+  else go(`#/deskmat/${enc(p.id)}`);
+  loadDeskmatList();
+  setTimeout(() => $(p.source?.file ? "#dm-edit-panel" : "#dm-candidates").scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+}
+function onDeskmat(p) {
+  if (p.result) {
+    dm.project = p;
+    if (location.hash !== `#/deskmat/${p.id}`) go(`#/deskmat/${enc(p.id)}`); else renderDeskmat();
+    loadDeskmatList();
+    toast("Deine Deskmat ist fertig.");
+    $("#dm-result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  } else openDeskmat(p);
+}
+
+// 1a card artwork
+wireAutocomplete($("#dm-card"), $("#ac-dm-card"));
+$("#dm-card").addEventListener("input", () => { dm.printing = null; $("#dm-art-choice").textContent = "Artwork: Standard-Druck"; $("#dm-mpc-grid").hidden = true; });
+$("#dm-art-btn").addEventListener("click", async () => {
+  const name = $("#dm-card").value.trim();
+  if (!name) { toast("Gib zuerst eine Karte ein.", "error"); $("#dm-card").focus(); return; }
+  const p = await pickPrinting(name);
+  if (!p) return;
+  dm.printing = p;
+  $("#dm-art-choice").textContent = `Artwork: ${p.set_name || p.set || ""}${p.collector_number ? " #" + p.collector_number : ""}`;
+});
+$("#dm-card-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { name: $("#dm-card").value.trim(), face: $("#dm-face").value, scryfall_id: dm.printing?.scryfall_id || null };
+  const btn = e.submitter || $("#dm-card-form [type=submit]");
+  btn.disabled = true;
+  try { openDeskmat(await api("/api/deskmat/card", { method: "POST", body })); }
+  catch (err) { fail(err); }
+  finally { btn.disabled = false; }
+});
+$("#dm-mpc-btn").addEventListener("click", async () => {
+  const name = $("#dm-card").value.trim();
+  if (!name) { toast("Gib zuerst eine Karte ein.", "error"); return; }
+  const grid = $("#dm-mpc-grid");
+  grid.hidden = false;
+  grid.innerHTML = '<p class="muted small">Suche Scans …</p>';
+  try {
+    const items = await api(`/api/deskmat/mpc?name=${enc(name)}`);
+    grid.innerHTML = items.map((o) => `<button type="button" class="similar" data-mpc="${esc(o.id)}"><img src="${esc(o.thumb)}" alt="" loading="lazy">
+      <span class="muted small">${esc(o.source || "")}${o.dpi ? ` · ${o.dpi} DPI` : ""}</span></button>`).join("") || '<p class="muted small">Keine Scans gefunden.</p>';
+  } catch (err) { grid.innerHTML = `<p class="bad small">${esc(err.message)}</p>`; }
+});
+$("#dm-mpc-grid").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-mpc]");
+  if (!b) return;
+  try { openDeskmat(await api("/api/deskmat/card", { method: "POST", body: { name: $("#dm-card").value.trim(), mpc_id: b.dataset.mpc } })); }
+  catch (err) { fail(err); }
+});
+
+// 1b generated from a described setting (Claude writes the prompt, a free generator paints)
+$("#dm-gen-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (currentJob) { toast("Es läuft schon ein Auftrag – warte kurz oder brich ihn ab.", "error"); return; }
+  const f = new FormData(e.target);
+  const body = { setting: f.get("setting"), style: f.get("style"), deck: f.get("deck") || null, variants: Number(f.get("variants")), format: $("#dm-format").value || "playmat" };
+  try {
+    const { job } = await api("/api/deskmat/generate", { method: "POST", body });
+    startJob(job, "Claude entwirft dein Motiv", { kind: "deskmat", slot: "#dm-job-slot", route: "#/deskmat" });
+  } catch (err) { fail(err); }
+});
+$("#dm-cand-grid").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-n]");
+  if (!b || !dm.project) return;
+  try { openDeskmat(await api(`/api/deskmat/${enc(dm.project.id)}/choose`, { method: "POST", body: { n: Number(b.dataset.n) } })); }
+  catch (err) { fail(err); }
+});
+
+// 1c upload
+$("#dm-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const res = await fetch(`/api/deskmat/upload?filename=${enc(file.name)}`, { method: "POST", body: file });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    openDeskmat(data);
+  } catch (err) { fail(err); }
+  e.target.value = "";
+});
+
+// 3 render
+$("#dm-render-btn").addEventListener("click", async () => {
+  if (!dm.project || currentJob) return;
+  const body = { format: $("#dm-format").value, long_px: Number($("#dm-size").value), fit: dmFit(), crop: dm.crop, upscale: $("#dm-upscale").checked };
+  try {
+    const { job } = await api(`/api/deskmat/${enc(dm.project.id)}/render`, { method: "POST", body });
+    startJob(job, `Deskmat „${dm.project.title}“ wird erstellt`, { kind: "deskmat", slot: "#dm-render-slot", route: `#/deskmat/${enc(dm.project.id)}` });
+  } catch (err) { fail(err); }
+});
+$("#dm-open").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/deskmat/${enc(dm.project.id)}/open-folder`, { method: "POST" });
+    toast(r.opened ? "Ordner geöffnet." : `Ordner: ${r.path}`);
+  } catch (err) { fail(err); }
+});
+
+async function loadDeskmatList() {
+  let items = [];
+  try { items = await api("/api/deskmats"); } catch { /* empty state */ }
+  $("#dm-count").textContent = items.length || "";
+  $("#dm-empty").hidden = !!items.length;
+  $("#dm-list").innerHTML = items.map((p) => {
+    const kind = p.result ? "preview" : p.source?.file ? "source" : p.candidates?.length ? "candidate&n=0" : "";
+    const v = enc(p.updated || "");
+    return `<div class="dm-item" data-id="${esc(p.id)}">
+      <a class="thumb" href="#/deskmat/${enc(p.id)}">${kind ? `<img src="/api/deskmat/${enc(p.id)}/image?kind=${kind}&v=${v}" alt="" loading="lazy">` : ""}</a>
+      <div class="meta"><span title="${esc(p.title)}">${esc(p.title)}<br><span class="muted">${p.result ? `${p.result.size[0]} × ${p.result.size[1]}` : "noch nicht erstellt"}</span></span>
+        <button type="button" class="icon-btn dm-del" aria-label="Deskmat löschen" title="Löschen">${icon("x")}</button></div></div>`;
+  }).join("");
+}
+$("#dm-list").addEventListener("click", async (e) => {
+  const b = e.target.closest(".dm-del");
+  if (!b) return;
+  const id = b.closest(".dm-item").dataset.id;
+  if (!(await ask({ title: "Deskmat löschen?", text: "Motiv und Druckdatei werden gelöscht.", ok: "Löschen", danger: true }))) return;
+  try {
+    await api(`/api/deskmat/${enc(id)}`, { method: "DELETE" });
+    if (dm.project?.id === id) { dm.project = null; go("#/deskmat"); }
+    loadDeskmatList();
+  } catch (err) { fail(err); }
+});
+$("#deskmat-from-deck").addEventListener("click", () => {
+  if (!currentDeck) return;
+  $("#deck-menu").open = false;
+  dm.prefill = { card: currentDeck.commanders[0], deck: currentDeck.slug };
+  dm.project = null;
+  go("#/deskmat");
 });
 
 // ============================================================================================
@@ -2899,6 +3220,7 @@ function paletteItems() {
     { label: "Meine Sammlung", hint: "Seite", run: () => go("#/collection") },
     { label: "Karte zur Sammlung hinzufügen", hint: "Sammlung", run: () => { go("#/collection"); openCollAdd(); } },
     { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },
+    { label: "Deskmat-Studio", hint: "Seite", run: () => go("#/deskmat") },
     { label: "Glossar", hint: "Seite", run: () => go("#/glossary") },
     { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
     { label: "Einstellungen", hint: "Seite", run: () => go("#/settings") },
@@ -2909,6 +3231,7 @@ function paletteItems() {
     for (const [tab, label] of Object.entries(tabNames)) items.push({ label, hint: d.name, run: () => selectTab(tab) });
     items.push({ label: "Karten bearbeiten", hint: d.name, run: () => { selectTab("karten"); if (!edit) setEditing(true); } });
     items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });
+    items.push({ label: "Deskmat aus diesem Deck", hint: d.name, run: () => $("#deskmat-from-deck").click() });
     items.push({ label: "Partie festhalten", hint: d.name, run: () => { selectTab("partien"); $("#game-form input[name=result]").focus(); } });
   }
   for (const d of deckIndex) items.push({ label: d.name, hint: `Deck · ${d.commanders.join(" + ")} · ${d.level || ""}`, run: () => go(`#/deck/${enc(d.slug)}`) });

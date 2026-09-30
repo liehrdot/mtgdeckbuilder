@@ -29,6 +29,7 @@ _MIN_INTERVAL = {
     "json.edhrec.com": 0.5,
     "backend.commanderspellbook.com": 0.75,  # "80 requests per minute should be a safe rate"
     "archidekt.com": 0.5,
+    "image.pollinations.ai": 3.0,  # free generator: anonymous requests are queued, be gentle
     "cards.scryfall.io": 0.05,
     "cdn.mpcautofill.com": 0.05,  # image CDN, no documented rate limit – stay polite anyway
 }

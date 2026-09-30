@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, edhrec, games, importers, precons, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, proxy, scryfall, spellbook, storage
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -541,6 +541,34 @@ async def proxy_settings(
     return {**cfg, "autofill_found": str(found) if found else None,
             "upscaler_found": str(upscaler) if upscaler else None,
             "upscale_models": proxy.upscale_models(upscaler), "stocks": proxy.STOCKS}  # fmt: skip
+
+
+@mcp.tool()
+async def create_deskmat(
+    card: Annotated[str | None, Field(description="Card whose artwork becomes the mat (Scryfall art crop)")] = None,
+    image_prompt: Annotated[str | None, Field(description="Or: English text-to-image prompt (wide panorama, no text/frame) for the free generator")] = None,
+    format: Annotated[str, Field(description="playmat (61x35.5 cm) | deskmat-80x30 | deskmat-90x40 | deskmat-120x60 | screen-16x9")] = "playmat",
+    long_px: Annotated[int, Field(description="Long side in px: 3840, 4096 (4K) or 5120")] = 4096,
+    fit: Annotated[str, Field(description="fill = crop to the format, fit = whole image with blurred edges")] = "fill",
+) -> dict[str, Any]:
+    """Create a deskmat/playmat image of about 4K (Real-ESRGAN upscaling when set up) in deskmats/<id>/.
+    Give either ``card`` or ``image_prompt``. Returns the file path, size and warnings."""
+    if bool(card) == bool(image_prompt):
+        return {"error": "Entweder card oder image_prompt angeben."}
+    if format not in deskmat.FORMATS or long_px not in deskmat.SIZES:
+        return {"error": f"format: {', '.join(deskmat.FORMATS)}; long_px: {deskmat.SIZES}"}
+    try:
+        if card:
+            project = await deskmat.from_card(card)
+        else:
+            project = await deskmat.generate(image_prompt[:60], image_prompt, format, variants=1)  # type: ignore[index]
+            project = deskmat.choose(project["id"], 0)
+        project = await deskmat.render(project["id"], fmt=format, long_px=long_px, fit=fit)
+    except Exception as exc:
+        return {"error": str(exc)}
+    res = project["result"]
+    return {"id": project["id"], "file": str(deskmat.file(project["id"], "result")), "size": res["size"], "dpi": res["dpi"],
+            "ai_upscaled": res["ai_upscaled"], "warnings": res["warnings"]}  # fmt: skip
 
 
 @mcp.tool()
