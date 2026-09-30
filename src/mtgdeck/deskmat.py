@@ -392,14 +392,15 @@ def _resize(img: Image.Image, size: tuple[int, int], sharpen: bool) -> Image.Ima
 
 
 async def upscale_to(img: Image.Image, size: tuple[int, int], work: Path, cfg: dict[str, Any], *, ai: bool, scan: bool,
-                     warnings: list[str], say: Progress) -> tuple[Image.Image, int]:  # fmt: skip
-    """Bring ``img`` to exactly ``size``. With ``ai``: descreen scans, Real-ESRGAN ×4 – and for factors above
-    ~4.5 a second pass that starts from a quarter of the target (so it ends on the print size instead of
-    overshooting) – then Lanczos + light sharpening. Returns the image and the number of AI passes."""
+                     warnings: list[str], say: Progress, max_passes: int = 1) -> tuple[Image.Image, int]:  # fmt: skip
+    """Bring ``img`` to exactly ``size``. With ``ai``: descreen scans, Real-ESRGAN ×4 – and, if allowed
+    (``max_passes=2``) and the factor is above ~4.5, a second pass that starts from a quarter of the target
+    (so it ends on the print size instead of overshooting) – then Lanczos + light sharpening.
+    One pass often looks more natural; two are sharper but can look artificial. Returns image and passes."""
     factor = size[0] / img.width
     if not ai or factor <= 1.15:
         return _resize(img, size, sharpen=factor > 1.15), 0
-    passes = 1 if factor <= 4.5 else 2
+    passes = 2 if max_passes >= 2 and factor > 4.5 else 1
     if scan and cfg.get("descreen", "normal") != "off":
         img = imaging.descreen(img, cfg.get("descreen", "normal"))
     done = 0
@@ -421,7 +422,7 @@ async def upscale_to(img: Image.Image, size: tuple[int, int], work: Path, cfg: d
 
 
 async def render(pid: str, *, fmt: str = "playmat", dpi: int = 300, bleed_mm: float = 0, fit: str = "fill",
-                 crop: dict[str, float] | None = None, upscale: bool = True, filetype: str = "png",
+                 crop: dict[str, float] | None = None, upscale: bool = True, filetype: str = "png", passes: int = 1,
                  progress: Progress | None = None) -> dict[str, Any]:  # fmt: skip
     """Render the project's source to the print file (+ preview.jpg) and return the project."""
     size = check_size(fmt, dpi, bleed_mm)
@@ -443,7 +444,7 @@ async def render(pid: str, *, fmt: str = "playmat", dpi: int = 300, bleed_mm: fl
         # whole image, centred; the rest is the same image enlarged, blurred and darkened
         scale = min(size[0] / src.width, size[1] / src.height)
         fg_size = (round(src.width * scale), round(src.height * scale))
-        fg, passes = await upscale_to(src, fg_size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say)
+        fg, used = await upscale_to(src, fg_size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say, max_passes=passes)
         say("Setze das Bild zusammen …")
         bg_scale = max(size[0] / src.width, size[1] / src.height)
         small = src.resize((max(1, round(src.width * bg_scale / 16)), max(1, round(src.height * bg_scale / 16))), Image.Resampling.BILINEAR)
@@ -460,8 +461,8 @@ async def render(pid: str, *, fmt: str = "playmat", dpi: int = 300, bleed_mm: fl
         region = src.crop(box)
         region_size = region.size
         scale = size[0] / region.width
-        out, passes = await upscale_to(region, size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say)
-    limit = {0: 2.5, 1: 6, 2: 24}[passes]
+        out, used = await upscale_to(region, size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say, max_passes=passes)
+    limit = {0: 2.5, 1: 6, 2: 24}[used]
     if scale > limit:
         warnings.append(f"Das Motiv ist klein für {dpi} DPI (Faktor {scale:.1f}) – die Datei hat {dpi} DPI, wirkt aber weich. "
                         "Schärfer: MPC-Scan, generiertes Bild oder eigenes Bild in hoher Auflösung.")  # fmt: skip
@@ -477,9 +478,142 @@ async def render(pid: str, *, fmt: str = "playmat", dpi: int = 300, bleed_mm: fl
     prev_w = 1200
     out.resize((prev_w, max(1, round(prev_w * size[1] / size[0]))), Image.Resampling.LANCZOS, reducing_gap=3.0).save(work / "preview.jpg", quality=86)
     _, w_mm, h_mm = FORMATS[fmt]
-    meta["render"] = {"format": fmt, "dpi": dpi, "bleed_mm": bleed_mm, "fit": fit, "crop": crop, "upscale": upscale, "filetype": filetype}
+    meta["render"] = {"format": fmt, "dpi": dpi, "bleed_mm": bleed_mm, "fit": fit, "crop": crop, "upscale": upscale,
+                      "filetype": filetype, "passes": passes}  # fmt: skip
     meta["result"] = {"file": name, "preview": "preview.jpg", "size": list(size), "dpi": dpi, "bleed_mm": bleed_mm,
                       "print_mm": [w_mm + 2 * bleed_mm, h_mm + 2 * bleed_mm], "format_label": FORMATS[fmt][0],
-                      "source_px": list(region_size), "factor": round(scale, 2), "ai_passes": passes, "ai_upscaled": passes > 0,
+                      "source_px": list(region_size), "factor": round(scale, 2), "ai_passes": used, "ai_upscaled": used > 0,
                       "warnings": warnings, "bytes": (work / name).stat().st_size, "created": _now()}  # fmt: skip
     return _save(meta)
+
+
+# --- checking before ordering: detail comparison and a test print at real size ----------------------
+
+COMPARE_PX = 640  # side of a comparison tile in print pixels (≈ 5.4 cm at 300 DPI)
+TEST_MM = {"A4": (270, 190), "Letter": (259, 190)}  # printed region on a landscape sheet, leaves printer margins
+PAPER_MM = {"A4": (297, 210), "Letter": (279.4, 215.9)}
+
+
+def _mapping(meta: dict[str, Any], src_size: tuple[int, int]) -> tuple[tuple[int, int], float, float, float, tuple[float, float, float, float]]:
+    """How print pixels map to source pixels for the last render settings:
+    ``(print size, origin_x, origin_y, factor, area)`` with ``src = origin + print / factor``; ``area`` is the
+    part of the print that shows the source (all of it for fill, the centred image for fit)."""
+    r = meta.get("render") or {}
+    size = target_size(r.get("format", "playmat"), r.get("dpi", 300), r.get("bleed_mm", 0))
+    w, h = src_size
+    if r.get("fit") == "fit":
+        f = min(size[0] / w, size[1] / h)
+        off = ((size[0] - w * f) / 2, (size[1] - h * f) / 2)
+        return size, -off[0] / f, -off[1] / f, f, (off[0], off[1], off[0] + w * f, off[1] + h * f)
+    crop = r.get("crop") or default_crop(meta, size[0] / size[1])
+    x0, y0, x1, _ = crop_box(src_size, size[0] / size[1], crop.get("cx", 0.5), crop.get("cy", 0.5), crop.get("zoom", 1.0))
+    return size, x0, y0, size[0] / (x1 - x0), (0, 0, size[0], size[1])
+
+
+def _tile_box(point: tuple[float, float], tile: tuple[int, int], area: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
+    """A ``tile``-sized box centred on ``point`` (fractions of the print), kept inside ``area``."""
+    ax0, ay0, ax1, ay1 = area
+    tw, th = min(tile[0], int(ax1 - ax0)), min(tile[1], int(ay1 - ay0))
+    x0 = min(max(point[0] - tw / 2, ax0), ax1 - tw)
+    y0 = min(max(point[1] - th / 2, ay0), ay1 - th)
+    return round(x0), round(y0), round(x0) + tw, round(y0) + th
+
+
+async def compare(pid: str, *, x: float = 0.5, y: float = 0.5, progress: Progress | None = None) -> dict[str, Any]:
+    """Render one detail of the print (``COMPARE_PX`` square around the point x/y, fractions of the print)
+    without AI, with one and with two Real-ESRGAN passes – exactly as the full render would, but only for
+    that piece. Files: ``compare/<passes>.png``."""
+    meta = load(pid)
+    if not meta.get("render"):
+        raise ValueError("Erst die Deskmat erstellen – der Vergleich nutzt deren Format und Zuschnitt.")
+    say = progress or (lambda _t: None)
+    cfg = settings_mod.load()
+    work = _dir(pid)
+    with Image.open(file(pid, "source")) as src:
+        src.load()
+        src = src.convert("RGB")
+    size, ox, oy, f, area = _mapping(meta, src.size)
+    box = _tile_box((x * size[0], y * size[1]), (COMPARE_PX, COMPARE_PX), area)
+    margin = 8  # source pixels of context around the tile, so the AI sees the neighbourhood
+    sx0, sy0 = ox + box[0] / f, oy + box[1] / f
+    sx1, sy1 = ox + box[2] / f, oy + box[3] / f
+    cx0, cy0 = max(0, int(sx0) - margin), max(0, int(sy0) - margin)
+    cx1, cy1 = min(src.width, int(sx1 + 1) + margin), min(src.height, int(sy1 + 1) + margin)
+    piece = src.crop((cx0, cy0, cx1, cy1))
+    big = (round(piece.width * f), round(piece.height * f))
+    inner = (round((sx0 - cx0) * f), round((sy0 - cy0) * f))
+    tw, th = box[2] - box[0], box[3] - box[1]
+    out_dir = work / "compare"
+    shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.mkdir(parents=True)
+    tiles, warnings = [], []
+    scan = bool(meta["source"].get("scan"))
+    upscaler = bool(proxy.find_upscaler(cfg))
+    for passes in (0, 1, 2):
+        if passes and not upscaler:
+            continue
+        if passes == 2 and f <= 4.5:
+            continue  # a second pass is only used for large factors
+        say({0: "Ohne KI …", 1: "Mit einem KI-Durchgang …", 2: "Mit zwei KI-Durchgängen …"}[passes])
+        img, used = await upscale_to(piece, big, work, cfg, ai=passes > 0, scan=scan, warnings=warnings,
+                                     say=lambda _t: None, max_passes=max(passes, 1))  # fmt: skip
+        if passes and used != passes:
+            continue
+        tile = img.crop((inner[0], inner[1], inner[0] + tw, inner[1] + th))
+        tile.save(out_dir / f"{passes}.png")
+        tiles.append({"passes": passes, "file": f"compare/{passes}.png"})
+    meta["compare"] = {"tiles": tiles, "point": [x, y], "box": list(box), "print_size": list(size), "warnings": warnings,
+                       "tile_mm": round(tw / meta["render"]["dpi"] * 25.4), "factor": round(f, 2), "created": _now()}  # fmt: skip
+    return _save(meta)
+
+
+def compare_file(pid: str, passes: int) -> Path:
+    path = _dir(pid) / "compare" / f"{int(passes)}.png"
+    if not path.is_file():
+        raise FileNotFoundError("Vergleich fehlt")
+    return path
+
+
+def _note_font(px: int) -> Any:
+    """A readable font for the note on the test print (system fonts with umlauts, else Pillow's default)."""
+    from PIL import ImageFont
+
+    for name in ("DejaVuSans.ttf", "arial.ttf", "Arial.ttf", "Helvetica.ttc", "LiberationSans-Regular.ttf"):
+        try:
+            return ImageFont.truetype(name, px)
+        except OSError:
+            continue
+    return ImageFont.load_default(px)
+
+
+def testprint(pid: str, *, x: float = 0.5, y: float = 0.5, paper: str = "A4") -> Path:
+    """PDF with a piece of the finished print at real size on one landscape sheet (print it at 100 % /
+    "actual size"), centred on x/y (fractions of the print), with crop marks and a short note."""
+    from PIL import ImageDraw
+
+    meta = load(pid)
+    res = meta.get("result")
+    if not res:
+        raise ValueError("Erst die Deskmat erstellen.")
+    paper = paper if paper in TEST_MM else "A4"
+    dpi = res["dpi"]
+    px = lambda mm: round(mm / 25.4 * dpi)  # noqa: E731
+    region = (min(px(TEST_MM[paper][0]), res["size"][0]), min(px(TEST_MM[paper][1]), res["size"][1]))
+    box = _tile_box((x * res["size"][0], y * res["size"][1]), region, (0, 0, *res["size"]))
+    with Image.open(file(pid, "result")) as im:
+        piece = im.crop(box).convert("RGB")
+    sheet = Image.new("RGB", (px(PAPER_MM[paper][0]), px(PAPER_MM[paper][1])), "white")
+    left, top = (sheet.width - piece.width) // 2, (sheet.height - piece.height) // 2
+    sheet.paste(piece, (left, top))
+    draw = ImageDraw.Draw(sheet)
+    mark, gap = px(5), px(1)
+    for cx, cy, dx, dy in ((left, top, -1, -1), (left + piece.width, top, 1, -1), (left, top + piece.height, -1, 1),
+                           (left + piece.width, top + piece.height, 1, 1)):  # fmt: skip
+        draw.line([(cx + dx * gap, cy), (cx + dx * (gap + mark), cy)], fill="black", width=max(1, dpi // 150))
+        draw.line([(cx, cy + dy * gap), (cx, cy + dy * (gap + mark))], fill="black", width=max(1, dpi // 150))
+    note = (f"Probedruck \"{meta['title']}\" - {dpi} DPI - Ausschnitt {piece.width / dpi * 2.54:.1f} x {piece.height / dpi * 2.54:.1f} cm"
+            " - mit 100 % (Tatsächliche Größe) drucken und aus 50-60 cm ansehen")  # fmt: skip
+    draw.text((left + gap * 2, top + piece.height + gap + mark // 3), note, fill="black", font=_note_font(round(dpi * 9 / 72)))
+    out = _dir(pid) / f"probedruck-{paper.lower()}.pdf"
+    sheet.save(out, "PDF", resolution=dpi)
+    return out

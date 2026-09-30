@@ -287,10 +287,19 @@ Eine **Druckdatei** für Deskmat oder Playmat in echter Druckauflösung: **300 D
    unscharfen, abgedunkelten Erweiterung. Angezeigt werden Pixel, Megapixel und der Vergrößerungsfaktor.
    Über 250 Megapixel (120 × 60 cm bei 600 DPI) ist gesperrt – das passt nicht sinnvoll in den Speicher.
 3. **Deskmat erstellen:** Karten-Scans werden entrastert, dann skaliert **Real-ESRGAN ×4** hoch (dasselbe
-   Programm wie im Druckstudio, siehe Einstellungen). Reicht ×4 nicht (Faktor über ~4,5), folgt ein **zweiter
-   KI-Durchgang**: das Zwischenbild wird exakt auf ein Viertel der Zielgröße gebracht und nochmals ×4
+   Programm wie im Druckstudio, siehe Einstellungen). Wahlweise folgt bei großen Faktoren (über ~4,5) ein
+   **zweiter KI-Durchgang**: das Zwischenbild wird exakt auf ein Viertel der Zielgröße gebracht und nochmals ×4
    gerechnet – so landet es genau auf der Druckgröße. Den Rest erledigt Lanczos mit leichtem Nachschärfen.
    Ohne Real-ESRGAN wird ohne KI vergrößert (mit Hinweis). Alles liegt in `deskmats/<id>/`.
+
+4. **Vor dem Bestellen prüfen:** Klick ins fertige Bild wählt eine Stelle mit vielen Details (Gesichter, Türme,
+   Reiter).
+   - **Details vergleichen** rechnet dort einen Ausschnitt in Druckauflösung ohne KI, mit einem und mit zwei
+     KI-Durchgängen – nebeneinander, auf Wunsch in Originalpixeln; „Damit erstellen“ übernimmt die Variante.
+     Standard ist **ein** Durchgang (wirkt oft natürlicher), zwei sind schärfer, können aber künstlich wirken.
+   - **Probedruck als PDF:** der gewählte Ausschnitt in Originalgröße (27 × 19 cm auf A4 quer, Letter
+     entsprechend) mit Schnittmarken. Mit 100 % („Tatsächliche Größe“) drucken, auf den Tisch legen und aus
+     Spielabstand (50–60 cm) ansehen – sieht es da gut aus, bestellen.
 
 Erreichbar über die Seitenleiste, Strg+K oder im Deck über ⋯ → „Deskmat aus diesem Deck“ (Commander vorausgefüllt).
 Hinweis: Die Datei hat immer die gewählten DPI – wie viel echtes Detail drinsteckt, hängt vom Motiv ab.

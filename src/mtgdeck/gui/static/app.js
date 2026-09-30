@@ -588,7 +588,7 @@ function handleEvent(ev) {
     case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
     case "guide": onGuide(ev.guide, jobInfo?.slug); break;
     case "plan": onUpgradePlan(ev.plan, jobInfo?.slug); break;
-    case "deskmat": onDeskmat(ev.project); break;
+    case "deskmat": onDeskmat(ev.project, ev.what); break;
     case "progress": {
       const bar = $("#progress");
       bar.hidden = false;
@@ -2858,7 +2858,8 @@ $("#db-btn").addEventListener("click", async () => {
 // ============================================================================================
 // deskmat studio: motif (card art, generated, upload) -> crop to the mat format -> print file at 300 or 600 DPI
 // ============================================================================================
-const dm = { opts: null, project: null, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, printing: null, prefill: null };
+const dm = { opts: null, project: null, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, printing: null, prefill: null, point: [0.5, 0.5] };
+const dmPasses = () => Number($("#view-deskmat [name=dmpasses]:checked").value);
 
 async function deskmatOptions() {
   if (dm.opts) return dm.opts;
@@ -2946,6 +2947,7 @@ function renderDeskmat() {
     if (r.dpi) $(`#view-deskmat [name=dmdpi][value="${r.dpi}"]`).checked = true;
     $("#dm-bleed").value = String(r.bleed_mm ?? 0);
     $("#dm-filetype").value = r.filetype || "png";
+    $(`#view-deskmat [name=dmpasses][value="${r.passes || 1}"]`).checked = true;
     $(`#view-deskmat [name=dmfit][value="${r.fit}"]`).checked = true;
     $("#dm-upscale").checked = r.upscale && dm.opts.upscaler;
   } else if (!r && p.format) $("#dm-format").value = p.format;
@@ -2963,6 +2965,9 @@ function renderDeskmat() {
       + ` · ${(res.bytes / 1048576).toFixed(1)} MB ${ext} · `
       + (res.ai_passes ? `${res.ai_passes}× mit Real-ESRGAN hochskaliert` : res.factor > 1.15 ? "ohne KI vergrößert" : "ohne Vergrößerung");
     $("#dm-result-warn").innerHTML = res.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
+    if (p.compare?.point && dm.point.join() === "0.5,0.5") dm.point = [...p.compare.point];
+    placeDmMark();
+    renderDmCompare();
   }
 }
 
@@ -3002,9 +3007,10 @@ function layoutDeskmat() {
   const tooBig = mp > dm.opts.max_megapixels;
   const factor = fit ? Math.min(tw / w, th / h) : tw / region[0];
   const aiOn = $("#dm-upscale").checked && dm.opts.upscaler;
-  const passes = !aiOn || factor <= 1.15 ? 0 : factor <= 4.5 ? 1 : 2;
+  const passes = !aiOn || factor <= 1.15 ? 0 : factor > 4.5 && dmPasses() === 2 ? 2 : 1;
+  $("#dm-passes").hidden = !dm.opts.upscaler;
   const soft = factor > [2.5, 6, 24][passes];
-  const how = factor <= 1.15 ? "" : passes ? ` (KI ×4${passes === 2 ? " zweimal" : ""}, Rest per Lanczos)` : " (ohne KI)";
+  const how = factor <= 1.15 ? "" : passes ? ` (KI ×4${passes === 2 ? " zweimal" : ""}${factor > (passes === 2 ? 16 : 4) ? ", Rest per Lanczos" : ""})` : " (ohne KI)";
   $("#dm-info").innerHTML = `Druckdatei <b>${tw} × ${th} px</b> (${mp.toFixed(0)} MP) · <b>${dmDpi()} DPI</b> auf ${pw / 10} × ${ph / 10} cm`
     + (bleed ? ` inkl. ${bleed} mm Beschnitt` : "") + ` · Ausschnitt ${region[0]} × ${region[1]} px → Faktor ${factor.toFixed(1)}${how}`
     + (tooBig ? ` · <span class="bad">zu groß (max. ${dm.opts.max_megapixels} MP) – 300 DPI oder kleineres Format</span>`
@@ -3017,7 +3023,7 @@ $("#dm-format").addEventListener("change", () => { if (dm.project) dm.crop = dmD
 $("#dm-bleed").addEventListener("change", () => { if (dm.project && !dm.project.render) dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
 $("#dm-filetype").addEventListener("change", layoutDeskmat);
 $("#dm-upscale").addEventListener("change", layoutDeskmat);
-$("#view-deskmat").addEventListener("change", (e) => { if (e.target.name === "dmfit" || e.target.name === "dmdpi") layoutDeskmat(); });
+$("#view-deskmat").addEventListener("change", (e) => { if (["dmfit", "dmdpi", "dmpasses"].includes(e.target.name)) layoutDeskmat(); });
 $("#dm-zoom").addEventListener("input", (e) => { dm.crop.zoom = Number(e.target.value); layoutDeskmat(); });
 $("#dm-reset").addEventListener("click", () => { dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
 
@@ -3066,7 +3072,13 @@ function openDeskmat(p) {
   loadDeskmatList();
   setTimeout(() => $(p.source?.file ? "#dm-edit-panel" : "#dm-candidates").scrollIntoView({ behavior: "smooth", block: "start" }), 50);
 }
-function onDeskmat(p) {
+function onDeskmat(p, what) {
+  if (what === "compare") {
+    dm.project = p;
+    renderDmCompare();
+    $("#dm-compare").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   if (p.result) {
     dm.project = p;
     if (location.hash !== `#/deskmat/${p.id}`) go(`#/deskmat/${enc(p.id)}`); else renderDeskmat();
@@ -3150,7 +3162,7 @@ $("#dm-file").addEventListener("change", async (e) => {
 $("#dm-render-btn").addEventListener("click", async () => {
   if (!dm.project || currentJob) return;
   const body = { format: $("#dm-format").value, dpi: dmDpi(), bleed_mm: dmBleed(), fit: dmFit(), crop: dm.crop,
-    upscale: $("#dm-upscale").checked, filetype: $("#dm-filetype").value };
+    upscale: $("#dm-upscale").checked, filetype: $("#dm-filetype").value, passes: dmPasses() };
   try {
     const { job } = await api(`/api/deskmat/${enc(dm.project.id)}/render`, { method: "POST", body });
     startJob(job, `Deskmat „${dm.project.title}“ wird erstellt`, { kind: "deskmat", slot: "#dm-render-slot", route: `#/deskmat/${enc(dm.project.id)}` });
@@ -3161,6 +3173,53 @@ $("#dm-open").addEventListener("click", async () => {
     const r = await api(`/api/deskmat/${enc(dm.project.id)}/open-folder`, { method: "POST" });
     toast(r.opened ? "Ordner geöffnet." : `Ordner: ${r.path}`);
   } catch (err) { fail(err); }
+});
+
+// checking before ordering: pick a spot, compare without / 1× / 2× AI, test print at real size
+function placeDmMark() {
+  const res = dm.project?.result;
+  if (!res) return;
+  const paperMm = (appSettings?.paper || "A4") === "Letter" ? [259, 190] : [270, 190];
+  const [pw, ph] = res.print_mm;
+  const fw = Math.min(1, paperMm[0] / pw), fh = Math.min(1, paperMm[1] / ph);
+  const cx = Math.min(Math.max(dm.point[0], fw / 2), 1 - fw / 2), cy = Math.min(Math.max(dm.point[1], fh / 2), 1 - fh / 2);
+  Object.assign($("#dm-mark").style, { left: `${(cx - fw / 2) * 100}%`, top: `${(cy - fh / 2) * 100}%`, width: `${fw * 100}%`, height: `${fh * 100}%` });
+  $("#dm-testprint").href = `/api/deskmat/${enc(dm.project.id)}/testprint?x=${dm.point[0].toFixed(4)}&y=${dm.point[1].toFixed(4)}`;
+}
+$("#dm-result-wrap").addEventListener("click", (e) => {
+  const r = $("#dm-result").getBoundingClientRect();
+  dm.point = [Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1), Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)];
+  placeDmMark();
+});
+$("#dm-compare-btn").addEventListener("click", async () => {
+  if (!dm.project || currentJob) return;
+  try {
+    const { job } = await api(`/api/deskmat/${enc(dm.project.id)}/compare`, { method: "POST", body: { x: dm.point[0], y: dm.point[1] } });
+    startJob(job, "Vergleiche die Hochskalierung", { kind: "deskmat", slot: "#dm-compare-slot", route: `#/deskmat/${enc(dm.project.id)}` });
+  } catch (err) { fail(err); }
+});
+function renderDmCompare() {
+  const c = dm.project?.compare;
+  $("#dm-compare").hidden = !c?.tiles?.length;
+  if (!c?.tiles?.length) return;
+  const labels = { 0: "Ohne KI (nur Lanczos)", 1: "1 KI-Durchgang", 2: "2 KI-Durchgänge" };
+  const current = dm.project.render?.passes || 1;
+  $("#dm-compare-info").textContent = `Ausschnitt ${c.tile_mm} × ${c.tile_mm} mm in Druckauflösung (Faktor ${String(c.factor).replace(".", ",")}).`
+    + (c.tiles.some((t) => t.passes === 2) ? "" : " Ein zweiter Durchgang lohnt sich bei diesem Faktor nicht.");
+  const v = enc(c.created);
+  $("#dm-compare-grid").innerHTML = c.tiles.map((t) => `<figure>
+      <div class="tile"><img src="/api/deskmat/${enc(dm.project.id)}/compare/${t.passes}?v=${v}" alt="${esc(labels[t.passes])}"></div>
+      <figcaption><span>${esc(labels[t.passes])}${t.passes && t.passes === current && dm.project.result?.ai_passes ? " · aktuell" : ""}</span>
+        ${t.passes ? `<button type="button" class="btn small" data-passes="${t.passes}">Damit erstellen</button>` : ""}</figcaption></figure>`).join("");
+}
+$("#dm-compare-real").addEventListener("change", (e) => $("#dm-compare-grid").classList.toggle("real", e.target.checked));
+$("#dm-compare-grid").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-passes]");
+  if (!b) return;
+  $(`#view-deskmat [name=dmpasses][value="${b.dataset.passes}"]`).checked = true;
+  $("#dm-upscale").checked = true;
+  layoutDeskmat();
+  $("#dm-render-btn").click();
 });
 
 async function loadDeskmatList() {

@@ -36,6 +36,10 @@ mit Beschnitt. (Erste Version: „etwa 4K“; auf Wunsch auf Druck-DPI umgestell
   2. Format & Zuschnitt – Vorschau zum Ziehen, Zoom, Füllen/Einpassen, DPI, Beschnitt (Schnittlinie), PNG/JPEG;
   3. „Deskmat erstellen“ – Fortschritt, Ergebnis, Download;
   4. „Meine Deskmats“.
+- [x] Vor dem Bestellen prüfen (Tipps aus der Praxis): Standard 1 KI-Durchgang (natürlicher), 2 wählbar;
+      Detailvergleich ohne / 1× / 2× KI an einer gewählten Stelle (nur dieser Ausschnitt wird gerechnet);
+      Probedruck-PDF in Originalgröße (27 × 19 cm auf A4 quer) mit Schnittmarken und Hinweis „100 % drucken,
+      aus 50–60 cm ansehen“.
 - [x] Tests offline (Mocks für Scryfall-Bilder, MPC, Generator, Fake-Upscaler), Browser-Prüfung, Doku.
 
 ## Hinweise
@@ -44,4 +48,4 @@ mit Beschnitt. (Erste Version: „etwa 4K“; auf Wunsch auf Druck-DPI umgestell
   Scharf wird es mit einem MPC-Scan, einem generierten oder eigenen großen Bild.
 - Dateien: Playmat 300 DPI = 30 MP, 600 DPI = 121 MP; JPEG 95 % ist dann die handlichere Wahl.
 - Die externen Dienste (Scryfall, pollinations.ai, MPC Autofill) waren aus der Entwicklungsumgebung nicht erreichbar;
-  getestet ist mit nachgebauten Antworten.
+  getestet ist mit nachgebauten Antworten und einem Schein-Upscaler.

@@ -900,3 +900,18 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 @media (max-width: 760px) {
   .dm-card-row, .dm-gen-row, .dm-controls { grid-template-columns: 1fr; }
 }
+.dm-ai-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-2) 0; }
+.dm-result-wrap { position: relative; cursor: crosshair; margin-bottom: var(--space-3); overflow: hidden; border-radius: var(--radius); }
+.dm-result-wrap .dm-result { margin: 0; }
+.dm-mark { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / .6), 0 0 0 9999px rgb(0 0 0 / .25); border-radius: 2px; pointer-events: none; }
+.dm-check { border-top: 1px solid var(--border); padding-top: var(--space-4); margin-top: var(--space-4); }
+.dm-check h3 { margin-bottom: var(--space-2); }
+.dm-check .btn-group { flex-wrap: wrap; margin: var(--space-3) 0; }
+.dm-compare-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.dm-compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }
+.dm-compare-grid figure { margin: 0; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.dm-compare-grid .tile { overflow: auto; border-radius: var(--radius); background: #111; max-height: 70vh; }
+.dm-compare-grid img { display: block; width: 100%; image-rendering: auto; }
+.dm-compare-grid.real img { width: auto; max-width: none; image-rendering: pixelated; }
+.dm-compare-grid figcaption { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); font-size: var(--fs-sm); }
+.dm-tip { background: var(--surface-2); border-radius: var(--radius); padding: var(--space-3); margin: var(--space-4) 0 0; }

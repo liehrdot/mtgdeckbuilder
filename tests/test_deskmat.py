@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import re
 import time
 
 import pytest
@@ -74,8 +75,11 @@ async def test_render_with_real_esrgan_one_and_two_passes(tmp_path, small_format
     assert res["source_px"] == [267, 155]  # 400 x 240 source, window 1.72:1, zoom 1.5
     with Image.open(deskmat.file(p["id"], "result")) as im:
         assert im.getpixel((700, 10))[0] > 150  # the yellow top-right corner is in the crop
-    # 600 DPI: factor 1417 / 267 = 5.3 -> two passes, the second one from a quarter of the target
-    two = await deskmat.render(p["id"], fmt=small_format, dpi=600, crop={"cx": 0.8, "cy": 0.2, "zoom": 1.5}, filetype="jpg")
+    # 600 DPI: factor 1417 / 267 = 5.3 -> one pass by default (more natural) ...
+    one = await deskmat.render(p["id"], fmt=small_format, dpi=600, crop={"cx": 0.8, "cy": 0.2, "zoom": 1.5})
+    assert one["result"]["ai_passes"] == 1 and one["render"]["passes"] == 1
+    # ... two when asked for: the second one starts from a quarter of the target
+    two = await deskmat.render(p["id"], fmt=small_format, dpi=600, crop={"cx": 0.8, "cy": 0.2, "zoom": 1.5}, filetype="jpg", passes=2)
     assert two["result"]["ai_passes"] == 2 and two["result"]["size"] == [1417, 827]
     with Image.open(deskmat.file(p["id"], "result")) as im:
         assert im.format == "JPEG" and im.size == (1417, 827) and round(im.info["dpi"][0]) == 600
@@ -177,3 +181,38 @@ def test_generator_setting():
     assert ok.status_code == 200
     assert deskmat.generator_url("a b", 10, 20, 7) == "http://localhost:7860/gen?p=a%20b&s=7&x={other}"
     assert deskmat.formats()["generator"] == "localhost:7860"
+
+
+async def test_compare_and_testprint(tmp_path, small_format, monkeypatch):
+    _fake_esrgan(tmp_path)
+    monkeypatch.setattr(deskmat, "COMPARE_PX", 200)
+    p = deskmat.from_upload(_png((300, 180)), "Turm.png")
+    with pytest.raises(ValueError, match="Erst"):
+        await deskmat.compare(p["id"])
+    await deskmat.render(p["id"], fmt=small_format, dpi=600)  # factor 1417 / 300 = 4.7 -> two passes possible
+    done = await deskmat.compare(p["id"], x=0.9, y=0.1)
+    cmp = done["compare"]
+    assert [t["passes"] for t in cmp["tiles"]] == [0, 1, 2]
+    assert cmp["box"] == [1175, 0, 1375, 200] and cmp["tile_mm"] == 8  # x centred at 90 %, y clamped to the top edge
+    for passes in (0, 1, 2):
+        with Image.open(deskmat.compare_file(p["id"], passes)) as im:
+            assert im.size == (200, 200)
+    with Image.open(deskmat.compare_file(p["id"], 1)) as im:
+        assert im.getpixel((150, 50))[0] > 150  # the yellow top-right corner of the source
+    # test print: the finished print is only 60 x 35 mm, so the piece is the whole print on an A4 sheet
+    pdf = deskmat.testprint(p["id"], x=0.5, y=0.5).read_bytes()
+    assert pdf.startswith(b"%PDF")
+    box = [float(v) for v in re.search(rb"/MediaBox \[ ?([\d. ]+)\]", pdf).group(1).split()]
+    assert box[2] == pytest.approx(841.9, abs=0.5) and box[3] == pytest.approx(595.3, abs=0.5)  # A4 landscape in pt
+
+
+def test_testprint_region_at_real_size(small_format, monkeypatch):
+    monkeypatch.setitem(deskmat.TEST_MM, "A4", (40, 20))
+    p = deskmat.from_upload(_png((900, 600)), "Reiter.png")
+    asyncio.run(deskmat.render(p["id"], fmt=small_format, upscale=False))
+    client = TestClient(app)
+    r = client.get(f"/api/deskmat/{p['id']}/testprint", params={"x": 0.2, "y": 0.8})
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    assert 'filename="Probedruck-Reiter.pdf"' in r.headers["content-disposition"]
+    assert client.post(f"/api/deskmat/{p['id']}/compare", json={"x": 2}).status_code == 422
+    assert client.get(f"/api/deskmat/{p['id']}/compare/1").status_code == 404

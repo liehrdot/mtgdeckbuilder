@@ -876,7 +876,13 @@
           <button type="button" class="btn small ghost" id="dm-reset">Zurücksetzen</button>
         </div>
         <p id="dm-info" class="small muted"></p>
-        <label class="check small" id="dm-upscale-row"><input type="checkbox" id="dm-upscale" checked> KI-Hochskalierung (Real-ESRGAN ×4)</label>
+        <div class="dm-ai-row">
+          <label class="check small" id="dm-upscale-row"><input type="checkbox" id="dm-upscale" checked> KI-Hochskalierung (Real-ESRGAN ×4)</label>
+          <div class="segmented small" role="radiogroup" aria-label="KI-Durchgänge" id="dm-passes">
+            <label><input type="radio" name="dmpasses" value="1" checked><span>1 Durchgang (natürlicher)</span></label>
+            <label><input type="radio" name="dmpasses" value="2"><span>2 Durchgänge (schärfer)</span></label>
+          </div>
+        </div>
         <p id="dm-upscale-hint" class="small warn" hidden>Real-ESRGAN ist nicht eingerichtet – das Bild wird ohne KI vergrößert und wirkt weicher.
           Einrichten unter <a href="#/settings">Einstellungen → Proxy-Druck</a>.</p>
         <div class="form-actions">
@@ -893,9 +899,33 @@
             <a class="btn primary" id="dm-download" href="#" download>Druckdatei herunterladen</a>
           </div>
         </div>
-        <img id="dm-result" class="dm-result" alt="Fertige Deskmat">
+        <div class="dm-result-wrap" id="dm-result-wrap" title="Klick wählt die Stelle für Vergleich und Probedruck">
+          <img id="dm-result" class="dm-result" alt="Fertige Deskmat">
+          <div id="dm-mark" class="dm-mark" aria-hidden="true"></div>
+        </div>
         <p id="dm-result-info" class="small muted"></p>
         <ul id="dm-result-warn" class="small warn"></ul>
+
+        <div class="dm-check">
+          <h3>Vor dem Bestellen prüfen</h3>
+          <p class="small muted">Klick ins Bild wählt eine Stelle mit vielen Details (Gesichter, Türme, Reiter) – dort sieht man
+            Artefakte am ehesten. Der Rahmen zeigt den Probedruck-Ausschnitt.</p>
+          <div class="btn-group">
+            <button type="button" class="btn" id="dm-compare-btn">Details vergleichen (ohne / 1× / 2× KI)</button>
+            <a class="btn" id="dm-testprint" href="#" download>Probedruck als PDF (Originalgröße)</a>
+          </div>
+          <div id="dm-compare-slot"></div>
+          <div id="dm-compare" hidden>
+            <div class="dm-compare-head">
+              <p class="small muted" id="dm-compare-info"></p>
+              <label class="check small"><input type="checkbox" id="dm-compare-real"> Originalpixel (1:1)</label>
+            </div>
+            <div id="dm-compare-grid" class="dm-compare-grid"></div>
+          </div>
+          <p class="small dm-tip"><b>So prüfst du:</b> Probedruck mit 100 % („Tatsächliche Größe“, nicht „An Seite anpassen“)
+            drucken, auf den Tisch legen und aus Spielabstand (50–60 cm) ansehen. Sieht es da gut aus, bestellen – leichte
+            Unschärfe aus der Nähe passt zum malerischen Stil und fällt unter den Karten kaum auf.</p>
+        </div>
       </section>
 
       <section class="panel">

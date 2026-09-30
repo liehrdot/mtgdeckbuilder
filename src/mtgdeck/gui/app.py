@@ -1175,6 +1175,7 @@ class DeskmatRender(BaseModel):
     crop: dict[str, float] | None = None
     upscale: bool = True
     filetype: str = Field("png", pattern="^(png|jpg)$")
+    passes: int = Field(1, ge=1, le=2)
 
 
 @app.post("/api/deskmat/{pid}/render")
@@ -1188,7 +1189,7 @@ async def api_deskmat_render(pid: str, req: DeskmatRender) -> dict[str, str]:
     async def runner(job: Job) -> None:
         job.emit(type="status", text="Bereite das Motiv vor …")
         project = await deskmat.render(pid, fmt=req.format, dpi=req.dpi, bleed_mm=req.bleed_mm, fit=req.fit, crop=req.crop,
-                                       upscale=req.upscale, filetype=req.filetype,
+                                       upscale=req.upscale, filetype=req.filetype, passes=req.passes,
                                        progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
         res = project["result"]
         for w in res["warnings"]:
@@ -1199,6 +1200,42 @@ async def api_deskmat_render(pid: str, req: DeskmatRender) -> dict[str, str]:
         job.emit(type="done", ok=True)
 
     return _start_runner(runner)
+
+
+class DeskmatPoint(BaseModel):
+    x: float = Field(0.5, ge=0, le=1)
+    y: float = Field(0.5, ge=0, le=1)
+
+
+@app.post("/api/deskmat/{pid}/compare")
+async def api_deskmat_compare(pid: str, req: DeskmatPoint) -> dict[str, str]:
+    meta = _not_found(deskmat.load, pid)
+    if not meta.get("render"):
+        raise HTTPException(400, "Erst die Deskmat erstellen.")
+
+    async def runner(job: Job) -> None:
+        project = await deskmat.compare(pid, x=req.x, y=req.y, progress=lambda t: job.emit(type="status", text=t))
+        job.emit(type="deskmat", project=project, what="compare")
+        job.emit(type="done", ok=bool(project["compare"]["tiles"]))
+
+    return _start_runner(runner)
+
+
+@app.get("/api/deskmat/{pid}/compare/{passes}")
+async def api_deskmat_compare_tile(pid: str, passes: int) -> FileResponse:
+    return FileResponse(_not_found(deskmat.compare_file, pid, passes), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/deskmat/{pid}/testprint")
+async def api_deskmat_testprint(pid: str, x: float = 0.5, y: float = 0.5) -> FileResponse:
+    _not_found(deskmat.load, pid)
+    try:
+        path = await asyncio.to_thread(deskmat.testprint, pid, x=min(max(x, 0), 1), y=min(max(y, 0), 1),
+                                       paper=settings_mod.load().get("paper", "A4"))  # fmt: skip
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    title = re.sub(r"[^\w\- ]+", "", deskmat.load(pid).get("title") or "deskmat").strip().replace(" ", "-") or "deskmat"
+    return FileResponse(path, filename=f"Probedruck-{title}.pdf", media_type="application/pdf")
 
 
 @app.api_route("/api/deskmat/{pid}/image", methods=["GET", "HEAD"])

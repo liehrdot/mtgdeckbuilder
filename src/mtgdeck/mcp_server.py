@@ -551,6 +551,7 @@ async def create_deskmat(
     dpi: Annotated[int, Field(description="Print resolution: 300 (minimum) or 600 (best)")] = 300,
     bleed_mm: Annotated[float, Field(description="Bleed on every side in mm: 0, 3 or 5 (if the print shop asks for it)")] = 0,
     fit: Annotated[str, Field(description="fill = crop to the format, fit = whole image with blurred edges")] = "fill",
+    passes: Annotated[int, Field(description="Real-ESRGAN passes: 1 (more natural, default) or 2 (sharper, can look artificial)")] = 1,
 ) -> dict[str, Any]:
     """Create a deskmat/playmat print file at 300 or 600 DPI (Real-ESRGAN upscaling when set up) in deskmats/<id>/.
     Give either ``card`` or ``image_prompt``. Returns the file path, size and warnings."""
@@ -566,7 +567,7 @@ async def create_deskmat(
         else:
             project = await deskmat.generate(image_prompt[:60], image_prompt, format, variants=1)  # type: ignore[index]
             project = deskmat.choose(project["id"], 0)
-        project = await deskmat.render(project["id"], fmt=format, dpi=dpi, bleed_mm=bleed_mm, fit=fit)
+        project = await deskmat.render(project["id"], fmt=format, dpi=dpi, bleed_mm=bleed_mm, fit=fit, passes=min(max(passes, 1), 2))
     except Exception as exc:
         return {"error": str(exc)}
     res = project["result"]
