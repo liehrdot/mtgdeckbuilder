@@ -547,28 +547,31 @@ async def proxy_settings(
 async def create_deskmat(
     card: Annotated[str | None, Field(description="Card whose artwork becomes the mat (Scryfall art crop)")] = None,
     image_prompt: Annotated[str | None, Field(description="Or: English text-to-image prompt (wide panorama, no text/frame) for the free generator")] = None,
-    format: Annotated[str, Field(description="playmat (61x35.5 cm) | deskmat-80x30 | deskmat-90x40 | deskmat-120x60 | screen-16x9")] = "playmat",
-    long_px: Annotated[int, Field(description="Long side in px: 3840, 4096 (4K) or 5120")] = 4096,
+    format: Annotated[str, Field(description="playmat (61x35.5 cm) | deskmat-80x30 | deskmat-90x40 | deskmat-120x60")] = "playmat",
+    dpi: Annotated[int, Field(description="Print resolution: 300 (minimum) or 600 (best)")] = 300,
+    bleed_mm: Annotated[float, Field(description="Bleed on every side in mm: 0, 3 or 5 (if the print shop asks for it)")] = 0,
     fit: Annotated[str, Field(description="fill = crop to the format, fit = whole image with blurred edges")] = "fill",
 ) -> dict[str, Any]:
-    """Create a deskmat/playmat image of about 4K (Real-ESRGAN upscaling when set up) in deskmats/<id>/.
+    """Create a deskmat/playmat print file at 300 or 600 DPI (Real-ESRGAN upscaling when set up) in deskmats/<id>/.
     Give either ``card`` or ``image_prompt``. Returns the file path, size and warnings."""
     if bool(card) == bool(image_prompt):
         return {"error": "Entweder card oder image_prompt angeben."}
-    if format not in deskmat.FORMATS or long_px not in deskmat.SIZES:
-        return {"error": f"format: {', '.join(deskmat.FORMATS)}; long_px: {deskmat.SIZES}"}
+    try:
+        deskmat.check_size(format, dpi, bleed_mm)
+    except ValueError as exc:
+        return {"error": f"{exc} (format: {', '.join(deskmat.FORMATS)})"}
     try:
         if card:
             project = await deskmat.from_card(card)
         else:
             project = await deskmat.generate(image_prompt[:60], image_prompt, format, variants=1)  # type: ignore[index]
             project = deskmat.choose(project["id"], 0)
-        project = await deskmat.render(project["id"], fmt=format, long_px=long_px, fit=fit)
+        project = await deskmat.render(project["id"], fmt=format, dpi=dpi, bleed_mm=bleed_mm, fit=fit)
     except Exception as exc:
         return {"error": str(exc)}
     res = project["result"]
     return {"id": project["id"], "file": str(deskmat.file(project["id"], "result")), "size": res["size"], "dpi": res["dpi"],
-            "ai_upscaled": res["ai_upscaled"], "warnings": res["warnings"]}  # fmt: skip
+            "print_mm": res["print_mm"], "ai_passes": res["ai_passes"], "warnings": res["warnings"]}  # fmt: skip
 
 
 @mcp.tool()

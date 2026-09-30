@@ -1,15 +1,16 @@
 # Deskmat-Studio – Plan
 
-Ziel: aus einem Kartenartwork, einem beschriebenen Setting oder einem eigenen Bild eine Deskmat-/Playmat-Datei
-mit **etwa 4K** (lange Seite 4096 px, wahlweise 3840 / 5120) erzeugen – zugeschnitten auf das Mattenformat.
+Ziel: aus einem Kartenartwork, einem beschriebenen Setting oder einem eigenen Bild eine Deskmat-/Playmat-Druckdatei
+in **300 DPI (Minimum) oder 600 DPI** für die echte Mattengröße erzeugen – zugeschnitten aufs Format, optional
+mit Beschnitt. (Erste Version: „etwa 4K“; auf Wunsch auf Druck-DPI umgestellt.)
 
 ## Bausteine
 
 - [x] `deskmat.py`
-  - Formate: Playmat 61 × 35,5 cm, Deskmat 80 × 30 / 90 × 40 / 120 × 60 cm, 16:9 (Bildschirm); Zielgröße aus
-    langer Seite und Seitenverhältnis.
+  - Formate: Playmat 61 × 35,5 cm, Deskmat 80 × 30 / 90 × 40 / 120 × 60 cm; Zielgröße = (Maß + 2 × Beschnitt)
+    × DPI; über 250 MP gesperrt (120 × 60 cm bei 600 DPI).
   - Projekte in `deskmats/<id>/` (`MTG_DESKMAT_DIR`, gitignored): `source.*`, `meta.json`, Kandidaten, Ergebnis
-    `deskmat-<B>x<H>.png` und eine kleine Vorschau.
+    `deskmat-<B>x<H>-<dpi>dpi.png|jpg` (DPI in der Datei) und eine kleine Vorschau.
   - Quellen:
     - Scryfall `art_crop` eines Drucks (reines Artwork, ohne Rahmen und Text – nichts muss entfernt werden);
     - MPC-Autofill-Scan (hochaufgelöst, mit Rahmen → Standard-Zuschnitt auf die Artwork-Box);
@@ -21,7 +22,8 @@ mit **etwa 4K** (lange Seite 4096 px, wahlweise 3840 / 5120) erzeugen – zugesc
     1. Zuschnitt (Füllen: Fenster im Zielformat, Mittelpunkt + Zoom) bzw. Einpassen (Bild vollständig, Ränder
        als unscharf erweiterter, abgedunkelter Hintergrund).
     2. Bei Karten-Scans Entrasterung (Einstellung `descreen`).
-    3. Real-ESRGAN ×4 (vorhandener Upscaler, Modell aus den Einstellungen).
+    3. Real-ESRGAN ×4 (vorhandener Upscaler); bei Faktor > 4,5 ein zweiter Durchgang, der von einem Viertel
+       der Zielgröße startet und so genau auf der Druckgröße landet.
     4. Lanczos auf die exakte Zielgröße plus leichtes Nachschärfen.
     - Ohne Upscaler oder ohne GPU: Lanczos mit Warnung.
 - [x] Claude-Job „Setting → Bild“: strukturierte Antwort (Titel, englischer Bild-Prompt), optional mit
@@ -31,15 +33,15 @@ mit **etwa 4K** (lange Seite 4096 px, wahlweise 3840 / 5120) erzeugen – zugesc
 - [x] GUI-Seite „Deskmat-Studio“ (`#/deskmat[/<id>]`, Seitenleiste, Strg+K, ⋯-Menü im Deck „Deskmat aus diesem
       Deck“):
   1. Motiv – Kartenartwork · Setting beschreiben · Eigenes Bild;
-  2. Format & Zuschnitt – Vorschau zum Ziehen, Zoom, Füllen/Einpassen, Angabe von Pixeln und effektiven DPI;
+  2. Format & Zuschnitt – Vorschau zum Ziehen, Zoom, Füllen/Einpassen, DPI, Beschnitt (Schnittlinie), PNG/JPEG;
   3. „Deskmat erstellen“ – Fortschritt, Ergebnis, Download;
   4. „Meine Deskmats“.
 - [x] Tests offline (Mocks für Scryfall-Bilder, MPC, Generator, Fake-Upscaler), Browser-Prüfung, Doku.
 
 ## Hinweise
 
-- Scryfall-`art_crop` ist klein (oft ~600 px breit). Für 4K ist das ein Faktor ~6,5: KI ×4 plus Lanczos. Scharf
-  wird es mit einem MPC-Scan oder einem generierten Bild in hoher Auflösung.
-- 4096 px auf 61 cm sind ≈ 170 DPI – für Stoffmatten üblich ausreichend. Die GUI zeigt die effektiven DPI an.
+- Scryfall-`art_crop` ist klein (oft ~600 px breit). Für 300 DPI auf 61 cm ist das ein Faktor ~12: zwei KI-Durchgänge.
+  Scharf wird es mit einem MPC-Scan, einem generierten oder eigenen großen Bild.
+- Dateien: Playmat 300 DPI = 30 MP, 600 DPI = 121 MP; JPEG 95 % ist dann die handlichere Wahl.
 - Die externen Dienste (Scryfall, pollinations.ai, MPC Autofill) waren aus der Entwicklungsumgebung nicht erreichbar;
   getestet ist mit nachgebauten Antworten.

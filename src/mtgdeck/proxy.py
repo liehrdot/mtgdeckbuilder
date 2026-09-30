@@ -410,7 +410,7 @@ def upscale_command(exe: Path, src: Path, dst: Path, model: str) -> list[str]:
     return cmd + ["-i", str(src), "-o", str(dst), "-n", model, "-s", "4", "-m", str(exe.parent / "models"), "-f", "png"]
 
 
-async def _upscale(raw: Path, cfg: dict[str, Any]) -> Path:
+async def _upscale(raw: Path, cfg: dict[str, Any], timeout: int = 600) -> Path:
     exe = find_upscaler(cfg)
     if exe is None:
         raise FileNotFoundError("Real-ESRGAN nicht gefunden")
@@ -420,7 +420,7 @@ async def _upscale(raw: Path, cfg: dict[str, Any]) -> Path:
     def run() -> subprocess.CompletedProcess[str]:
         with _upscale_lock:
             return subprocess.run(
-                upscale_command(exe, raw, out, cfg["upscale_model"]), capture_output=True, text=True, timeout=600
+                upscale_command(exe, raw, out, cfg["upscale_model"]), capture_output=True, text=True, timeout=timeout
             )
 
     proc = await asyncio.to_thread(run)

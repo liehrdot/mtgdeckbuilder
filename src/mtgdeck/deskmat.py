@@ -1,16 +1,17 @@
-"""Deskmat / playmat studio: turn a card artwork, a generated image or an upload into a print file of
-about 4K (long side 4096 px by default) in the mat's aspect ratio.
+"""Deskmat / playmat studio: turn a card artwork, a generated image or an upload into a print file at
+300 DPI (minimum for printing) or 600 DPI for the mat's real size, optionally with bleed.
 
 A project lives in ``deskmats/<id>/`` (``MTG_DESKMAT_DIR``)::
 
     meta.json            title, source info, last render settings and result
     source.<ext>         the chosen motif (original resolution)
     candidates/<n>.<ext> generated variants to choose from
-    deskmat-<W>x<H>.png  the result, preview.jpg a small copy for the GUI
+    deskmat-<W>x<H>-<dpi>dpi.(png|jpg)  the result, preview.jpg a small copy for the GUI
 
 Rendering: crop (fill: a window in the target aspect, centre + zoom) or fit (whole image on a blurred,
-darkened extension of itself) → descreen for printed card scans → Real-ESRGAN ×4 (the upscaler of the
-proxy printing, opt-out) → Lanczos to the exact size + light sharpening.
+darkened extension of itself) → descreen for printed card scans → Real-ESRGAN ×4, twice for large factors
+(the second pass starts from exactly a quarter of the target, so it lands on the print size) → Lanczos to
+the exact size + light sharpening.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from . import settings as settings_mod
 from .http import HttpError, _throttle, client, download
 
 DESKMAT_DIR = Path(os.environ.get("MTG_DESKMAT_DIR", storage.PROJECT_ROOT / "deskmats"))
-Image.MAX_IMAGE_PIXELS = 200_000_000  # upscaled intermediates are big but trusted (our own files)
+Image.MAX_IMAGE_PIXELS = 320_000_000  # print files at 600 DPI are big (our own files and the user's uploads)
 
 # key -> (label, width mm, height mm)
 FORMATS: dict[str, tuple[str, int, int]] = {
@@ -42,10 +43,10 @@ FORMATS: dict[str, tuple[str, int, int]] = {
     "deskmat-80x30": ("Deskmat 80 × 30 cm", 800, 300),
     "deskmat-90x40": ("Deskmat 90 × 40 cm", 900, 400),
     "deskmat-120x60": ("Deskmat 120 × 60 cm", 1200, 600),
-    "screen-16x9": ("16:9 (Bildschirm / Hintergrund)", 1600, 900),
 }
-SIZES = [3840, 4096, 5120]  # long side in px; 4096 = "4K"
-DEFAULT_LONG = 4096
+DPIS = [300, 600]  # 300 = minimum for printing, 600 = best
+BLEEDS = [0, 3, 5]  # mm added on every side (Beschnittzugabe) when the print shop asks for it
+MAX_MEGAPIXELS = 250  # larger files do not fit into memory comfortably (120 x 60 cm at 600 DPI = 402 MP)
 STYLES: dict[str, tuple[str, str]] = {
     "painting": ("Fantasy-Gemälde (wie Magic-Artwork)", "epic fantasy oil painting in the style of Magic: The Gathering card art"),
     "cinematic": ("Filmisch / Matte Painting", "cinematic matte painting, volumetric light, highly detailed"),
@@ -65,22 +66,30 @@ Progress = Callable[[str], None]
 # --- formats ---------------------------------------------------------------------------------------
 
 
-def target_size(fmt: str, long_px: int = DEFAULT_LONG) -> tuple[int, int]:
+def target_size(fmt: str, dpi: int = 300, bleed_mm: float = 0) -> tuple[int, int]:
+    """Pixels of the print file: the mat's size (plus bleed on every side) at ``dpi``."""
     _, w, h = FORMATS[fmt]
-    return (long_px, round(long_px * h / w)) if w >= h else (round(long_px * w / h), long_px)
+    return round((w + 2 * bleed_mm) / 25.4 * dpi), round((h + 2 * bleed_mm) / 25.4 * dpi)
 
 
-def dpi(fmt: str, size: tuple[int, int]) -> int:
-    return round(size[0] / (FORMATS[fmt][1] / 25.4))
+def check_size(fmt: str, dpi: int, bleed_mm: float) -> tuple[int, int]:
+    if fmt not in FORMATS:
+        raise ValueError(f"Unbekanntes Format: {fmt}")
+    if dpi not in DPIS or bleed_mm not in BLEEDS:
+        raise ValueError(f"DPI: {DPIS}, Beschnitt: {BLEEDS} mm")
+    size = target_size(fmt, dpi, bleed_mm)
+    if size[0] * size[1] > MAX_MEGAPIXELS * 1_000_000:
+        raise ValueError(f"{FORMATS[fmt][0]} mit {dpi} DPI wären {size[0] * size[1] / 1e6:.0f} Megapixel – zu groß. "
+                         "Nimm 300 DPI oder ein kleineres Format.")  # fmt: skip
+    return size
 
 
 def formats() -> dict[str, Any]:
     cfg = settings_mod.load()
     exe = proxy.find_upscaler(cfg)
     return {
-        "formats": [{"key": k, "label": v[0], "mm": [v[1], v[2]], "aspect": v[1] / v[2],
-                     "sizes": {str(s): list(target_size(k, s)) for s in SIZES}} for k, v in FORMATS.items()],
-        "sizes": SIZES, "default_size": DEFAULT_LONG,
+        "formats": [{"key": k, "label": v[0], "mm": [v[1], v[2]]} for k, v in FORMATS.items()],
+        "dpis": DPIS, "bleeds": BLEEDS, "max_megapixels": MAX_MEGAPIXELS,
         "styles": [{"key": k, "label": v[0]} for k, v in STYLES.items()],
         "upscaler": bool(exe), "upscale_model": cfg["upscale_model"],
         "generator": (cfg.get("image_generator_url") or DEFAULT_GENERATOR).split("/")[2],
@@ -270,9 +279,10 @@ def generator_url(prompt: str, width: int, height: int, seed: int) -> str:
 
 
 def gen_size(fmt: str) -> tuple[int, int]:
-    """Size to request from the generator: long side GEN_LONG, multiples of 64."""
-    w, h = target_size(fmt, GEN_LONG)
-    return max(64, round(w / 64) * 64), max(64, round(h / 64) * 64)
+    """Size to request from the generator: long side GEN_LONG in the mat's aspect, multiples of 64."""
+    _, w, h = FORMATS[fmt]
+    w_px, h_px = (GEN_LONG, GEN_LONG * h / w) if w >= h else (GEN_LONG * w / h, GEN_LONG)
+    return max(64, round(w_px / 64) * 64), max(64, round(h_px / 64) * 64)
 
 
 async def _fetch_generated(url: str, dest: Path, retries: int = 3) -> Path:
@@ -359,44 +369,65 @@ def default_crop(meta: dict[str, Any], aspect: float) -> dict[str, float]:
     return {"cx": (box[0] + box[2]) / 2, "cy": (box[1] + box[3]) / 2, "zoom": round((full[2] - full[0]) / win_w, 3)}
 
 
-async def _ai_upscale(img: Image.Image, work: Path, cfg: dict[str, Any], scan: bool, warnings: list[str]) -> tuple[Image.Image, bool]:
-    """Real-ESRGAN ×4 (after descreening scans); on any problem the image stays as it is plus a warning."""
-    if scan and cfg.get("descreen", "normal") != "off":
-        img = imaging.descreen(img, cfg.get("descreen", "normal"))
+async def _esrgan(img: Image.Image, work: Path, cfg: dict[str, Any]) -> Image.Image:
+    """One Real-ESRGAN ×4 pass (raises FileNotFoundError / UpscaleError)."""
     raw = work / f"upscale-in-{uuid.uuid4().hex[:6]}.png"
-    img.convert("RGB").save(raw)
+    img.convert("RGB").save(raw, compress_level=1)
     try:
-        out = await proxy._upscale(raw, cfg)
+        out = await proxy._upscale(raw, cfg, timeout=1800)
         with Image.open(out) as big:
             big.load()
-            return big.convert("RGB"), True
-    except FileNotFoundError:
-        warnings.append("Real-ESRGAN ist nicht eingerichtet – ohne KI hochskaliert (weicher). Einrichtung: Einstellungen → Proxy-Druck.")
-    except proxy.UpscaleError as exc:
-        warnings.append(f"{exc} – ohne KI hochskaliert.")
+            return big.convert("RGB")
     finally:
         raw.unlink(missing_ok=True)
         for f in work.glob("upscale-in-*-x4-*.png"):
             f.unlink(missing_ok=True)
-    return img, False
 
 
 def _resize(img: Image.Image, size: tuple[int, int], sharpen: bool) -> Image.Image:
-    out = img.convert("RGB").resize(size, Image.Resampling.LANCZOS)
+    out = img.convert("RGB") if img.size == size else img.convert("RGB").resize(size, Image.Resampling.LANCZOS)
     if sharpen:
         out = out.filter(ImageFilter.UnsharpMask(radius=2, percent=45, threshold=2))
     return out
 
 
-async def render(pid: str, *, fmt: str = "playmat", long_px: int = DEFAULT_LONG, fit: str = "fill",
-                 crop: dict[str, float] | None = None, upscale: bool = True, progress: Progress | None = None) -> dict[str, Any]:  # fmt: skip
-    """Render the project's source to ``deskmat-<W>x<H>.png`` (+ preview.jpg) and return the project."""
-    if fmt not in FORMATS:
-        raise ValueError(f"Unbekanntes Format: {fmt}")
-    if long_px not in SIZES:
-        raise ValueError(f"Auflösung muss eine von {SIZES} sein")
+async def upscale_to(img: Image.Image, size: tuple[int, int], work: Path, cfg: dict[str, Any], *, ai: bool, scan: bool,
+                     warnings: list[str], say: Progress) -> tuple[Image.Image, int]:  # fmt: skip
+    """Bring ``img`` to exactly ``size``. With ``ai``: descreen scans, Real-ESRGAN ×4 – and for factors above
+    ~4.5 a second pass that starts from a quarter of the target (so it ends on the print size instead of
+    overshooting) – then Lanczos + light sharpening. Returns the image and the number of AI passes."""
+    factor = size[0] / img.width
+    if not ai or factor <= 1.15:
+        return _resize(img, size, sharpen=factor > 1.15), 0
+    passes = 1 if factor <= 4.5 else 2
+    if scan and cfg.get("descreen", "normal") != "off":
+        img = imaging.descreen(img, cfg.get("descreen", "normal"))
+    done = 0
+    try:
+        say(f"KI-Hochskalierung, Durchgang 1 von {passes} (Real-ESRGAN ×4) …")
+        img = await _esrgan(img, work, cfg)
+        done = 1
+        if passes == 2:
+            quarter = (max(1, round(size[0] / 4)), max(1, round(size[1] / 4)))
+            say(f"KI-Hochskalierung, Durchgang 2 von 2 (auf {size[0]} × {size[1]} px) …")
+            img = await _esrgan(img.resize(quarter, Image.Resampling.LANCZOS), work, cfg)
+            done = 2
+    except FileNotFoundError:
+        warnings.append("Real-ESRGAN ist nicht eingerichtet – ohne KI vergrößert (weicher). Einrichtung: Einstellungen → Proxy-Druck.")
+    except proxy.UpscaleError as exc:
+        warnings.append(f"{exc} – {'nur ein KI-Durchgang' if done else 'ohne KI vergrößert'}.")
+    say(f"Skaliere auf {size[0]} × {size[1]} px …")
+    return _resize(img, size, sharpen=img.width < size[0] * 0.95), done
+
+
+async def render(pid: str, *, fmt: str = "playmat", dpi: int = 300, bleed_mm: float = 0, fit: str = "fill",
+                 crop: dict[str, float] | None = None, upscale: bool = True, filetype: str = "png",
+                 progress: Progress | None = None) -> dict[str, Any]:  # fmt: skip
+    """Render the project's source to the print file (+ preview.jpg) and return the project."""
+    size = check_size(fmt, dpi, bleed_mm)
+    if filetype not in ("png", "jpg"):
+        raise ValueError("Dateiformat: png oder jpg")
     meta = load(pid)
-    size = target_size(fmt, long_px)
     aspect = size[0] / size[1]
     crop = crop or default_crop(meta, aspect)
     cfg = settings_mod.load()
@@ -412,44 +443,43 @@ async def render(pid: str, *, fmt: str = "playmat", long_px: int = DEFAULT_LONG,
         # whole image, centred; the rest is the same image enlarged, blurred and darkened
         scale = min(size[0] / src.width, size[1] / src.height)
         fg_size = (round(src.width * scale), round(src.height * scale))
-        fg, used_ai = src, False
-        if upscale and scale > 1.15:
-            say("KI-Hochskalierung (Real-ESRGAN ×4) …")
-            fg, used_ai = await _ai_upscale(src, work, cfg, scan, warnings)
+        fg, passes = await upscale_to(src, fg_size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say)
         say("Setze das Bild zusammen …")
         bg_scale = max(size[0] / src.width, size[1] / src.height)
-        bg = src.resize((max(1, round(src.width * bg_scale / 8)), max(1, round(src.height * bg_scale / 8))), Image.Resampling.BILINEAR)
-        bg = bg.filter(ImageFilter.GaussianBlur(6)).resize((round(src.width * bg_scale), round(src.height * bg_scale)), Image.Resampling.BICUBIC)
-        bg = ImageEnhance.Brightness(bg).enhance(0.55)
-        canvas = bg.crop(((bg.width - size[0]) // 2, (bg.height - size[1]) // 2, (bg.width - size[0]) // 2 + size[0], (bg.height - size[1]) // 2 + size[1]))
-        canvas.paste(_resize(fg, fg_size, sharpen=scale > 1.15), ((size[0] - fg_size[0]) // 2, (size[1] - fg_size[1]) // 2))
+        small = src.resize((max(1, round(src.width * bg_scale / 16)), max(1, round(src.height * bg_scale / 16))), Image.Resampling.BILINEAR)
+        bg = ImageEnhance.Brightness(small.filter(ImageFilter.GaussianBlur(4))).enhance(0.55)
+        bg = bg.resize((round(src.width * bg_scale), round(src.height * bg_scale)), Image.Resampling.BICUBIC)
+        left, top = (bg.width - size[0]) // 2, (bg.height - size[1]) // 2
+        out = bg.crop((left, top, left + size[0], top + size[1]))
+        del bg
+        out.paste(fg, ((size[0] - fg_size[0]) // 2, (size[1] - fg_size[1]) // 2))
+        del fg
         region_size = (src.width, src.height)
-        out = canvas
     else:
         box = crop_box((src.width, src.height), aspect, crop.get("cx", 0.5), crop.get("cy", 0.5), crop.get("zoom", 1.0))
         region = src.crop(box)
         region_size = region.size
         scale = size[0] / region.width
-        used_ai = False
-        if upscale and scale > 1.15:
-            say("KI-Hochskalierung (Real-ESRGAN ×4) …")
-            region, used_ai = await _ai_upscale(region, work, cfg, scan, warnings)
-        say(f"Skaliere auf {size[0]} × {size[1]} px …")
-        out = _resize(region, size, sharpen=scale > 1.15)
-    if scale > (6 if used_ai else 2.5):
-        warnings.append(f"Das Motiv ist klein für dieses Format (Faktor {scale:.1f}) – es wird weich wirken. "
+        out, passes = await upscale_to(region, size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say)
+    limit = {0: 2.5, 1: 6, 2: 24}[passes]
+    if scale > limit:
+        warnings.append(f"Das Motiv ist klein für {dpi} DPI (Faktor {scale:.1f}) – die Datei hat {dpi} DPI, wirkt aber weich. "
                         "Schärfer: MPC-Scan, generiertes Bild oder eigenes Bild in hoher Auflösung.")  # fmt: skip
 
-    for old in work.glob("deskmat-*.png"):
+    for old in [*work.glob("deskmat-*.png"), *work.glob("deskmat-*.jpg")]:
         old.unlink()
-    name = f"deskmat-{size[0]}x{size[1]}.png"
-    say("Speichere PNG …")
-    out.save(work / name, dpi=(dpi(fmt, size), dpi(fmt, size)))
-    preview = out.copy()
-    preview.thumbnail((1200, 1200))
-    preview.save(work / "preview.jpg", quality=86)
-    meta["render"] = {"format": fmt, "long_px": long_px, "fit": fit, "crop": crop, "upscale": upscale}
-    meta["result"] = {"file": name, "preview": "preview.jpg", "size": list(size), "dpi": dpi(fmt, size),
-                      "format_label": FORMATS[fmt][0], "source_px": list(region_size), "factor": round(scale, 2),
-                      "ai_upscaled": used_ai, "warnings": warnings, "bytes": (work / name).stat().st_size, "created": _now()}  # fmt: skip
+    name = f"deskmat-{size[0]}x{size[1]}-{dpi}dpi.{filetype}"
+    say(f"Speichere {filetype.upper()} ({size[0] * size[1] / 1e6:.0f} Megapixel) …")
+    if filetype == "jpg":
+        out.save(work / name, quality=95, subsampling=0, dpi=(dpi, dpi))
+    else:
+        out.save(work / name, compress_level=6 if size[0] * size[1] < 60e6 else 3, dpi=(dpi, dpi))
+    prev_w = 1200
+    out.resize((prev_w, max(1, round(prev_w * size[1] / size[0]))), Image.Resampling.LANCZOS, reducing_gap=3.0).save(work / "preview.jpg", quality=86)
+    _, w_mm, h_mm = FORMATS[fmt]
+    meta["render"] = {"format": fmt, "dpi": dpi, "bleed_mm": bleed_mm, "fit": fit, "crop": crop, "upscale": upscale, "filetype": filetype}
+    meta["result"] = {"file": name, "preview": "preview.jpg", "size": list(size), "dpi": dpi, "bleed_mm": bleed_mm,
+                      "print_mm": [w_mm + 2 * bleed_mm, h_mm + 2 * bleed_mm], "format_label": FORMATS[fmt][0],
+                      "source_px": list(region_size), "factor": round(scale, 2), "ai_passes": passes, "ai_upscaled": passes > 0,
+                      "warnings": warnings, "bytes": (work / name).stat().st_size, "created": _now()}  # fmt: skip
     return _save(meta)

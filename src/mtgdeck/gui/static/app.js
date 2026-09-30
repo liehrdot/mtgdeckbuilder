@@ -2856,7 +2856,7 @@ $("#db-btn").addEventListener("click", async () => {
 });
 
 // ============================================================================================
-// deskmat studio: motif (card art, generated, upload) -> crop to the mat format -> ~4K file
+// deskmat studio: motif (card art, generated, upload) -> crop to the mat format -> print file at 300 or 600 DPI
 // ============================================================================================
 const dm = { opts: null, project: null, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, printing: null, prefill: null };
 
@@ -2865,7 +2865,6 @@ async function deskmatOptions() {
   const o = await api("/api/deskmat/options");
   dm.opts = o;
   $("#dm-format").innerHTML = o.formats.map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("");
-  $("#dm-size").innerHTML = o.sizes.map((px) => `<option value="${px}"${px === o.default_size ? " selected" : ""}>${px} px${px === 4096 ? " (4K)" : px === 3840 ? " (UHD)" : px === 5120 ? " (5K)" : ""}</option>`).join("");
   $("#dm-style").innerHTML = o.styles.map((st) => `<option value="${esc(st.key)}">${esc(st.label)}</option>`).join("");
   $("#dm-gen-host").textContent = o.generator;
   $("#dm-mpc-btn").hidden = !o.mpc;
@@ -2902,7 +2901,12 @@ async function showDeskmat(id) {
 }
 
 function dmFormat() { return dm.opts.formats.find((f) => f.key === $("#dm-format").value) || dm.opts.formats[0]; }
-function dmTarget() { return dmFormat().sizes[$("#dm-size").value]; }
+const dmDpi = () => Number($("#view-deskmat [name=dmdpi]:checked").value);
+const dmBleed = () => Number($("#dm-bleed").value);
+// same maths as deskmat.target_size: the mat plus bleed on every side at the chosen DPI
+function dmPrintMm() { const [w, h] = dmFormat().mm, b = dmBleed(); return [w + 2 * b, h + 2 * b]; }
+function dmTarget() { return dmPrintMm().map((mm) => Math.round(mm / 25.4 * dmDpi())); }
+const dmAspect = () => { const [w, h] = dmPrintMm(); return w / h; };
 const dmFit = () => $("#view-deskmat [name=dmfit]:checked").value;
 
 // same maths as deskmat.crop_box on the server
@@ -2939,11 +2943,13 @@ function renderDeskmat() {
   const r = p.render;
   if (r && !dm.crop) {
     $("#dm-format").value = r.format;
-    $("#dm-size").value = String(r.long_px);
+    if (r.dpi) $(`#view-deskmat [name=dmdpi][value="${r.dpi}"]`).checked = true;
+    $("#dm-bleed").value = String(r.bleed_mm ?? 0);
+    $("#dm-filetype").value = r.filetype || "png";
     $(`#view-deskmat [name=dmfit][value="${r.fit}"]`).checked = true;
     $("#dm-upscale").checked = r.upscale && dm.opts.upscaler;
   } else if (!r && p.format) $("#dm-format").value = p.format;
-  if (!dm.crop) dm.crop = r?.crop && r.format === $("#dm-format").value ? { ...r.crop } : dmDefaultCrop(p, dmFormat().aspect);
+  if (!dm.crop) dm.crop = r?.crop && r.format === $("#dm-format").value ? { ...r.crop } : dmDefaultCrop(p, dmAspect());
   const src = `/api/deskmat/${enc(p.id)}/image?kind=source&v=${enc(`${p.source.file}-${p.source.chosen ?? ""}-${p.source.size}`)}`;
   if ($("#dm-img").dataset.src !== src) { $("#dm-img").src = src; $("#dm-bg").src = src; $("#dm-img").dataset.src = src; }
   layoutDeskmat();
@@ -2951,8 +2957,11 @@ function renderDeskmat() {
     const res = p.result;
     $("#dm-result").src = `/api/deskmat/${enc(p.id)}/image?kind=preview&v=${enc(res.created)}`;
     $("#dm-download").href = `/api/deskmat/${enc(p.id)}/image?kind=result&download=true`;
-    $("#dm-result-info").textContent = `${res.size[0]} × ${res.size[1]} px · ≈ ${res.dpi} DPI · ${res.format_label} · `
-      + `${(res.bytes / 1048576).toFixed(1)} MB PNG · ${res.ai_upscaled ? "mit Real-ESRGAN hochskaliert" : res.factor > 1.15 ? "ohne KI vergrößert" : "ohne Vergrößerung"}`;
+    const ext = res.file.split(".").pop().toUpperCase();
+    $("#dm-result-info").textContent = `${res.size[0]} × ${res.size[1]} px · ${res.dpi} DPI · ${res.format_label}`
+      + (res.bleed_mm ? ` + ${res.bleed_mm} mm Beschnitt (${res.print_mm[0] / 10} × ${res.print_mm[1] / 10} cm)` : "")
+      + ` · ${(res.bytes / 1048576).toFixed(1)} MB ${ext} · `
+      + (res.ai_passes ? `${res.ai_passes}× mit Real-ESRGAN hochskaliert` : res.factor > 1.15 ? "ohne KI vergrößert" : "ohne Vergrößerung");
     $("#dm-result-warn").innerHTML = res.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
   }
 }
@@ -2961,9 +2970,11 @@ function layoutDeskmat() {
   const p = dm.project;
   if (!p?.source?.file || $("#dm-edit-panel").hidden) return;
   const f = dmFormat();
+  const [pw, ph] = dmPrintMm();
+  const aspect = pw / ph;
   const frame = $("#dm-frame");
-  frame.style.aspectRatio = `${f.mm[0]} / ${f.mm[1]}`;
-  const F = frame.clientWidth, H = F / f.aspect;
+  frame.style.aspectRatio = `${pw} / ${ph}`;
+  const F = frame.clientWidth, H = F / aspect;
   const [w, h] = p.source.size;
   const fit = dmFit() === "fit";
   frame.classList.toggle("fit", fit);
@@ -2975,28 +2986,40 @@ function layoutDeskmat() {
     left = (F - w * s) / 2; top = (H - h * s) / 2;
     region = [w, h];
   } else {
-    const b = dmCropBox(w, h, f.aspect, dm.crop);
+    const b = dmCropBox(w, h, aspect, dm.crop);
     dm.crop.cx = (b.x0 + b.ww / 2) / w; dm.crop.cy = (b.y0 + b.wh / 2) / h;  // keep the centre inside
     s = F / b.ww; left = -b.x0 * s; top = -b.y0 * s;
     region = [Math.round(b.ww), Math.round(b.wh)];
   }
   Object.assign(img.style, { width: `${w * s}px`, height: `${h * s}px`, left: `${left}px`, top: `${top}px` });
+  const bleed = dmBleed();
+  const trim = $("#dm-trim");
+  trim.hidden = !bleed;
+  if (bleed) Object.assign(trim.style, { left: `${bleed / pw * 100}%`, right: `${bleed / pw * 100}%`, top: `${bleed / ph * 100}%`, bottom: `${bleed / ph * 100}%` });
   $("#dm-zoom").value = dm.crop.zoom;
   const [tw, th] = dmTarget();
+  const mp = tw * th / 1e6;
+  const tooBig = mp > dm.opts.max_megapixels;
   const factor = fit ? Math.min(tw / w, th / h) : tw / region[0];
-  const dpiVal = Math.round(tw / (f.mm[0] / 25.4));
-  const ai = $("#dm-upscale").checked && dm.opts.upscaler && factor > 1.15;
-  $("#dm-info").innerHTML = `Ausgabe <b>${tw} × ${th} px</b> · ≈ ${dpiVal} DPI auf ${f.mm[0] / 10} × ${f.mm[1] / 10} cm · Ausschnitt `
-    + `${region[0]} × ${region[1]} px → Faktor ${factor.toFixed(1)}${factor > 1.15 ? (ai ? " (KI ×4, Rest per Lanczos)" : " (ohne KI)") : ""}`
-    + (factor > (ai ? 6 : 2.5) ? ' · <span class="warn">wird weich – größeres Motiv oder weniger Zoom</span>' : "");
+  const aiOn = $("#dm-upscale").checked && dm.opts.upscaler;
+  const passes = !aiOn || factor <= 1.15 ? 0 : factor <= 4.5 ? 1 : 2;
+  const soft = factor > [2.5, 6, 24][passes];
+  const how = factor <= 1.15 ? "" : passes ? ` (KI ×4${passes === 2 ? " zweimal" : ""}, Rest per Lanczos)` : " (ohne KI)";
+  $("#dm-info").innerHTML = `Druckdatei <b>${tw} × ${th} px</b> (${mp.toFixed(0)} MP) · <b>${dmDpi()} DPI</b> auf ${pw / 10} × ${ph / 10} cm`
+    + (bleed ? ` inkl. ${bleed} mm Beschnitt` : "") + ` · Ausschnitt ${region[0]} × ${region[1]} px → Faktor ${factor.toFixed(1)}${how}`
+    + (tooBig ? ` · <span class="bad">zu groß (max. ${dm.opts.max_megapixels} MP) – 300 DPI oder kleineres Format</span>`
+      : soft ? ' · <span class="warn">wird weich – größeres Motiv oder weniger Zoom</span>' : "")
+    + (mp > 60 && $("#dm-filetype").value === "png" ? ' · <span class="muted">Tipp: JPEG spart hier viel Platz</span>' : "");
+  $("#dm-render-btn").disabled = tooBig || !!currentJob;
 }
 window.addEventListener("resize", debounce(layoutDeskmat, 100));
-$("#dm-format").addEventListener("change", () => { if (dm.project) dm.crop = dmDefaultCrop(dm.project, dmFormat().aspect); layoutDeskmat(); });
-$("#dm-size").addEventListener("change", layoutDeskmat);
+$("#dm-format").addEventListener("change", () => { if (dm.project) dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
+$("#dm-bleed").addEventListener("change", () => { if (dm.project && !dm.project.render) dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
+$("#dm-filetype").addEventListener("change", layoutDeskmat);
 $("#dm-upscale").addEventListener("change", layoutDeskmat);
-$("#view-deskmat").addEventListener("change", (e) => { if (e.target.name === "dmfit") layoutDeskmat(); });
+$("#view-deskmat").addEventListener("change", (e) => { if (e.target.name === "dmfit" || e.target.name === "dmdpi") layoutDeskmat(); });
 $("#dm-zoom").addEventListener("input", (e) => { dm.crop.zoom = Number(e.target.value); layoutDeskmat(); });
-$("#dm-reset").addEventListener("click", () => { dm.crop = dmDefaultCrop(dm.project, dmFormat().aspect); layoutDeskmat(); });
+$("#dm-reset").addEventListener("click", () => { dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
 
 // drag (mouse, touch, pen) and keyboard to move the crop window
 let dmDrag = null;
@@ -3126,7 +3149,8 @@ $("#dm-file").addEventListener("change", async (e) => {
 // 3 render
 $("#dm-render-btn").addEventListener("click", async () => {
   if (!dm.project || currentJob) return;
-  const body = { format: $("#dm-format").value, long_px: Number($("#dm-size").value), fit: dmFit(), crop: dm.crop, upscale: $("#dm-upscale").checked };
+  const body = { format: $("#dm-format").value, dpi: dmDpi(), bleed_mm: dmBleed(), fit: dmFit(), crop: dm.crop,
+    upscale: $("#dm-upscale").checked, filetype: $("#dm-filetype").value };
   try {
     const { job } = await api(`/api/deskmat/${enc(dm.project.id)}/render`, { method: "POST", body });
     startJob(job, `Deskmat „${dm.project.title}“ wird erstellt`, { kind: "deskmat", slot: "#dm-render-slot", route: `#/deskmat/${enc(dm.project.id)}` });

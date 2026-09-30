@@ -268,7 +268,9 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
 ## Deskmat-Studio
 
-Eine Druckdatei für Deskmat oder Playmat mit **etwa 4K** (lange Seite 4096 px; wahlweise 3840 oder 5120):
+Eine **Druckdatei** für Deskmat oder Playmat in echter Druckauflösung: **300 DPI** (Minimum) oder **600 DPI**
+(beste Qualität), bezogen auf die Mattengröße – z. B. Playmat 61 × 35,5 cm = 7205 × 4193 px bei 300 DPI bzw.
+14409 × 8386 px bei 600 DPI. Die DPI stehen in der Datei.
 
 1. **Motiv** – drei Wege:
    - **Kartenartwork:** das reine Artwork (Scryfall „art crop“, ohne Rahmen und Text) in jedem Druck, auch Rückseiten;
@@ -278,18 +280,23 @@ Eine Druckdatei für Deskmat oder Playmat mit **etwa 4K** (lange Seite 4096 px; 
      Der Prompt wird dorthin geschickt. In den Einstellungen lässt sich ein anderer Generator eintragen (URL mit
      `{prompt}`, `{width}`, `{height}`, `{seed}`), etwa ein eigener lokaler.
    - **Eigenes Bild** hochladen.
-2. **Format & Zuschnitt:** Playmat 61 × 35,5 cm, Deskmat 80 × 30 / 90 × 40 / 120 × 60 cm oder 16:9. Den
-   Ausschnitt ziehst du mit Maus oder Finger zurecht, Zoom per Regler, Mausrad oder +/−. „Einpassen“ zeigt das
-   ganze Bild und füllt die Ränder mit einer unscharfen, abgedunkelten Erweiterung. Angezeigt werden Pixel,
-   effektive DPI und der Vergrößerungsfaktor.
-3. **Deskmat erstellen:** Karten-Scans werden entrastert, dann skaliert **Real-ESRGAN ×4** (dasselbe Programm wie
-   im Druckstudio, siehe Einstellungen) hoch, den Rest erledigt Lanczos mit leichtem Nachschärfen – exakt auf die
-   Zielgröße. Ohne Real-ESRGAN wird ohne KI vergrößert (mit Hinweis). Ergebnis als PNG mit DPI-Angabe zum Download,
-   alles liegt in `deskmats/<id>/`.
+2. **Format & Zuschnitt:** Playmat 61 × 35,5 cm, Deskmat 80 × 30 / 90 × 40 / 120 × 60 cm; 300 oder 600 DPI;
+   optional **Beschnitt (Bleed)** 3 oder 5 mm je Seite – die Schnittkante ist in der Vorschau gestrichelt;
+   PNG (verlustfrei) oder JPEG 95 % (viel kleiner bei 600 DPI). Den Ausschnitt ziehst du mit Maus oder Finger
+   zurecht, Zoom per Regler, Mausrad oder +/−. „Einpassen“ zeigt das ganze Bild und füllt die Ränder mit einer
+   unscharfen, abgedunkelten Erweiterung. Angezeigt werden Pixel, Megapixel und der Vergrößerungsfaktor.
+   Über 250 Megapixel (120 × 60 cm bei 600 DPI) ist gesperrt – das passt nicht sinnvoll in den Speicher.
+3. **Deskmat erstellen:** Karten-Scans werden entrastert, dann skaliert **Real-ESRGAN ×4** hoch (dasselbe
+   Programm wie im Druckstudio, siehe Einstellungen). Reicht ×4 nicht (Faktor über ~4,5), folgt ein **zweiter
+   KI-Durchgang**: das Zwischenbild wird exakt auf ein Viertel der Zielgröße gebracht und nochmals ×4
+   gerechnet – so landet es genau auf der Druckgröße. Den Rest erledigt Lanczos mit leichtem Nachschärfen.
+   Ohne Real-ESRGAN wird ohne KI vergrößert (mit Hinweis). Alles liegt in `deskmats/<id>/`.
 
 Erreichbar über die Seitenleiste, Strg+K oder im Deck über ⋯ → „Deskmat aus diesem Deck“ (Commander vorausgefüllt).
-Hinweis: Scryfall-Artworks sind klein (oft ~600 px breit) – für 4K ist das ein Faktor um 6,5. Schärfer werden
-MPC-Scans, generierte oder eigene große Bilder. 4096 px auf 61 cm sind ≈ 170 DPI, für Stoffmatten üblich.
+Hinweis: Die Datei hat immer die gewählten DPI – wie viel echtes Detail drinsteckt, hängt vom Motiv ab.
+Scryfall-Artworks sind klein (oft ~600 px breit), für 300 DPI auf 61 cm ist das ein Faktor um 12. Deutlich
+schärfer werden MPC-Scans, generierte oder eigene große Bilder; bei zu kleinen Motiven warnt die Seite.
+Die zwei KI-Durchgänge bei 600 DPI brauchen eine Weile und eine Grafikkarte mit genug Speicher.
 
 ## Meine Sammlung
 
@@ -357,7 +364,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `collection_search` / `collection_status` / `update_collection` | Sammlung durchsuchen, Deck mit Sammlung abgleichen, Karten eintragen |
 | `import_deck` | Deck-Link importieren (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats, EDHREC) |
 | `search_precons` / `import_precon` | Starterdecks (Precons) von MTGJSON suchen / als Deck speichern |
-| `create_deskmat` | Deskmat/Playmat (~4K) aus einem Kartenartwork oder einem Bild-Prompt erstellen |
+| `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |

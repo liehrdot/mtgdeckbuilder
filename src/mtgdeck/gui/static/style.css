@@ -878,7 +878,8 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .dm-cands button { padding: 0; border: 2px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; overflow: hidden; }
 .dm-cands button:hover, .dm-cands button:focus-visible, .dm-cands button[aria-pressed="true"] { border-color: var(--accent); }
 .dm-cands img { display: block; width: 100%; }
-.dm-controls { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: var(--space-3); align-items: end; }
+.dm-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 var(--space-3); align-items: end; }
+.dm-trim { position: absolute; border: 1px dashed rgb(255 255 255 / .9); box-shadow: 0 0 0 1px rgb(0 0 0 / .45); pointer-events: none; }
 .dm-controls .field, .dm-controls .field-block { margin-bottom: var(--space-3); }
 .dm-frame { position: relative; width: 100%; overflow: hidden; border-radius: var(--radius); background: #111; cursor: grab; touch-action: none; user-select: none; box-shadow: inset 0 0 0 1px var(--border); }
 .dm-frame.dragging { cursor: grabbing; }

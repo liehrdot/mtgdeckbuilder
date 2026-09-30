@@ -23,48 +23,75 @@ def _png(size=(900, 600), color=(40, 90, 160)) -> bytes:
     return buf.getvalue()
 
 
+@pytest.fixture
+def small_format(monkeypatch):
+    """A tiny mat (60 x 35 mm -> 709 x 413 px at 300 DPI) keeps the rendering tests fast."""
+    monkeypatch.setitem(deskmat.FORMATS, "test", ("Test 6 × 3,5 cm", 60, 35))
+    return "test"
+
+
 def test_formats_and_crop_maths():
-    assert deskmat.target_size("playmat", 4096) == (4096, 2384)
-    assert deskmat.target_size("screen-16x9", 3840) == (3840, 2160)
-    assert deskmat.dpi("playmat", (4096, 2384)) == 171
+    assert deskmat.target_size("playmat", 300) == (7205, 4193)
+    assert deskmat.target_size("playmat", 600) == (14409, 8386)
+    assert deskmat.target_size("playmat", 300, 3) == (7276, 4264)  # 3 mm bleed on every side
+    assert deskmat.check_size("deskmat-90x40", 600, 0) == (21260, 9449)
+    with pytest.raises(ValueError, match="zu groß"):
+        deskmat.check_size("deskmat-120x60", 600, 0)
+    with pytest.raises(ValueError):
+        deskmat.check_size("playmat", 150, 0)
     # 4:3 source into 1.72:1 -> full width, centred vertically
     assert deskmat.crop_box((1200, 900), 610 / 355) == (0, 101, 1200, 799)
     # zoom 2 (600 x 300 window), pushed to the bottom-right corner stays inside
     assert deskmat.crop_box((1200, 900), 2.0, 1.0, 1.0, 2.0) == (600, 600, 1200, 900)
     opts = deskmat.formats()
     assert opts["upscaler"] is False and opts["generator"] == "image.pollinations.ai" and len(opts["styles"]) == 6
+    assert opts["dpis"] == [300, 600] and opts["bleeds"] == [0, 3, 5] and opts["formats"][0]["mm"] == [610, 355]
 
 
-async def test_card_source_and_render_without_upscaler():
+async def test_card_source_and_render_without_upscaler(small_format):
     p = await deskmat.from_card("Sol Ring")
     assert p["source"]["kind"] == "card" and p["source"]["scan"] and p["title"] == "Sol Ring"
     assert deskmat.file(p["id"], "source").exists()
-    done = await deskmat.render(p["id"], fmt="playmat", long_px=4096)
+    done = await deskmat.render(p["id"], fmt=small_format, dpi=600, bleed_mm=3)
     res = done["result"]
-    assert res["size"] == [4096, 2384] and not res["ai_upscaled"]
+    assert res["size"] == [1559, 969] and res["dpi"] == 600 and res["print_mm"] == [66, 41] and res["ai_passes"] == 0
     assert any("Real-ESRGAN ist nicht eingerichtet" in w for w in res["warnings"])
     with Image.open(deskmat.file(p["id"], "result")) as im:
-        assert im.size == (4096, 2384)
+        assert im.size == (1559, 969) and round(im.info["dpi"][0]) == 600
+    assert deskmat.file(p["id"], "result").name == "deskmat-1559x969-600dpi.png"
     with Image.open(deskmat.file(p["id"], "preview")) as im:
         assert max(im.size) == 1200
 
 
-async def test_render_with_real_esrgan_and_fit(tmp_path):
+async def test_render_with_real_esrgan_one_and_two_passes(tmp_path, small_format):
     _fake_esrgan(tmp_path)
-    p = deskmat.from_upload(_png((1000, 700)), "Mein Drache.png")
-    assert p["title"] == "Mein Drache" and p["source"]["size"] == [1000, 700]
-    done = await deskmat.render(p["id"], fmt="deskmat-90x40", long_px=3840, fit="fill", crop={"cx": 0.8, "cy": 0.2, "zoom": 1.5})
+    p = deskmat.from_upload(_png((400, 240)), "Mein Drache.png")
+    assert p["title"] == "Mein Drache" and p["source"]["size"] == [400, 240]
+    # factor 709 / 267 = 2.7 -> one pass (x4) then down to the exact size
+    done = await deskmat.render(p["id"], fmt=small_format, fit="fill", crop={"cx": 0.8, "cy": 0.2, "zoom": 1.5})
     res = done["result"]
-    assert res["ai_upscaled"] and res["size"] == [3840, 1707] and res["warnings"] == []
-    assert res["source_px"] == [667, 296]  # 1000 wide / 2.25 aspect / zoom 1.5
+    assert res["ai_passes"] == 1 and res["size"] == [709, 413] and res["warnings"] == []
+    assert res["source_px"] == [267, 155]  # 400 x 240 source, window 1.72:1, zoom 1.5
     with Image.open(deskmat.file(p["id"], "result")) as im:
-        assert im.getpixel((3800, 20))[0] > 150  # the yellow top-right corner is in the crop
-    fit = await deskmat.render(p["id"], fmt="playmat", fit="fit")
+        assert im.getpixel((700, 10))[0] > 150  # the yellow top-right corner is in the crop
+    # 600 DPI: factor 1417 / 267 = 5.3 -> two passes, the second one from a quarter of the target
+    two = await deskmat.render(p["id"], fmt=small_format, dpi=600, crop={"cx": 0.8, "cy": 0.2, "zoom": 1.5}, filetype="jpg")
+    assert two["result"]["ai_passes"] == 2 and two["result"]["size"] == [1417, 827]
     with Image.open(deskmat.file(p["id"], "result")) as im:
-        assert im.size == (4096, 2384)
-        edge, centre = im.getpixel((5, 1192)), im.getpixel((2048, 1800))
+        assert im.format == "JPEG" and im.size == (1417, 827) and round(im.info["dpi"][0]) == 600
+    assert not list(deskmat._dir(p["id"]).glob("upscale-in-*"))  # intermediates are cleaned up
+    fit = await deskmat.render(p["id"], fmt=small_format, fit="fit")
+    with Image.open(deskmat.file(p["id"], "result")) as im:
+        assert im.size == (709, 413)
+        edge, centre = im.getpixel((3, 206)), im.getpixel((354, 380))
         assert sum(edge) < sum(centre) + 60  # darkened blurred extension at the sides
-    assert fit["render"]["fit"] == "fit" and len(list(deskmat._dir(p["id"]).glob("deskmat-*.png"))) == 1
+    assert fit["render"]["fit"] == "fit" and len(list(deskmat._dir(p["id"]).glob("deskmat-*"))) == 1
+
+
+async def test_too_small_motif_warns(small_format):
+    p = deskmat.from_upload(_png((80, 64)), "klein.png")
+    res = (await deskmat.render(p["id"], fmt=small_format, dpi=600, upscale=False))["result"]
+    assert any("klein für 600 DPI" in w for w in res["warnings"])
 
 
 async def test_upload_rejects_non_images():
@@ -75,6 +102,7 @@ async def test_upload_rejects_non_images():
 async def test_generate_variants_and_choose():
     p = await deskmat.generate("Nebelburg", "misty castle, wide panorama", "playmat", variants=2)
     assert len(p["candidates"]) == 2 and p["candidates"][0]["size"] == [1536, 896]
+    assert deskmat.gen_size("deskmat-90x40") == (1536, 704)
     chosen = deskmat.choose(p["id"], 1)
     assert chosen["source"]["kind"] == "generated" and chosen["source"]["chosen"] == 1 and not chosen["source"]["scan"]
     with pytest.raises(ValueError):
@@ -95,7 +123,7 @@ async def test_mpc_scan_starts_on_the_art_box():
     assert crop["cy"] == pytest.approx(0.3325) and crop["zoom"] == pytest.approx(1.205, abs=0.01)
 
 
-def test_prompt_and_routes(monkeypatch):
+def test_prompt_and_routes(monkeypatch, small_format):
     req = DeskmatGenerateRequest(setting="Eine Burg im Nebel über einem Drachenfriedhof", style="dark")
     text = deskmat_prompt(req, {"name": "Meren", "commanders": ["Meren of Clan Nel Toth"], "description": "Friedhof"})
     assert "Drachenfriedhof" in text and "dark gothic" in text and "no text" in text and "Meren of Clan Nel Toth" in text
@@ -117,26 +145,28 @@ def test_prompt_and_routes(monkeypatch):
     pid = project["id"]
     assert client.get(f"/api/deskmat/{pid}/image", params={"kind": "candidate", "n": 1}).status_code == 200
     assert client.post(f"/api/deskmat/{pid}/choose", json={"n": 0}).json()["source"]["file"].startswith("source.")
-    job = client.post(f"/api/deskmat/{pid}/render", json={"format": "screen-16x9", "long_px": 3840}).json()["job"]
+    job = client.post(f"/api/deskmat/{pid}/render", json={"format": small_format, "dpi": 300, "bleed_mm": 5}).json()["job"]
     for _ in range(300):
         if any(e["type"] == "done" for e in app_mod.JOBS[job].events):
             break
         time.sleep(0.02)
     assert any(e["type"] == "deskmat" for e in app_mod.JOBS[job].events)
     r = client.get(f"/api/deskmat/{pid}/image", params={"kind": "result", "download": True})
-    assert r.status_code == 200 and 'filename="Nebelburg-3840x2160.png"' in r.headers["content-disposition"]
+    assert r.status_code == 200 and 'filename="Nebelburg-827x531-300dpi.png"' in r.headers["content-disposition"]
     up = client.post("/api/deskmat/upload", params={"filename": "bild.png"}, content=_png())
     assert up.status_code == 200 and len(client.get("/api/deskmats").json()) == 2
     assert client.post("/api/deskmat/card", json={"name": "Sol Ring"}).json()["source"]["kind"] == "card"
     assert client.delete(f"/api/deskmat/{pid}").json() == {"deleted": True}
     assert client.get(f"/api/deskmat/{pid}").status_code == 404
     assert client.get("/api/deskmat/../../etc").status_code == 404
-    assert client.post(f"/api/deskmat/{up.json()['id']}/render", json={"long_px": 1000}).status_code == 400
+    assert client.post(f"/api/deskmat/{up.json()['id']}/render", json={"dpi": 1000}).status_code == 400
+    assert "zu groß" in client.post(f"/api/deskmat/{up.json()['id']}/render", json={"format": "deskmat-120x60", "dpi": 600}).json()["detail"]
 
 
-async def test_mcp_create_deskmat():
-    res = await mcp.call_tool("create_deskmat", {"card": "Sol Ring", "long_px": 3840})
-    assert "3840" in str(res) and "deskmat-3840x" in str(res)
+async def test_mcp_create_deskmat(small_format):
+    res = await mcp.call_tool("create_deskmat", {"card": "Sol Ring", "format": small_format, "dpi": 600})
+    assert "deskmat-1417x827-600dpi.png" in str(res)
+    assert "zu groß" in str(await mcp.call_tool("create_deskmat", {"card": "Sol Ring", "format": "deskmat-120x60", "dpi": 600}))
     assert "error" in str(await mcp.call_tool("create_deskmat", {}))
 
 

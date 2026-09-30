@@ -784,7 +784,7 @@
         <div>
           <h1>Deskmat-Studio</h1>
           <p class="lead">Aus einem Kartenartwork, einem beschriebenen Setting oder einem eigenen Bild wird eine Druckdatei für
-            deine Deskmat oder Playmat – zugeschnitten aufs Format und mit Real-ESRGAN auf etwa 4K hochskaliert.</p>
+            deine Deskmat oder Playmat – zugeschnitten aufs Format und mit Real-ESRGAN auf 300 oder 600 DPI hochskaliert.</p>
         </div>
       </header>
 
@@ -846,7 +846,17 @@
         </div>
         <div class="dm-controls">
           <label class="field"><span>Format</span><select id="dm-format"></select></label>
-          <label class="field"><span>Auflösung (lange Seite)</span><select id="dm-size"></select></label>
+          <div class="field-block">
+            <span class="field-label">Druckauflösung</span>
+            <div class="segmented small" role="radiogroup" aria-label="Druckauflösung" id="dm-dpi">
+              <label><input type="radio" name="dmdpi" value="300" checked><span>300 DPI</span></label>
+              <label><input type="radio" name="dmdpi" value="600"><span>600 DPI (beste)</span></label>
+            </div>
+          </div>
+          <label class="field"><span>Beschnitt (Bleed)</span><select id="dm-bleed">
+            <option value="0">ohne</option><option value="3">3 mm je Seite</option><option value="5">5 mm je Seite</option></select></label>
+          <label class="field"><span>Datei</span><select id="dm-filetype">
+            <option value="png">PNG (verlustfrei)</option><option value="jpg">JPEG 95 % (kleiner)</option></select></label>
           <div class="field-block">
             <span class="field-label">Anpassen</span>
             <div class="segmented small" role="radiogroup" aria-label="Anpassen">
@@ -858,6 +868,7 @@
         <div id="dm-frame" class="dm-frame" tabindex="0" aria-label="Zuschnitt – ziehen zum Verschieben, Pfeiltasten und +/− zum Zoomen">
           <img id="dm-bg" class="dm-bg" alt="">
           <img id="dm-img" class="dm-img" alt="Motiv" draggable="false">
+          <div id="dm-trim" class="dm-trim" hidden title="Schnittkante – außerhalb ist Beschnitt"></div>
         </div>
         <div class="dm-zoom">
           <label for="dm-zoom" class="small">Zoom</label>
@@ -879,7 +890,7 @@
           <h2><span class="step-num" aria-hidden="true">3</span> Ergebnis</h2>
           <div class="btn-group">
             <button type="button" class="btn" id="dm-open">Ordner öffnen</button>
-            <a class="btn primary" id="dm-download" href="#" download>PNG herunterladen</a>
+            <a class="btn primary" id="dm-download" href="#" download>Druckdatei herunterladen</a>
           </div>
         </div>
         <img id="dm-result" class="dm-result" alt="Fertige Deskmat">

@@ -1044,7 +1044,7 @@ def deskmat_prompt(req: DeskmatGenerateRequest, deck: dict[str, Any] | None) -> 
     label, w_mm, h_mm = deskmat.FORMATS[req.format]
     lines = [
         "Schreibe einen Bild-Prompt für einen Text-zu-Bild-Generator (Flux). Daraus wird eine Deskmat/Playmat "
-        f"für Magic: The Gathering ({label}, Querformat {w_mm}:{h_mm}).",
+        f"für Magic: The Gathering ({label}, Querformat {w_mm}:{h_mm}), gedruckt mit 300–600 DPI.",
         "",
         f"- Setting des Nutzers: {req.setting.strip()}",
         f"- Stil: {style}",
@@ -1057,7 +1057,7 @@ def deskmat_prompt(req: DeskmatGenerateRequest, deck: dict[str, Any] | None) -> 
         "",
         "Regeln für den Prompt (Englisch, höchstens 550 Zeichen, ein Absatz):",
         "- breite Panorama-Komposition; das Hauptmotiv eher seitlich, ruhigere Flächen dort, wo Karten liegen;",
-        "- sehr detailliert, stimmiges Licht, hohe Qualität;",
+        "- sehr detailliert, klare Formen und saubere Kanten (wird stark vergrößert), stimmiges Licht, hohe Qualität;",
         "- ausdrücklich: no text, no letters, no logos, no card frame, no border, no watermark.",
         "",
         "Du läufst im GUI-Modus: keine Rückfragen, nichts speichern. Gib Titel (deutsch) und Prompt strukturiert zurück.",
@@ -1169,27 +1169,32 @@ async def api_deskmat_choose(pid: str, req: ChooseVariant) -> dict[str, Any]:
 
 class DeskmatRender(BaseModel):
     format: str = "playmat"
-    long_px: int = deskmat.DEFAULT_LONG
+    dpi: int = 300
+    bleed_mm: float = 0
     fit: str = Field("fill", pattern="^(fill|fit)$")
     crop: dict[str, float] | None = None
     upscale: bool = True
+    filetype: str = Field("png", pattern="^(png|jpg)$")
 
 
 @app.post("/api/deskmat/{pid}/render")
 async def api_deskmat_render(pid: str, req: DeskmatRender) -> dict[str, str]:
     _not_found(deskmat.load, pid)
-    if req.format not in deskmat.FORMATS or req.long_px not in deskmat.SIZES:
-        raise HTTPException(400, "Unbekanntes Format oder Auflösung")
+    try:
+        deskmat.check_size(req.format, req.dpi, req.bleed_mm)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     async def runner(job: Job) -> None:
         job.emit(type="status", text="Bereite das Motiv vor …")
-        project = await deskmat.render(pid, fmt=req.format, long_px=req.long_px, fit=req.fit, crop=req.crop,
-                                       upscale=req.upscale, progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
+        project = await deskmat.render(pid, fmt=req.format, dpi=req.dpi, bleed_mm=req.bleed_mm, fit=req.fit, crop=req.crop,
+                                       upscale=req.upscale, filetype=req.filetype,
+                                       progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
         res = project["result"]
         for w in res["warnings"]:
             job.emit(type="status", text=w)
-        job.emit(type="result", text=f"Fertig: {res['size'][0]} × {res['size'][1]} px (≈ {res['dpi']} DPI)"
-                 + (" · KI-hochskaliert" if res["ai_upscaled"] else ""))  # fmt: skip
+        job.emit(type="result", text=f"Fertig: {res['size'][0]} × {res['size'][1]} px mit {res['dpi']} DPI"
+                 + (f" · {res['ai_passes']}× KI-hochskaliert" if res["ai_passes"] else ""))  # fmt: skip
         job.emit(type="deskmat", project=project)
         job.emit(type="done", ok=True)
 
