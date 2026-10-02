@@ -223,7 +223,7 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
   legale), unten Meine Sammlung, Sammelbestellungen, Deskmat-Studio, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
   hinter ☰ weg.
-- **Neues Deck** – drei Einstiege:
+- **Neues Deck** – vier Einstiege:
   - **Ich habe einen Commander:** ein Formular in vier Schritten: 1 Commander (Autovervollständigung,
     Kartenbild, optional Partner/Background) · 2 Stärke (Bracket 1–5 mit Erklärung, „Feinabstimmung“ für
     Stufe, Hausregeln, Stil) · 3 Budget oder Proxy-Deck · 4 Wünsche. Das KI-Modell steckt unter „Erweitert“.
@@ -238,6 +238,14 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     nicht, wählst du ihn aus den legendären Karten der Liste. Das Bracket wird geschätzt oder gewählt, die
     Kategorien der Quelle werden übernommen, wo sie passen. Moxfield blockt fremde Zugriffe oft – dann
     „Export“ → „Copy Plain Text“ und die Liste einfügen.
+  - **Gegen meine Runde bauen:** Claude sieht sich deine eigenen Decks (Stufe, Power, Bilanz, gegen wen sie
+    verloren haben) und deine Gegnerdecks an (Merkmale, Notizen, Bilanz) und baut das stärkste Deck dagegen –
+    „am stärksten“ heißt die besten Chancen gegen genau diese Gegner, immer innerhalb von Bracket, Feinstufe,
+    Tischregel, Budget und Blacklist. Du wählst die Gegnerdecks (eine Tischregel wählt ihre Runde vor), gibst
+    optional einen Commander vor (sonst sucht Claude einen, den du noch nicht spielst) und hast dieselben
+    Optionen wie beim normalen Bau. Das Deck merkt sich, gegen wen es gebaut wurde („Gebaut gegen …“), und
+    spätere Upgrades achten besonders auf diese Gegner. In Claude Code genügt: „Bau mir das stärkste Deck gegen
+    meine Runde, Bracket 3“.
 - **Während Claude arbeitet:** Status in Klartext („Claude prüft EDHREC-Empfehlungen …“), Laufzeit,
   Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich.
 - **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und acht Tabs –

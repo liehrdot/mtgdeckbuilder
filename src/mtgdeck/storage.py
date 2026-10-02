@@ -292,7 +292,8 @@ def list_decks() -> list[dict[str, Any]]:
     if not DECKS_DIR.exists():
         return []
     out = []
-    for path in sorted(DECKS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    paths = [p for p in DECKS_DIR.glob("*.json") if not p.name.startswith(".")]  # .opponents.json etc. are no decks
+    for path in sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             d = json.loads(path.read_text("utf-8"))
         except ValueError:

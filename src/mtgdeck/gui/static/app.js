@@ -197,8 +197,10 @@ function setMode(mode) {
   buildForm.dataset.mode = mode;
   buildForm.elements.mode.value = mode;
   // only the fields of the active mode take part in validation and submission
-  for (const el of buildForm.querySelectorAll(".mode-build :is(input, textarea, select)")) el.disabled = mode !== "build";
-  for (const el of buildForm.querySelectorAll(".mode-find :is(input, textarea, select)")) el.disabled = mode !== "find";
+  for (const el of buildForm.querySelectorAll(":is(.mode-build, .mode-find, .mode-meta) :is(input, textarea, select)")) {
+    el.disabled = !el.closest(".mode-build, .mode-find, .mode-meta").classList.contains(`mode-${mode}`);
+  }
+  if (mode === "meta") renderMetaBox();
   if (mode === "import" && $("#import-box").dataset.imode === "precon" && !preconItems) searchPrecons();
 }
 buildForm.addEventListener("change", (e) => { if (e.target.name === "mode") setMode(e.target.value); });
@@ -259,7 +261,21 @@ buildForm.addEventListener("submit", async (e) => {
   if (currentJob) { toast("Es läuft schon ein Auftrag – warte kurz oder brich ihn ab.", "error"); return; }
   const f = Object.fromEntries(new FormData(buildForm));
   try {
-    if (buildForm.dataset.mode === "find") {
+    if (buildForm.dataset.mode === "meta") {
+      const fd = new FormData(buildForm);
+      const ids = fd.getAll("meta_opps");
+      if (!oppIndex.length) { toast("Noch keine Gegnerdecks – lege sie unter „Gegnerdecks“ an.", "error"); return; }
+      if (!ids.length) { toast("Wähle mindestens ein Gegnerdeck aus.", "error"); return; }
+      const body = {
+        ...buildSettings(), commander: f.meta_commander || null, opponent_ids: ids.length === oppIndex.length ? [] : ids,
+        strategy: f.strategy || null, notes: f.notes || null, prefer_collection: !!f.prefer_collection,
+        profile: readProfile($("#build-profile .profile-fields")), table_rule: f.table_rule || null,
+      };
+      const { job } = await api("/api/build-meta", { method: "POST", body });
+      startJob(job, body.commander ? `Claude baut ${body.commander} gegen deine Runde` : "Claude baut das stärkste Deck gegen deine Runde",
+        { kind: "build", slot: "#job-slot-main", route: "#/job" });
+      go("#/job");
+    } else if (buildForm.dataset.mode === "find") {
       const fd = new FormData(buildForm);
       const body = { ...buildSettings(), prompt: f.prompt || "", count: Number(f.count), feel: fd.getAll("feel"),
         colors: fd.getAll("colors"), themes: fd.getAll("themes"), experience: f.experience || null };
@@ -739,6 +755,9 @@ function renderDeckHead(d) {
   $("#deck-meta").innerHTML = pills.join("");
   $("#deck-desc").textContent = d.description || "";
   $("#deck-desc").hidden = !d.description;
+  const against = d.built_against_info || [];
+  $("#deck-against").hidden = !against.length;
+  $("#deck-against").innerHTML = against.length ? `${icon("swords")} Gebaut gegen ${against.map((o) => `<a href="#/opponents/${enc(o.id)}">${esc(o.title)}</a>`).join(", ")}` : "";
   for (const [id, fmt] of [["#export-cod", "cockatrice"], ["#export-tts", "tts"], ["#export-txt", "text"]]) $(id).href = `/api/decks/${enc(d.slug)}/export/${fmt}`;
 }
 
@@ -2912,6 +2931,20 @@ function oppMeta(o) {
     ...o.tag_labels].filter(Boolean).join(" · ");
 }
 
+// "Neues Deck" → "Gegen meine Runde bauen": which opponent decks the build targets
+async function renderMetaBox() {
+  await refreshOpponents();
+  const keep = new Set($$("#meta-opps input").filter((c) => !c.checked).map((c) => c.value));
+  $("#meta-empty").hidden = !!oppIndex.length;
+  $("#meta-opps-head").hidden = !oppIndex.length;
+  $("#meta-opps").innerHTML = oppIndex.map((o) => `<label title="${esc(oppMeta(o))}"><input type="checkbox" name="meta_opps" value="${esc(o.id)}"${keep.has(o.id) ? "" : " checked"}><span>${esc(o.title)}</span></label>`).join("");
+  const games = oppIndex.reduce((n, o) => n + o.record.games, 0);
+  $("#meta-summary").textContent = oppIndex.length
+    ? `${deckIndex.length} eigene${deckIndex.length === 1 ? "s Deck" : " Decks"} · ${oppIndex.length} Gegnerdeck${oppIndex.length === 1 ? "" : "s"} · ${games} festgehaltene Partie${games === 1 ? "" : "n"} gegen sie`
+    : "";
+}
+$("#meta-all").addEventListener("click", () => { for (const cb of $$("#meta-opps input")) cb.checked = true; });
+
 // game form: quick picks of known opponents fill the next empty slot
 function renderKnownOpps() {
   const box = $("#game-known-opps");
@@ -3098,6 +3131,14 @@ function updateBuildTableHint() {
     + (t.summary.length ? esc(t.summary.join(" · ")) : "Diese Tischregel ist noch leer.");
 }
 $("#build-table").addEventListener("change", updateBuildTableHint);
+$("#build-table").addEventListener("change", () => {  // meta build: the opponents of that table, if any are assigned
+  if (buildForm.dataset.mode !== "meta") return;
+  const id = $("#build-table").value;
+  const atTable = oppIndex.filter((o) => id && o.table_rule === id).map((o) => o.id);
+  if (!atTable.length) return;
+  for (const cb of $$("#meta-opps input")) cb.checked = atTable.includes(cb.value);
+  toast(`Gegner der Runde „${tableById(id).name}“ ausgewählt.`);
+});
 $("#bracket-options").addEventListener("change", updateBuildTableHint);
 $("#proxy").addEventListener("change", updateBuildTableHint);
 
@@ -4059,6 +4100,7 @@ function paletteItems() {
   const items = [
     { label: "Neues Deck", hint: "Seite", run: () => { go("#/new"); setMode("build"); } },
     { label: "Commander vorschlagen lassen", hint: "Neues Deck", run: () => { go("#/new"); setMode("find"); } },
+    { label: "Stärkstes Deck gegen meine Runde bauen", hint: "Neues Deck", run: () => { go("#/new"); setMode("meta"); } },
     { label: "Deck per Link importieren", hint: "Moxfield, Archidekt, …", run: () => { go("#/new"); setMode("import"); setImportMode("link"); $("#import-url").focus(); } },
     { label: "Deckliste einfügen", hint: "Neues Deck", run: () => { go("#/new"); setMode("import"); setImportMode("text"); $("#import-text").focus(); } },
     { label: "Starterdeck (Precon) importieren", hint: "Neues Deck", run: () => { go("#/new"); setMode("import"); setImportMode("precon"); } },
@@ -4138,6 +4180,7 @@ wireAutocomplete($("#partner"), $("#ac-partner"));
 wireAutocomplete($("#bl-input"), $("#ac-bl"));
 wireAutocomplete($("#tr-input"), $("#ac-tr"));
 wireAutocomplete($("#opp-new [name=commander]"), $("#ac-opp-new"));
+wireAutocomplete(buildForm.elements.meta_commander, $("#ac-meta-commander"));
 wireAutocomplete($("#opp-form [name=commander]"), $("#ac-opp-edit"));
 wireAutocomplete($("#opp-form [name=partner]"), $("#ac-opp-partner"));
 setMode("build");

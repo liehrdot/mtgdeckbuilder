@@ -118,6 +118,7 @@ async def _run_claude(
     read_only: bool = False,
     finish: Finish | None = None,
     table_rule: str | None = None,
+    extras: dict[str, Any] | None = None,
 ) -> None:
     """Run Claude Code on ``prompt``. ``read_only`` restricts the mtg tools to research;
     ``finish(job, ok, final_text, structured_output)`` replaces the default end (detect the saved deck)."""
@@ -193,6 +194,11 @@ async def _run_claude(
         return
 
     deck = next((d for d in storage.list_decks() if (d.get("updated") or "") >= _iso(job.started)), None)
+    for key, value in (extras or {}).items() if deck else []:  # e.g. which opponents a meta build targeted
+        try:
+            storage.set_extra(deck["slug"], key, value)
+        except (FileNotFoundError, ValueError):
+            pass
     if deck and table_rule and deck.get("table_rule") != table_rule:  # Claude forgot to pass it on
         try:
             await _set_table_rule(deck["slug"], table_rule)
@@ -323,6 +329,74 @@ def build_prompt(req: BuildRequest) -> str:
     if req.table_rule:  # the opponents of that table
         lines += opponents_mod.prompt_lines({"table_rule": req.table_rule})
     lines += [
+        "",
+        "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
+        "Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
+        "Speichere das fertige Deck mit `save_deck` und behebe alle Fehler und Bracket-Verstöße, bevor du fertig bist.",
+        "Antworte auf Deutsch.",
+    ]
+    return "\n".join(lines)
+
+
+# --- meta build: the strongest deck against the user's playgroup ---------------------------------
+
+
+class MetaBuildRequest(BaseModel):
+    commander: str | None = None  # empty = Claude picks
+    partner: str | None = None
+    opponent_ids: list[str] = Field(default_factory=list)  # empty = all opponent decks
+    bracket: int = Field(3, ge=1, le=5)
+    budget: float | None = None
+    proxy: bool = False
+    currency: str = "eur"
+    strategy: str | None = None
+    notes: str | None = None
+    profile: PowerProfile | None = None
+    prefer_collection: bool = False
+    table_rule: str | None = None
+    model: str | None = None
+
+
+def meta_prompt(req: MetaBuildRequest) -> str:
+    b = brackets.BY_NUMBER[req.bracket]
+    free = not (req.commander or "").strip()
+    lines = [
+        "Baue das stärkste Commander-Deck gegen die Runde des Nutzers. Nutze den Skill `commander-deckbuilder` "
+        "(Abschnitt „Gegen die Runde bauen“)" + (" und für die Wahl des Commanders den Skill `commander-finder`." if free else "."),
+        "",
+        "Die Gegnerdecks der Runde (nur Commander, Merkmale, Beobachtungen und Bilanz – keine Listen):",
+        *opponents_mod.meta_lines(req.opponent_ids),
+        "",
+        "Die eigenen Decks des Nutzers:",
+        *(opponents_mod.own_deck_lines() or ["  - noch keine"]),
+        "",
+        "Vorgaben:",
+        f"- Commander: {req.commander}" + (f" + {req.partner}" if req.partner else "") if not free else
+        "- Commander: frei wählbar – wähle den, der gegen genau diese Gegner am besten steht (Tempo, Interaktion, "
+        "Widerstandskraft) und der noch keinem eigenen Deck des Nutzers entspricht.",
+        f"- Bracket: {req.bracket} ({b['name']})",
+        _budget_line(req.budget, req.proxy, req.currency),
+        f"- Währung für Preise: {req.currency}",
+        *profile_lines(req.bracket, req.profile),
+        *tablerules.prompt_lines(tablerules.get(req.table_rule)),
+    ]
+    if req.strategy:
+        lines.append(f"- Strategie/Thema: {req.strategy}")
+    if req.notes:
+        lines.append(f"- Weitere Wünsche: {req.notes}")
+    if req.prefer_collection:
+        lines.append(COLLECTION_LINE)
+    lines += [
+        "",
+        "So gehst du vor:",
+        "1. Lies die Runde: Wie gewinnen die Gegner, wie schnell, womit haben sie dem Nutzer Probleme gemacht? Typische Karten "
+        "eines Gegner-Commanders liefert `edhrec_recommendations`, Details zu Gegnern `opponent_decks`, zu eigenen Partien `deck_games`.",
+        "2. „Am stärksten“ heißt: die besten Chancen gegen genau diese Gegner – innerhalb von Bracket, Feinstufe, Hausregeln, "
+        "Tischregel, Budget und Blacklist, nie darüber hinaus.",
+        "3. Baue ein stimmiges Deck mit eigener Siegstrategie und gezielter Interaktion gegen die Bedrohungen der Runde – kein "
+        "reines Hate-Deck, keine Karten nur gegen einen einzigen Gegner, wenn sie sonst tot sind.",
+        "4. `description`: warum das Deck gegen diese Runde stark ist. `notes`: pro Gegner ein kurzer Spielplan "
+        "(worauf achten, welche Antworten zurückhalten).",
         "",
         "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
         "Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
@@ -635,6 +709,18 @@ async def api_build(req: BuildRequest) -> dict[str, str]:
     if req.table_rule and not tablerules.get(req.table_rule):
         raise HTTPException(404, "Diese Tischregel gibt es nicht mehr.")
     return _start(build_prompt(req), req.model, table_rule=req.table_rule)
+
+
+@app.post("/api/build-meta")
+async def api_build_meta(req: MetaBuildRequest) -> dict[str, str]:
+    known = {o["id"] for o in opponents_mod.all_opponents()}
+    if not known:
+        raise HTTPException(400, "Noch keine Gegnerdecks – lege sie unter „Gegnerdecks“ an oder halte Partien mit Gegnern fest.")
+    req.opponent_ids = [i for i in req.opponent_ids if i in known]
+    if req.table_rule and not tablerules.get(req.table_rule):
+        raise HTTPException(404, "Diese Tischregel gibt es nicht mehr.")
+    against = req.opponent_ids or sorted(known)
+    return _start(meta_prompt(req), req.model, table_rule=req.table_rule, extras={"built_against": against})
 
 
 @app.post("/api/refine")
@@ -1744,6 +1830,8 @@ async def api_deck(slug: str) -> dict[str, Any]:
     deck["health"] = health.check(deck)
     rs = tablerules.get(deck.get("table_rule"))
     deck["table_rule_info"] = {"id": rs["id"], "name": rs["name"], "summary": tablerules.summary_lines(rs)} if rs else None
+    against = [opponents_mod.get(i) for i in deck.get("built_against") or []]
+    deck["built_against_info"] = [{"id": o["id"], "title": opponents_mod.title(o)} for o in against if o]
     return deck
 
 

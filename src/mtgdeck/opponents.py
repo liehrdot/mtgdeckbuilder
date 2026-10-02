@@ -252,10 +252,12 @@ def relevant(deck: dict[str, Any] | None, *, limit: int = 8) -> list[dict[str, A
         return []
     slug = (deck or {}).get("slug")
     table = (deck or {}).get("table_rule")
+    against = set((deck or {}).get("built_against") or [])
 
     def weight(o: dict[str, Any]) -> tuple[int, int]:
         with_deck = next((p["games"] for p in o["record"]["per_deck"] if p["slug"] == slug), 0)
-        return (with_deck * 3 + (5 if table and o.get("table_rule") == table else 0), o["record"]["games"])
+        bonus = (5 if table and o.get("table_rule") == table else 0) + (4 if o["id"] in against else 0)
+        return (with_deck * 3 + bonus, o["record"]["games"])
 
     picked = [o for o in items if weight(o)[0] > 0]
     if not picked:
@@ -279,6 +281,35 @@ def _line(o: dict[str, Any], deck_slug: str | None = None) -> str:
     if notes:
         parts.append("aufgefallen: " + " | ".join(f"„{n}“" for n in notes))
     return "  - " + "; ".join(parts)
+
+
+def own_deck_lines(limit: int = 15) -> list[str]:
+    """The user's saved decks with level, power score and record – for the meta build prompt."""
+    out = []
+    for d in storage.list_decks()[:limit]:
+        try:
+            deck = storage.load(d["slug"])
+        except FileNotFoundError:
+            continue
+        power = (((deck.get("validation") or {}).get("bracket") or {}).get("power") or {}).get("value")
+        st = games.stats(games.games(d["slug"]))
+        parts = [f"„{d['name']}“ ({' + '.join(d['commanders']) or '?'}, {d['level']}" + (f", Power {power}" if power else "") + ")"]
+        if st["games"]:
+            lost_to = Counter(o for g in games.games(d["slug"]) if g.get("result") == "loss" for o in g.get("opponents") or [])
+            parts.append(f"Bilanz {st['wins']}–{st['losses']}" + (f", verloren gegen {', '.join(n for n, _ in lost_to.most_common(3))}" if lost_to else ""))
+        if deck.get("description"):
+            parts.append(deck["description"][:160])
+        out.append("  - " + "; ".join(parts))
+    return out
+
+
+def meta_lines(opponent_ids: list[str] | None = None) -> list[str]:
+    """The playgroup for a meta build: the chosen opponent decks (all when ``opponent_ids`` is empty)."""
+    pool = _all_games()
+    chosen = set(opponent_ids or [])
+    items = [describe(o, pool) for o in _read() if not chosen or o["id"] in chosen]
+    items.sort(key=lambda o: (o["record"]["games"], len(o.get("notes") or [])), reverse=True)
+    return [_line(o) for o in items]
 
 
 def prompt_lines(deck: dict[str, Any] | None, *, focus_id: str | None = None) -> list[str]:

@@ -89,6 +89,7 @@
           <label><input type="radio" name="mode" value="build" checked><span>Ich habe einen Commander</span></label>
           <label><input type="radio" name="mode" value="find"><span><svg class="icon"><use href="#i-spark"/></svg>Commander vorschlagen lassen</span></label>
           <label><input type="radio" name="mode" value="import"><span><svg class="icon"><use href="#i-box"/></svg>Ich habe schon ein Deck</span></label>
+          <label><input type="radio" name="mode" value="meta"><span><svg class="icon"><use href="#i-swords"/></svg>Gegen meine Runde bauen</span></label>
         </div>
 
         <section class="step">
@@ -97,6 +98,23 @@
             <h2 class="step-title mode-build">Commander</h2>
             <h2 class="step-title mode-find">Was für ein Spieler bist du?</h2>
             <h2 class="step-title mode-import">Woher kommt dein Deck?</h2>
+            <h2 class="step-title mode-meta">Gegen wen?</h2>
+            <div class="mode-meta" id="meta-box">
+              <p class="muted small">Claude sieht sich deine Decks und deine Gegnerdecks an – Commander, Merkmale, deine Notizen und
+                die Bilanz – und baut das stärkste Deck dagegen, das in deinen Rahmen (Bracket, Tischregel, Budget) passt.</p>
+              <p id="meta-summary" class="small"></p>
+              <div class="meta-opps-head" id="meta-opps-head">
+                <span class="field-label">Gegnerdecks</span>
+                <button type="button" class="link-btn" id="meta-all">Alle auswählen</button>
+              </div>
+              <div id="meta-opps" class="pick-chips"></div>
+              <p id="meta-empty" class="empty-inline" hidden>Noch keine Gegnerdecks. Lege sie unter <a href="#/opponents">Gegnerdecks</a> an
+                oder halte im Deck unter „Partien“ fest, gegen wen du gespielt hast.</p>
+              <label class="field">Commander vorgeben <span class="muted">(optional – leer lassen, dann wählt Claude)</span>
+                <input name="meta_commander" list="ac-meta-commander" placeholder="leer = Claude sucht den passenden Commander">
+                <datalist id="ac-meta-commander"></datalist>
+              </label>
+            </div>
             <div class="mode-import" id="import-box" data-imode="link">
               <div class="segmented small" role="radiogroup" aria-label="Woher kommt das Deck?">
                 <label><input type="radio" name="imode" value="link" checked><span>Link</span></label>
@@ -240,7 +258,7 @@
           </div>
         </section>
 
-        <section class="step mode-build">
+        <section class="step mode-build mode-meta">
           <span class="step-num" aria-hidden="true">4</span>
           <div class="step-body">
             <h2 class="step-title">Wünsche <span class="muted">(optional)</span></h2>
@@ -269,8 +287,9 @@
 
         <div class="form-actions not-import">
           <button type="submit" id="build-btn" class="btn primary lg">
-            <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span></button>
+            <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span><span class="mode-meta">Stärkstes Deck bauen lassen</span></button>
           <p class="muted small"><span class="mode-build">Dauert ein paar Minuten – du kannst währenddessen andere Decks ansehen.</span>
+            <span class="mode-meta">Claude analysiert zuerst deine Runde, das dauert etwas länger als ein normaler Bau.</span>
             <span class="mode-find">Bracket und Budget fließen in die Vorschläge ein.</span></p>
         </div>
       </form>
@@ -299,6 +318,7 @@
           <h1 id="deck-name"></h1>
           <div id="deck-meta" class="meta-row"></div>
           <p id="deck-desc" class="lead"></p>
+          <p id="deck-against" class="muted small" hidden></p>
         </div>
         <div class="page-actions">
           <button type="button" id="copy-btn" class="btn"><svg class="icon"><use href="#i-copy"/></svg><span>Liste kopieren</span></button>

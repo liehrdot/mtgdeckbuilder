@@ -33,6 +33,7 @@ async def test_create_update_notes_and_delete():
         raise AssertionError("unknown commander accepted")
     except ValueError as exc:
         assert "nicht gefunden" in str(exc)
+    assert [d["slug"] for d in storage.list_decks()] == []  # decks/.opponents.json is not a deck
     opponents.delete(o["id"])
     assert opponents.all_opponents() == []
 
@@ -120,3 +121,46 @@ async def test_mcp_tools():
     amb = await mcp_server.update_opponent_deck(commander=ATRAXA, note="x")
     assert "Mehrere" in amb["error"] and len(amb["candidates"]) == 2
     assert (await mcp_server.update_opponent_deck(commander=ATRAXA, opponent_id=amb["candidates"][1]["id"], delete=True))["deleted"]
+
+
+async def test_meta_build_prompt_and_route(monkeypatch):
+    slug = _deck("Meren Aristo")
+    games.add(slug, result="loss", opponents=[ATRAXA])
+    a = await opponents.create([ATRAXA], label="Tims Atraxa", tags=["combo"], note="Thassa's Oracle")
+    k = await opponents.create(["Krenko, Mob Boss"])
+    t = await tablerules.create("Freitag", max_bracket=3)
+
+    req = gui.MetaBuildRequest(opponent_ids=[a["id"]], bracket=3, table_rule=t["id"], proxy=True)
+    text = gui.meta_prompt(req)
+    assert "Abschnitt „Gegen die Runde bauen“" in text and "`commander-finder`" in text
+    assert "Tims Atraxa" in text and "Krenko" not in text  # only the chosen opponents
+    assert "„Meren Aristo“ (Meren of Clan Nel Toth, Bracket 3" in text and f"verloren gegen {ATRAXA}" in text
+    assert "Commander: frei wählbar" in text and "Tischregel „Freitag“" in text and "proxy=true" in text
+    assert "\n" in text and "\\n" not in text
+    fixed = gui.meta_prompt(gui.MetaBuildRequest(commander="Meren of Clan Nel Toth"))
+    assert "- Commander: Meren of Clan Nel Toth" in fixed and "Krenko" in fixed and "`commander-finder`" not in fixed
+
+    started = {}
+
+    def fake_start(prompt, model, output_format=None, **kw):
+        started.update(prompt=prompt, **kw)
+        return {"job": "x"}
+
+    monkeypatch.setattr(gui, "_start", fake_start)
+    with TestClient(gui.app) as client:
+        assert client.post("/api/build-meta", json={"opponent_ids": ["nope", k["id"]], "table_rule": t["id"]}).json() == {"job": "x"}
+        assert started["extras"] == {"built_against": [k["id"]]} and started["table_rule"] == t["id"]
+        assert client.post("/api/build-meta", json={"table_rule": "gone0000"}).status_code == 404
+    # the built deck later prefers the opponents it was built against
+    deck = storage.load(slug)
+    deck["built_against"] = [k["id"]]
+    assert [o["id"] for o in opponents.relevant(deck)] == [k["id"], a["id"]]  # built against (+4) before one game (+3)
+
+
+async def test_deck_shows_built_against():
+    slug = _deck("Meta Deck")
+    k = await opponents.create(["Krenko, Mob Boss"], label="Anas Goblins")
+    storage.set_extra(slug, "built_against", [k["id"], "gone0000"])
+    with TestClient(gui.app) as client:
+        deck = client.get(f"/api/decks/{slug}").json()
+    assert deck["built_against_info"] == [{"id": k["id"], "title": "Anas Goblins (Krenko, Mob Boss)"}]

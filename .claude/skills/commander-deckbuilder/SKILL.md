@@ -1,6 +1,6 @@
 ---
 name: commander-deckbuilder
-description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built, a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier. Also use it to answer questions about a saved deck (strategy, how to play it, power level, matchups against other commanders, weaknesses, card choices).
+description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built (also "the strongest deck against my playgroup / the decks I play against"), a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier. Also use it to answer questions about a saved deck (strategy, how to play it, power level, matchups against other commanders, weaknesses, card choices).
 argument-hint: "<Commander> [bracket 1-5] [budget] [theme]"
 ---
 
@@ -118,6 +118,23 @@ Then present to the user:
 - Notable choices / what was left out for bracket or budget reasons, upgrade ideas.
 - Where it is saved (`decks/<slug>.txt` imports into Moxfield/Archidekt) and that it can be
   viewed in the GUI (`uv run mtg-gui`).
+
+## Gegen die Runde bauen (meta build)
+
+For "bau das stärkste Deck gegen meine Runde / gegen die Decks, gegen die ich spiele":
+1. Read the field: `opponent_decks` (commanders, traits, the user's observations, record – no lists; look up
+   typical cards of each commander with `edhrec_recommendations`), `list_decks` + `load_deck` / `deck_games`
+   for the user's own decks (what exists, how they fared, who beat them). Name the main threats: how each
+   opponent wins, how fast, what hurt the user.
+2. Commander: if none is given, pick one (commander-finder approach, `find_commanders`) that is well placed
+   against exactly this field – speed, the right interaction, resilience against their answers – and that the
+   user does not play yet. Briefly say why it beats the alternatives.
+3. "Strongest" = best chances against these opponents **inside** the bracket, sub-tier, house rules, table
+   rule, budget and blacklist – never above them.
+4. Build a coherent deck with its own win plan plus targeted interaction (answers that also work outside this
+   pod; no dead hate cards for a single opponent). Then validate, fix and save as usual.
+5. `description`: why the deck is strong against this pod. `notes`: a short game plan per opponent (what to
+   watch for, which answers to hold back).
 
 ## Bracket rauf/runter & Feinabstimmung (retune)
 

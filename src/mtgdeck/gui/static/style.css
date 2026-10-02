@@ -236,8 +236,15 @@ details.more[open] > summary { margin-bottom: var(--space-3); }
 .step-title { font-size: var(--fs-md); margin: 3px 0 var(--space-3); }
 .step-title .muted { font-weight: 400; font-size: 14px; }
 .step .field:last-child, .step .switch:last-child { margin-bottom: 0; }
-.form-card[data-mode="build"] .mode-find, .form-card[data-mode="find"] .mode-build,
-.form-card:not([data-mode="import"]) .mode-import, .form-card[data-mode="import"] :is(.mode-build, .mode-find, .not-import) { display: none !important; }
+.form-card:not([data-mode="build"]) .mode-build:not(.mode-meta),
+.form-card:not([data-mode="meta"]) .mode-meta:not(.mode-build),
+.form-card:is([data-mode="find"], [data-mode="import"]) .mode-build.mode-meta,
+.form-card:not([data-mode="find"]) .mode-find,
+.form-card:not([data-mode="import"]) .mode-import,
+.form-card[data-mode="import"] .not-import { display: none !important; }
+.meta-opps-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
+#meta-opps { margin-bottom: var(--space-4); }
+#meta-summary { margin: var(--space-2) 0 0; }
 #import-box:not([data-imode="link"]) .imode-link, #import-box:not([data-imode="text"]) .imode-text,
 #import-box:not([data-imode="precon"]) .imode-precon, #import-box[data-imode="precon"] .import-preview { display: none !important; }
 #import-box .segmented { margin-bottom: var(--space-3); }
@@ -907,7 +914,8 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
   .precon-pick img { width: 120px; }
   .plan-list .upgrade-list li { grid-template-columns: minmax(0, 1fr) auto; }
 }
-.mode-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.mode-switch { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; }
+@media (max-width: 1100px) { .mode-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .mode-switch span { justify-content: center; text-align: center; height: 100%; }
 @media (max-width: 700px) { .mode-switch { grid-template-columns: 1fr; } }
 
@@ -989,3 +997,5 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .order-items input { width: 64px; height: 30px; padding: 2px 6px; }
 .order-items .muted { font-size: var(--fs-xs); }
 #order-print-slot #print-panel { margin-top: 0; }
+#deck-against { margin-top: var(--space-2); }
+#deck-against .icon { width: 14px; height: 14px; vertical-align: -2px; }
