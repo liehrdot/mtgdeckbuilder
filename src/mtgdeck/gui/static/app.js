@@ -2807,10 +2807,38 @@ $("#add-printed-btn").addEventListener("click", async () => {
 // blacklist
 // ============================================================================================
 async function refreshBlacklist() {
-  const names = await api("/api/blacklist").catch(() => []);
-  $("#bl-count").textContent = names.length || "";
-  $("#bl-empty").hidden = names.length > 0;
-  $("#bl-list").innerHTML = names.map((n) => `<li>${esc(n)}<button type="button" title="Entfernen" aria-label="${esc(n)} entfernen" data-name="${esc(n)}">×</button></li>`).join("");
+  const bl = await api("/api/blacklist").catch(() => ({ cards: [], rules: [], catalog: [] }));
+  const active = new Set(bl.rules.map((r) => r.rule));
+  $("#bl-count").textContent = bl.cards.length + bl.rules.length || "";
+  $("#bl-empty").hidden = bl.cards.length > 0;
+  $("#bl-list").innerHTML = bl.cards.map((n) => `<li>${esc(n)}<button type="button" title="Entfernen" aria-label="${esc(n)} entfernen" data-name="${esc(n)}">×</button></li>`).join("");
+  $("#bl-rules-empty").hidden = bl.rules.length > 0;
+  $("#bl-rules").innerHTML = bl.rules.map((r) => `<li>
+      <div class="bl-rule-main">
+        <strong>${esc(r.label)}</strong>
+        <span class="pill ${r.checked ? "ok" : "accent"}">${r.checked ? "wird geprüft" : "Hinweis für Claude"}</span>
+        <p class="muted small">${esc(r.description)}</p>
+        ${r.cards ? `<details class="more"><summary>${r.cards.length} Karten</summary><p class="small">${r.cards.map(esc).join(" · ")}</p></details>` : ""}
+      </div>
+      <button type="button" class="btn ghost small" data-name="${esc(r.rule)}" aria-label="${esc(r.label)} entfernen">Entfernen</button>
+    </li>`).join("");
+  const hasPrice = bl.rules.some((r) => r.key === "price");
+  $("#bl-quick").innerHTML = bl.catalog.filter((c) => !active.has(c.rule))
+    .map((c) => `<button type="button" class="chip" data-rule="${esc(c.rule)}" title="${esc(c.description)}">${esc(c.label)}</button>`).join("")
+    + (hasPrice ? "" : `<button type="button" class="chip" data-price="1" title="Karten über einem Preis sperren">Teurer als … €</button>`);
+}
+async function addToBlacklist(add) {
+  const r = await api("/api/blacklist", { method: "POST", body: { add } });
+  const parts = [];
+  if (r.added.length) parts.push(`Karten: ${r.added.join(", ")}`);
+  if (r.added_rules.length) parts.push(`Regeln: ${r.added_rules.map((x) => x.label).join(", ")}`);
+  $("#bl-msg").textContent = parts.length ? `Hinzugefügt – ${parts.join(" · ")}` : "";
+  for (const term of r.not_found) {
+    const ok = await ask({ title: `„${term}“ nicht gefunden`, ok: "Als Begriff speichern",
+      text: "Das ist weder eine Karte noch ein bekannter Begriff. Als freien Begriff speichern? Claude beachtet ihn beim Bauen, automatisch geprüft wird er nicht." });
+    if (ok) await api("/api/blacklist", { method: "POST", body: { add: [`@${term}`] } }).catch(fail);
+  }
+  await refreshBlacklist();
 }
 $("#bl-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -2818,18 +2846,31 @@ $("#bl-form").addEventListener("submit", async (e) => {
   if (!raw) return;
   const add = raw.split(/[;\n]/).map((x) => x.trim()).filter(Boolean);
   try {
-    const r = await api("/api/blacklist", { method: "POST", body: { add } });
     $("#bl-input").value = "";
-    $("#bl-msg").textContent = r.not_found.length ? `Nicht gefunden: ${r.not_found.join(", ")}` : "";
-    refreshBlacklist();
+    await addToBlacklist(add);
   } catch (err) { $("#bl-msg").textContent = err.message; }
 });
-$("#bl-list").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-name]");
+$("#bl-quick").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button");
   if (!btn) return;
-  await api("/api/blacklist", { method: "POST", body: { remove: [btn.dataset.name] } }).catch(fail);
-  refreshBlacklist();
+  let rule = btn.dataset.rule;
+  if (btn.dataset.price) {
+    const v = await ask({ title: "Karten über welchem Preis sperren?", text: "Betrag in Euro (günstigster Druck). Proxy-Decks prüfen ihn genauso.", value: "20", ok: "Sperren" });
+    const n = parseFloat(String(v || "").replace(",", "."));
+    if (!(n > 0)) return;
+    rule = `@price>${n}`;
+  }
+  await addToBlacklist([rule]).catch(fail);
 });
+for (const list of ["#bl-list", "#bl-rules"]) {
+  $(list).addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-name]");
+    if (!btn) return;
+    await api("/api/blacklist", { method: "POST", body: { remove: [btn.dataset.name] } }).catch(fail);
+    $("#bl-msg").textContent = "";
+    refreshBlacklist();
+  });
+}
 
 // ============================================================================================
 // settings: proxy printing, AI upscaling, local card DB

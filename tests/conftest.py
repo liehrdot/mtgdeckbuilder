@@ -48,6 +48,7 @@ CARDS = {
         card("Survival of the Fittest", ci="G", type_line="Enchantment", gc=True, cmc=2, text="{G}, Discard a creature card: Search your library for a creature card."),
         card("Armageddon", ci="W", type_line="Sorcery", text="Destroy all lands.", cmc=4),
         card("Time Warp", ci="U", type_line="Sorcery", text="Target player takes an extra turn after this one.", cmc=5),
+        card("Bayou", ci="BG", type_line="Land — Swamp Forest", text="({T}: Add {B} or {G}.)", cmc=0, eur="650.00", mana_cost=""),
         card("Forest", type_line="Basic Land — Forest", text="({T}: Add {G}.)", cmc=0, eur=None, mana_cost=""),
         card("Swamp", type_line="Basic Land — Swamp", text="({T}: Add {B}.)", cmc=0, eur=None, mana_cost=""),
         card("Relentless Rats", ci="B", text="A deck can have any number of cards named Relentless Rats."),

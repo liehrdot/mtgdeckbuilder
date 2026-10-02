@@ -93,9 +93,9 @@ def test_gui_blacklist_routes_and_finder_start(monkeypatch):
     monkeypatch.setattr(gui, "_start", fake_start)
     client = TestClient(gui.app)
     assert client.post("/api/blacklist", json={"add": ["Sol Ring"]}).json()["added"] == ["Sol Ring"]
-    assert client.get("/api/blacklist").json() == ["Sol Ring"]
+    assert client.get("/api/blacklist").json()["cards"] == ["Sol Ring"]
     client.post("/api/blacklist", json={"remove": ["Sol Ring"]})
-    assert client.get("/api/blacklist").json() == []
+    assert client.get("/api/blacklist").json()["cards"] == []
 
     assert client.post("/api/find-commander", json={"prompt": "Vampire", "bracket": 2}).json() == {"job": "x"}
     assert started["output_format"]["type"] == "json_schema"

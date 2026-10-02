@@ -369,17 +369,21 @@ async def update_collection(
 
 @mcp.tool()
 async def get_blacklist() -> dict[str, Any]:
-    """The user's blacklist: cards that must never be put into a deck."""
+    """The user's blacklist: cards and rules (groups/terms like True Duals, cheap tutors, fast mana,
+    a price limit, or free-text wishes) that must never go into a deck. Search results already omit
+    blacklisted cards and cards breaking a checked rule; free-text rules (checked=false) are yours to respect."""
     names = blacklist.load()
-    return {"count": len(names), "blacklist": names}
+    rules = blacklist.rules()
+    return {"count": len(names), "blacklist": names, "rules": rules,
+            "note": "Rules with checked=true are enforced by validate_deck; checked=false rules are free-text wishes you must respect yourself."}  # fmt: skip
 
 
 @mcp.tool()
 async def update_blacklist(
-    add: Annotated[list[str] | None, Field(description="Card names to blacklist (any language)")] = None,
-    remove: Annotated[list[str] | None, Field(description="Card names to take off the blacklist")] = None,
+    add: Annotated[list[str] | None, Field(description="Card names (any language) or terms like 'True Duals', 'Günstige Tutoren', 'Fast Mana', 'teurer als 20 €'; prefix '@' to store any text as a free-text rule")] = None,
+    remove: Annotated[list[str] | None, Field(description="Card names, or rule lines as returned by get_blacklist (e.g. '@cheap-tutors')")] = None,
 ) -> dict[str, Any]:
-    """Add or remove cards on the user's blacklist. Only on explicit user request."""
+    """Add or remove cards and rules on the user's blacklist. Only on explicit user request."""
     return await blacklist.update(add, remove)
 
 

@@ -179,11 +179,17 @@ werden überall mit beiden Seiten behandelt:
   Karten für Bracket und Strategie (Bracket-Regeln gelten weiterhin). Das Deck wird als
   Proxy-Deck markiert, der echte Kartenwert nur informativ angezeigt.
 - **Budget:** `validate_deck`/`save_deck` warnen, wenn das Deck das Budget überschreitet.
-- **Blacklist:** Karten, die nie in ein Deck dürfen. Gepflegt in der GUI, per Claude
-  („setz X auf die Blacklist“, Tool `update_blacklist`) oder direkt in `blacklist.txt`
-  (eine Karte pro Zeile, `#` = Kommentar; Datei ist gitignored). Deutsche Namen werden in
-  Oracle-Namen übersetzt. Suchergebnisse blenden Blacklist-Karten aus, die Validierung meldet
-  sie als Fehler.
+- **Blacklist:** Karten – und ganze Gruppen –, die nie in ein Deck dürfen. Gepflegt in der GUI, per
+  Claude („setz X auf die Blacklist“, „keine günstigen Tutoren“, Tool `update_blacklist`) oder direkt in
+  `blacklist.txt` (eine Zeile pro Eintrag, `#` = Kommentar; Datei ist gitignored). Deutsche Namen
+  werden in Oracle-Namen übersetzt. Neben Karten gehen **Begriffe** (deutsch oder englisch):
+  True Duals, Fetchlands, Shocklands, Günstige Tutoren (≤ 2 Mana), Alle Tutoren, Fast Mana,
+  Game Changer, Extra-Züge, Massen-Landzerstörung, Gratis-Zauber, Counterspells, Board Wipes,
+  Stax (kuratierte Liste), 2-Karten-Combos (über Commander Spellbook) und „teurer als 20 €“. In der
+  Datei stehen sie als `@true-duals`, `@cheap-tutors`, `@price>20` …; alles andere mit `@` davor
+  (`@keine Gedankenkontrolle`) wird als freier Begriff gespeichert, den Claude beachtet, der aber
+  nicht automatisch geprüft wird. Suchergebnisse blenden Blacklist-Karten und Regel-Treffer aus,
+  die Validierung meldet sie als Fehler („Blacklist-Regel „Günstige Tutoren“: Demonic Tutor“).
 
 ## Web-GUI
 
@@ -398,7 +404,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
 | `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
-| `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |
+| `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten und Begriffe (True Duals, Günstige Tutoren, teurer als 20 € …) hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
 | `restore_deck_version` / `copy_deck` | alte Version wiederherstellen, Deck (oder alte Version) kopieren |
 | `create_proxy_order` / `export_proxy_pdf` | Proxy-Druckdateien (MPC-Autofill-XML + Bilder), PDF zum Selbstdrucken |

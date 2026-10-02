@@ -296,7 +296,7 @@ def build_prompt(req: BuildRequest) -> str:
     lines += [
         "",
         "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
-        "Karten auf der Blacklist (`get_blacklist`) sind tabu.",
+        "Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
         "Speichere das fertige Deck mit `save_deck` und behebe alle Fehler und Bracket-Verstöße, bevor du fertig bist.",
         "Antworte auf Deutsch.",
     ]
@@ -457,7 +457,7 @@ def retune_prompt(req: RetuneRequest, deck: dict[str, Any]) -> str:
         lines.append(f"- Zusätzlicher Wunsch: {req.request}")
     lines += [
         "",
-        "Du läufst im GUI-Modus: keine Rückfragen. Commander bleibt gleich. Karten auf der Blacklist (`get_blacklist`) sind tabu.",
+        "Du läufst im GUI-Modus: keine Rückfragen. Commander bleibt gleich. Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
         f"Speichere mit `save_deck` (slug=`{req.slug}`, neues `bracket`, `power_profile`) und einer `change_note`, "
         "die alte → neue Stufe, Power-Score vorher/nachher und die wichtigsten Tausche mit Grund nennt.",
         "Fasse die Änderungen (+ rein / - raus) kurz zusammen. Antworte auf Deutsch.",
@@ -478,7 +478,7 @@ def refine_prompt(req: RefineRequest, deck: dict[str, Any] | None = None) -> str
         [
             f"Überarbeite das gespeicherte Commander-Deck `{req.slug}` (lade es mit `load_deck`).",
             f"Bisherige Vorgaben: {budget.lstrip('- ')}",
-            "Karten auf der Blacklist (`get_blacklist`) sind tabu.",
+            "Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
             "Nutze den Skill `commander-deckbuilder` (Abschnitt „Deck überarbeiten“).",
             f"Änderungswunsch: {req.request}",
             "",
@@ -1483,8 +1483,8 @@ class BlacklistUpdate(BaseModel):
 
 
 @app.get("/api/blacklist")
-async def api_blacklist() -> list[str]:
-    return blacklist.load()
+async def api_blacklist() -> dict[str, Any]:
+    return {"cards": blacklist.load(), "rules": blacklist.rules(), "catalog": blacklist.catalog()}
 
 
 @app.post("/api/blacklist")

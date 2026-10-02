@@ -23,9 +23,12 @@ Gather: commander (+ partner/background), **bracket (1-5)**, budget (total, EUR 
 - **Proxy**: if the user will proxy the deck ("ich proxe", "Proxies", "Preis egal"), prices do
   not matter at all. Ignore any budget, pick the best cards for bracket and strategy, and pass
   `proxy: true` to `validate_deck` and `save_deck`. Still respect the bracket.
-- **Blacklist**: call `get_blacklist` once. Those cards must never be in the deck
-  (`validate_deck` reports them as errors; searches already hide them). If the user says a card
-  should *never* be played again, offer to add it with `update_blacklist`.
+- **Blacklist**: call `get_blacklist` once. Its cards must never be in the deck, and neither
+  may any card that breaks one of its `rules` (e.g. True Duals, cheap tutors, fast mana, a price
+  limit, 2-card combos). `validate_deck` reports both as errors; searches already hide them.
+  Rules with `checked: false` are free-text wishes – respect them yourself. If the user says a card
+  or a kind of card should *never* be played again, offer to add it with `update_blacklist`
+  (terms like "Günstige Tutoren" or "teurer als 20 €" work directly; `@<text>` stores free text).
 - GUI/non-interactive mode (prompt says so): never ask, make reasonable assumptions and
   mention them in the deck description. Default bracket 3 if absent.
 
@@ -73,7 +76,7 @@ Rules while picking:
 - **Respect the budget** (unless proxy): track prices (`price_eur`/`price_usd`, cheapest printing
   in the local DB). Leave ~10 % headroom. Basics count as ~0. Pass `budget` to `validate_deck` /
   `save_deck` so overruns are flagged. For proxy decks don't use the EDHREC `budget` filter.
-- **Never use blacklisted cards.**
+- **Never use blacklisted cards** or cards that break a blacklist rule.
 - Prefer high synergy + high inclusion cards, but every card needs a reason to be in the deck.
 - Have 2–4 clear win conditions and say what they are.
 - Mana base: basics + on-color duals/utility lands fitting the budget; count colored pips

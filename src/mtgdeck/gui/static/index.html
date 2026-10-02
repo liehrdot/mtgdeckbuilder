@@ -1046,16 +1046,26 @@
       <header class="page-head">
         <div>
           <h1>Blacklist</h1>
-          <p class="lead">Diese Karten kommen nie in ein Deck – auch nicht beim Überarbeiten. Deutsche Namen gehen auch.</p>
+          <p class="lead">Was hier steht, kommt nie in ein Deck – auch nicht beim Überarbeiten. Einzelne Karten (deutsche Namen gehen auch) oder ganze Gruppen wie „True Duals“ oder „Günstige Tutoren“.</p>
         </div>
       </header>
       <section class="panel">
         <form id="bl-form" class="inline-form" autocomplete="off">
-          <input id="bl-input" list="ac-bl" placeholder="Karte hinzufügen, mehrere mit ; trennen" aria-label="Karte hinzufügen">
+          <input id="bl-input" list="ac-bl" placeholder="Karte oder Begriff, z. B. Sol Ring; True Duals; teurer als 20 €" aria-label="Karte oder Begriff hinzufügen">
           <datalist id="ac-bl"></datalist>
           <button type="submit" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Hinzufügen</button>
         </form>
         <p id="bl-msg" class="muted small" aria-live="polite"></p>
+        <p class="muted small bl-quick-label">Schnell hinzufügen:</p>
+        <div class="chips-row" id="bl-quick"></div>
+      </section>
+      <section class="panel">
+        <h2>Regeln &amp; Begriffe</h2>
+        <ul id="bl-rules" class="bl-rules"></ul>
+        <p id="bl-rules-empty" class="empty-inline">Noch keine Regeln. Tipp: oben einen Begriff wählen.</p>
+      </section>
+      <section class="panel">
+        <h2>Einzelne Karten</h2>
         <ul id="bl-list" class="chips"></ul>
         <p id="bl-empty" class="empty-inline" hidden>Noch keine Karten auf der Blacklist.</p>
       </section>

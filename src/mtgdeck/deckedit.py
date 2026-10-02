@@ -158,6 +158,7 @@ async def similar_cards(deck: dict[str, Any], card_name: str, *, limit: int = 12
     identity = _deck_identity([data[c] for c in deck.get("commanders", []) if c in data])
     in_deck = {c["name"] for c in deck.get("cards", [])} | set(deck.get("commanders", []))
     banned = blacklist.names_lower()
+    user_rules = blacklist.rules()
     roles = target.get("roles") or card_roles(target)
     ptype = primary_type(target.get("type_line", ""))
     score: dict[str, float] = {}
@@ -167,7 +168,7 @@ async def similar_cards(deck: dict[str, Any], card_name: str, *, limit: int = 12
     def offer(cards: list[dict[str, Any]], why: str, weight: float) -> None:
         for rank, c in enumerate(cards):
             n = c.get("name")
-            if not n or n in in_deck or n.lower() in banned or n == target["name"]:
+            if not n or n in in_deck or n.lower() in banned or n == target["name"] or blacklist.card_rules(c, active=user_rules, currency=deck.get("currency", "eur")):
                 continue
             found.setdefault(n, c)
             reason.setdefault(n, why)
@@ -202,6 +203,7 @@ async def role_candidates(deck: dict[str, Any], role: str, *, limit: int = 18, m
     identity = _deck_identity(list(data.values()))
     in_deck = {c["name"] for c in deck.get("cards", [])} | set(deck.get("commanders", []))
     banned = blacklist.names_lower()
+    user_rules = blacklist.rules()
     currency = deck.get("currency", "eur")
     tag = _ROLE_QUERY[role].split(":", 1)[1]
     if carddb.available() and carddb.tag_counts([tag]).get(tag):
@@ -212,6 +214,6 @@ async def role_candidates(deck: dict[str, Any], role: str, *, limit: int = 18, m
         found = [scryfall.compact(c) for c in res["cards"]]
     keep = ("name", "type_line", "mana_cost", "cmc", "image", "image_back", "price_eur", "price_usd", "game_changer", "oracle_text")
     out = [{**{k: c.get(k) for k in keep}, "reason": ROLE_LABELS.get(role, role)} for c in found
-           if c.get("name") not in in_deck and c.get("name", "").lower() not in banned
+           if c.get("name") not in in_deck and c.get("name", "").lower() not in banned and not blacklist.card_rules(c, active=user_rules, currency=currency)
            and "Land" not in (c.get("type_line") or "").split("//")[0]]  # fmt: skip
     return out[:limit]

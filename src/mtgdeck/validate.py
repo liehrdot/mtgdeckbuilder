@@ -105,6 +105,14 @@ async def validate_deck(
     hits = [n for n in [*commanders, *merged] if n.lower() in banned_by_user]
     if hits:
         errors.append(f"Karten auf deiner Blacklist: {', '.join(hits)} – bitte ersetzen")
+    user_rules = [r for r in blacklist.rules() if r["checked"] and not r.get("deck_level")]
+    by_rule: dict[str, list[str]] = {}
+    for n in [*commanders, *merged]:
+        if n in card_data and n not in hits:
+            for label in blacklist.card_rules(card_data[n], active=user_rules, currency=currency):
+                by_rule.setdefault(label, []).append(n)
+    for label, names in by_rule.items():
+        errors.append(f"Blacklist-Regel „{label}“: {', '.join(names)} – bitte ersetzen")
 
     # --- composition
     main_cards = [card_data[e.name] for e in entries if e.name in card_data]
@@ -136,6 +144,10 @@ async def validate_deck(
         except (HttpError, httpx.HTTPError, OSError) as exc:
             warnings.append(f"Commander Spellbook nicht erreichbar: {exc}")
     two_card = [c for c in (combos_found or {}).get("included", []) if len(c.get("cards") or []) == 2]
+    combo_rule = blacklist.deck_rule("two-card-combos")
+    if combo_rule and two_card:
+        pairs = "; ".join(" + ".join(c["cards"]) for c in two_card[:5])
+        errors.append(f"Blacklist-Regel „{combo_rule['label']}“: {pairs} – eine Karte je Combo ersetzen")
     all_cards = [card_data[n] for n in commanders if n in card_data] + main_cards
     bracket_result = brackets.evaluate(
         bracket, all_cards, spellbook_estimate=sb_estimate, two_card_combos=two_card, profile=profile

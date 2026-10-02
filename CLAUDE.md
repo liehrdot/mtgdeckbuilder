@@ -83,10 +83,12 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `deck_ownership()` (real/proxy/missing, shopping list, `shared_shortages` across decks; basics count as owned), `missing_counts()` for printing only missing cards, `add_printed()` after printing, `search_owned()` for building from the collection.
   - Routes `/api/collection[...]`, `/api/cards/prints`, `/api/decks/{slug}/ownership`, `/collection/add-printed`; MCP `collection_search`, `collection_status`, `update_collection`.
 - **`exports.py`**: Cockatrice `.cod` (commander in the side zone, DFCs by front face) and Tabletop Simulator saved objects; route `/api/decks/{slug}/export/{text|cockatrice|tts}`.
-- **`blacklist.py`**: the user's card blacklist in `blacklist.txt` (plain text, gitignored, `MTG_BLACKLIST_FILE`).
-  - Names are resolved to Oracle names on add.
-  - `validate_deck` treats blacklisted cards as errors.
-  - The MCP search tools (`search_cards`, `local_card_search`, `find_commanders`, `edhrec_recommendations`) filter them out.
+- **`blacklist.py`**: the user's blacklist in `blacklist.txt` (plain text, gitignored, `MTG_BLACKLIST_FILE`): cards and rules.
+  - Card lines are Oracle names (resolved on add). Rule lines start with `@`: `@<key>` from `RULES` (curated name lists like `true-duals`/`fetchlands`/`shocklands`/`stax`, predicates on compact card data like `cheap-tutors`/`tutors`/`fast-mana`/`game-changers`/`extra-turns`/`mld`/`free-spells`/`counterspells`/`board-wipes`, deck-level `two-card-combos`), `@price>N[usd]`, `@text:<free text>` (unchecked, for Claude).
+  - `parse_rule()` maps typed German/English terms via normalised aliases; `update()` turns known terms into rules, the rest into cards; a leading `@` forces a (free-text) rule. `load()` returns card names only, `rules()` the described rules, `catalog()` the quick-add list.
+  - `validate_deck` reports blacklisted cards and `card_rules()` hits as errors ("Blacklist-Regel „…“"), and 2-card Spellbook combos when `two-card-combos` is set.
+  - The MCP search tools (`search_cards`, `local_card_search`, `find_commanders`, `edhrec_recommendations`) and `deckedit` suggestions filter them out via `filter_cards()` / `card_rules()`; name-only EDHREC entries are looked up in the local DB for predicate rules.
+  - `GET /api/blacklist` → `{cards, rules, catalog}`.
 - **`power.py`**: sub-tiers inside a bracket.
   - `PowerProfile` (pydantic) holds: tier low/mid/high, stricter house rules (`max_game_changers`, `max_tutors`, `allow_*`), `style` and `notes`.
   - `score()` is a transparent heuristic on the 1.0–5.99 bracket scale (3.8 = upper bracket 3). Hard rules set a floor.

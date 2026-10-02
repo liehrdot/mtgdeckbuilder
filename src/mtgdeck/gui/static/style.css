@@ -587,6 +587,13 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .chips li { display: flex; align-items: center; gap: 2px; background: var(--surface-2); border-radius: 99px; padding: 3px 4px 3px 12px; font-size: 14px; }
 .chips button { background: none; border: none; color: var(--muted); padding: 0 6px; font-size: 16px; line-height: 1; cursor: pointer; border-radius: 99px; }
 .chips button:hover { color: var(--bad); }
+.bl-quick-label { margin-top: var(--space-3); }
+#bl-quick { margin-top: var(--space-2); }
+.bl-rules { list-style: none; margin: 0; padding: 0; }
+.bl-rules li { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+.bl-rules li:first-child { border-top: none; padding-top: 0; }
+.bl-rule-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); min-width: 0; }
+.bl-rule-main p, .bl-rule-main details { flex-basis: 100%; margin: 0; }
 
 /* ---------- print studio ---------- */
 .toolbar { display: flex; gap: var(--space-3); align-items: flex-end; flex-wrap: wrap; margin-bottom: var(--space-2); }
