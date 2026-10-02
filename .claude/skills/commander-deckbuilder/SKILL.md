@@ -136,6 +136,12 @@ For "bau das stärkste Deck gegen meine Runde / gegen die Decks, gegen die ich s
 5. `description`: why the deck is strong against this pod. `notes`: a short game plan per opponent (what to
    watch for, which answers to hold back).
 
+When asked only for **suggestions** ("schlag mir 3–5 Decks gegen meine Runde vor"), do steps 1–3 for several
+clearly different commanders (colours, strategy, speed), ranked by expected strength, and present each with:
+why it beats this pod, win plan, one line per opponent, 5–8 key cards (checked with the tools), main weakness
+and fit with bracket/table rule/budget. Build nothing until the user picks one. If web research is allowed,
+use it for current meta information on the opponents' commanders and your candidates, and name the sources.
+
 ## Bracket rauf/runter & Feinabstimmung (retune)
 
 For "make it upper 3 / lower 4 / bracket 4 without Game Changers / bracket 2 but funny" on an

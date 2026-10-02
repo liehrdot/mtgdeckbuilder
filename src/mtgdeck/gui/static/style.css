@@ -245,6 +245,16 @@ details.more[open] > summary { margin-bottom: var(--space-3); }
 .meta-opps-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
 #meta-opps { margin-bottom: var(--space-4); }
 #meta-summary { margin: var(--space-2) 0 0; }
+.form-card:not([data-meta-action="build"]) .meta-build-only, .form-card[data-meta-action="build"] .meta-suggest-only { display: none !important; }
+.meta-opts { margin-bottom: var(--space-4); }
+.meta-opts .check { margin: var(--space-2) 0; }
+.meta-analysis { background: var(--surface-2); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: var(--space-2) 0 var(--space-4); }
+.meta-list { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.meta-list .label { font-weight: 650; font-size: var(--fs-sm); }
+.meta-list ul { margin: 0; padding-left: 1.1em; font-size: 14px; }
+.meta-list .key-cards { display: flex; flex-wrap: wrap; gap: 4px; }
+.meta-list .key-cards span { background: var(--surface-2); border-radius: 99px; padding: 1px 8px; font-size: var(--fs-xs); }
+#meta-sources { margin: var(--space-2) 0 0; padding-left: 1.1em; word-break: break-word; }
 #import-box:not([data-imode="link"]) .imode-link, #import-box:not([data-imode="text"]) .imode-text,
 #import-box:not([data-imode="precon"]) .imode-precon, #import-box[data-imode="precon"] .import-preview { display: none !important; }
 #import-box .segmented { margin-bottom: var(--space-3); }

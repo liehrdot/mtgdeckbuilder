@@ -119,6 +119,8 @@ async def _run_claude(
     finish: Finish | None = None,
     table_rule: str | None = None,
     extras: dict[str, Any] | None = None,
+    effort: str | None = None,
+    web: bool = False,
 ) -> None:
     """Run Claude Code on ``prompt``. ``read_only`` restricts the mtg tools to research;
     ``finish(job, ok, final_text, structured_output)`` replaces the default end (detect the saved deck)."""
@@ -137,7 +139,7 @@ async def _run_claude(
         job.done = True
         return
 
-    base_tools = ["Skill", "ToolSearch", "Read", "Glob", "Grep"]
+    base_tools = ["Skill", "ToolSearch", "Read", "Glob", "Grep"] + (["WebSearch", "WebFetch"] if web else [])
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_ROOT),
         setting_sources=["project"],  # loads .claude/skills and CLAUDE.md
@@ -147,6 +149,7 @@ async def _run_claude(
         disallowed_tools=(["Write", "Edit", "Bash"] + [f"mcp__mtg__{t}" for t in WRITE_TOOLS]) if read_only else [],
         permission_mode="dontAsk",
         model=model or None,
+        effort=effort,
         max_turns=int(os.environ.get("MTG_MAX_TURNS", 120)),
         output_format=output_format,
     )
@@ -357,13 +360,10 @@ class MetaBuildRequest(BaseModel):
     model: str | None = None
 
 
-def meta_prompt(req: MetaBuildRequest) -> str:
+def _meta_context(req: MetaBuildRequest, *, free: bool) -> list[str]:
+    """The playgroup, the user's decks and the build options – shared by meta builds and meta suggestions."""
     b = brackets.BY_NUMBER[req.bracket]
-    free = not (req.commander or "").strip()
     lines = [
-        "Baue das stärkste Commander-Deck gegen die Runde des Nutzers. Nutze den Skill `commander-deckbuilder` "
-        "(Abschnitt „Gegen die Runde bauen“)" + (" und für die Wahl des Commanders den Skill `commander-finder`." if free else "."),
-        "",
         "Die Gegnerdecks der Runde (nur Commander, Merkmale, Beobachtungen und Bilanz – keine Listen):",
         *opponents_mod.meta_lines(req.opponent_ids),
         "",
@@ -386,6 +386,17 @@ def meta_prompt(req: MetaBuildRequest) -> str:
         lines.append(f"- Weitere Wünsche: {req.notes}")
     if req.prefer_collection:
         lines.append(COLLECTION_LINE)
+    return lines
+
+
+def meta_prompt(req: MetaBuildRequest) -> str:
+    free = not (req.commander or "").strip()
+    lines = [
+        "Baue das stärkste Commander-Deck gegen die Runde des Nutzers. Nutze den Skill `commander-deckbuilder` "
+        "(Abschnitt „Gegen die Runde bauen“)" + (" und für die Wahl des Commanders den Skill `commander-finder`." if free else "."),
+        "",
+        *_meta_context(req, free=free),
+    ]
     lines += [
         "",
         "So gehst du vor:",
@@ -709,6 +720,118 @@ async def api_build(req: BuildRequest) -> dict[str, str]:
     if req.table_rule and not tablerules.get(req.table_rule):
         raise HTTPException(404, "Diese Tischregel gibt es nicht mehr.")
     return _start(build_prompt(req), req.model, table_rule=req.table_rule)
+
+
+META_MODEL = "claude-opus-5-5"  # meta suggestions always run on Opus 5.5 at extra-high effort
+META_EFFORT = "xhigh"
+META_COUNT = (3, 5)
+META_SUGGEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "analysis": {"type": "string", "description": "3-5 sentences (German): how the pod wins, its main threats, what the user's decks lack against it"},
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact English card name of the commander"},
+                    "partner": {"type": "string", "description": "Partner/background if a pair, else empty"},
+                    "archetype": {"type": "string", "description": "Short strategy label, e.g. 'Stax-Kontrolle', 'Aristocrats'"},
+                    "why": {"type": "string", "description": "2-3 sentences (German, 'du'): why this deck is strong against exactly this pod"},
+                    "win_plan": {"type": "string", "description": "1-2 sentences (German): how the deck wins"},
+                    "matchups": {"type": "array", "description": "One entry per opponent deck", "items": {
+                        "type": "object", "properties": {
+                            "opponent": {"type": "string", "description": "Opponent deck as named in the prompt"},
+                            "plan": {"type": "string", "description": "One sentence (German): how to beat it"}},
+                        "required": ["opponent", "plan"]}},
+                    "key_cards": {"type": "array", "items": {"type": "string"}, "description": "5-8 key cards, exact English names, checked with the tools"},
+                    "risks": {"type": "string", "description": "One sentence (German): the main weakness"},
+                    "bracket_fit": {"type": "string", "description": "How it fits bracket, sub-tier, table rule and budget"},
+                    "strategy": {"type": "string", "description": "Strategy text for the build form (German)"},
+                    "difficulty": {"type": "string", "enum": ["einfach", "mittel", "anspruchsvoll"]},
+                    "difficulty_note": {"type": "string"},
+                },
+                "required": ["name", "archetype", "why", "win_plan", "strategy"],
+            },
+        },
+        "sources": {"type": "array", "items": {"type": "string"}, "description": "Web sources used (URL or title), if any"},
+    },
+    "required": ["analysis", "suggestions"],
+}  # fmt: skip
+
+
+class MetaSuggestRequest(MetaBuildRequest):
+    count: int = Field(4, ge=META_COUNT[0], le=META_COUNT[1])
+    research: bool = True  # allow WebSearch / WebFetch
+
+
+def meta_suggest_prompt(req: MetaSuggestRequest) -> str:
+    lines = [
+        f"Schlage {req.count} Commander-Decks vor, die gegen die Runde des Nutzers am stärksten wären. Nutze den Skill "
+        "`commander-deckbuilder` (Abschnitt „Gegen die Runde bauen“) und für die Commander-Wahl den Skill `commander-finder`. "
+        "Baue noch KEIN Deck und speichere nichts – der Nutzer wählt einen Vorschlag aus.",
+        "",
+        *_meta_context(req, free=True),
+        "",
+        "So gehst du vor:",
+        "1. Analysiere die Runde gründlich: Wie gewinnen die Gegner, wie schnell, womit haben sie dem Nutzer Probleme gemacht, "
+        "was fehlt seinen Decks? Typische Karten der Gegner-Commander: `edhrec_recommendations`; Details: `opponent_decks`, `deck_games`.",
+        "2. „Am stärksten“ heißt: die besten Chancen gegen genau diese Gegner – innerhalb von Bracket, Feinstufe, Hausregeln, "
+        "Tischregel, Budget und Blacklist, nie darüber hinaus.",
+        f"3. Wähle {req.count} deutlich verschiedene Ansätze (Farben, Strategie, Tempo), sortiert nach erwarteter Stärke, keinen "
+        "Commander, den der Nutzer schon spielt. Prüfe Schlüsselkarten und Combos mit den Tools (`get_cards`, `find_combos`).",
+        "4. Pro Vorschlag: warum er gegen diese Runde stark ist, wie er gewinnt, ein Satz Spielplan pro Gegnerdeck, 5–8 "
+        "Schlüsselkarten, die größte Schwäche, wie er in Bracket/Tischregel/Budget passt, ein Strategietext fürs Bauformular.",
+    ]
+    if req.research:
+        lines.append("5. Du darfst im Web recherchieren (`WebSearch`, `WebFetch`): aktuelle Meta-Artikel, EDHREC-Seiten, Turnier- und "
+                     "Decklisten-Datenbanken. Nutze das gezielt für die Gegner-Commander und deine Kandidaten und nenne die Quellen "
+                     "in `sources`. Kartentexte und Legalität prüfst du trotzdem mit den mtg-Tools.")  # fmt: skip
+    lines += [
+        "",
+        "Du läufst im GUI-Modus: keine Rückfragen. Gib das Ergebnis als strukturierte Ausgabe zurück, alle Texte auf Deutsch, "
+        "Kartennamen exakt auf Englisch.",
+    ]
+    return "\n".join(lines)
+
+
+def _meta_file() -> Path:
+    return storage.DECKS_DIR / ".meta-suggestions.json"
+
+
+@app.post("/api/build-meta/suggest")
+async def api_build_meta_suggest(req: MetaSuggestRequest) -> dict[str, str]:
+    known = {o["id"] for o in opponents_mod.all_opponents()}
+    if not known:
+        raise HTTPException(400, "Noch keine Gegnerdecks – lege sie unter „Gegnerdecks“ an oder halte Partien mit Gegnern fest.")
+    req.opponent_ids = [i for i in req.opponent_ids if i in known]
+    if req.table_rule and not tablerules.get(req.table_rule):
+        raise HTTPException(404, "Diese Tischregel gibt es nicht mehr.")
+
+    async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
+        items = await _enrich_suggestions(structured) if ok else []
+        if items:
+            result = {"created": storage._now(), "model": META_MODEL, "effort": META_EFFORT, "research": req.research,
+                      "analysis": (structured or {}).get("analysis", ""), "sources": (structured or {}).get("sources") or [],
+                      "suggestions": items, "request": req.model_dump(exclude={"model"})}  # fmt: skip
+            _meta_file().parent.mkdir(parents=True, exist_ok=True)
+            _meta_file().write_text(json.dumps(result, ensure_ascii=False, indent=2), "utf-8")
+            job.emit(type="meta_suggestions", result=result)
+        elif ok:
+            job.emit(type="error", text="Keine verwertbaren Vorschläge erhalten.")
+        job.emit(type="done", ok=bool(items), deck=None)
+
+    output_format = {"type": "json_schema", "schema": META_SUGGEST_SCHEMA}
+    return _start(meta_suggest_prompt(req), META_MODEL, output_format, read_only=True, finish=finish,
+                  effort=META_EFFORT, web=req.research)  # fmt: skip
+
+
+@app.get("/api/build-meta/suggestions")
+async def api_build_meta_last() -> dict[str, Any]:
+    try:
+        return json.loads(_meta_file().read_text("utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
 
 
 @app.post("/api/build-meta")

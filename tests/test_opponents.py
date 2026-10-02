@@ -164,3 +164,68 @@ async def test_deck_shows_built_against():
     with TestClient(gui.app) as client:
         deck = client.get(f"/api/decks/{slug}").json()
     assert deck["built_against_info"] == [{"id": k["id"], "title": "Anas Goblins (Krenko, Mob Boss)"}]
+
+
+async def test_meta_suggest_runs_opus_xhigh_with_optional_research(monkeypatch):
+    a = await opponents.create([ATRAXA], label="Tims Atraxa", tags=["combo"])
+    started = {}
+
+    def fake_start(prompt, model, output_format=None, **kw):
+        started.update(prompt=prompt, model=model, output_format=output_format, **kw)
+        return {"job": "x"}
+
+    monkeypatch.setattr(gui, "_start", fake_start)
+    with TestClient(gui.app) as client:
+        assert client.get("/api/build-meta/suggestions").json() == {}
+        r = client.post("/api/build-meta/suggest", json={"count": 3, "bracket": 3, "model": "haiku"})
+        assert r.json() == {"job": "x"}
+        assert client.post("/api/build-meta/suggest", json={"count": 9}).status_code == 422
+    assert started["model"] == "claude-opus-5-5" and started["effort"] == "xhigh"  # fixed, the form's model is ignored
+    assert started["web"] is True and started["read_only"] is True
+    assert started["output_format"]["schema"] is gui.META_SUGGEST_SCHEMA
+    p = started["prompt"]
+    assert "Schlage 3 Commander-Decks vor" in p and "KEIN Deck" in p and "Tims Atraxa" in p and "`WebSearch`" in p
+
+    job = gui.Job(id="t")
+    structured = {"analysis": "Die Runde ist combo-lastig.", "sources": ["https://edhrec.com"],
+                  "suggestions": [{"name": "Krenko, Mob Boss", "archetype": "Goblins", "why": "Schnell.", "win_plan": "Tokens.",
+                                   "strategy": "Goblin-Tokens", "matchups": [{"opponent": "Tims Atraxa", "plan": "Druck machen."}]}]}  # fmt: skip
+    await started["finish"](job, True, "", structured)
+    ev = next(e for e in job.events if e["type"] == "meta_suggestions")["result"]
+    assert ev["analysis"].startswith("Die Runde") and ev["suggestions"][0]["image"] and ev["model"] == "claude-opus-5-5"
+    assert job.events[-1] == {"type": "done", "ok": True, "deck": None}
+    with TestClient(gui.app) as client:
+        last = client.get("/api/build-meta/suggestions").json()
+    assert last["suggestions"][0]["name"] == "Krenko, Mob Boss" and last["request"]["count"] == 3
+    assert [d["slug"] for d in storage.list_decks()] == []  # the dot file is no deck
+
+    gui.meta_suggest_prompt(gui.MetaSuggestRequest(research=False, opponent_ids=[a["id"]]))
+    with TestClient(gui.app) as client:
+        client.post("/api/build-meta/suggest", json={"research": False})
+    assert started["web"] is False and "`WebSearch`" not in started["prompt"]
+
+
+def test_run_claude_passes_effort_and_web_tools(monkeypatch):
+    import claude_agent_sdk
+
+    seen = {}
+
+    async def fake_query(prompt, options):
+        seen["options"] = options
+        if False:
+            yield None
+
+    monkeypatch.setattr(claude_agent_sdk, "query", fake_query)
+    job = gui.Job(id="r")
+
+    async def finish(*_):
+        pass
+
+    import asyncio
+
+    asyncio.run(gui._run_claude(job, "x", "claude-opus-5-5", read_only=True, finish=finish, effort="xhigh", web=True))
+    o = seen["options"]
+    assert o.model == "claude-opus-5-5" and o.effort == "xhigh"
+    assert "WebSearch" in o.allowed_tools and "WebFetch" in o.allowed_tools
+    asyncio.run(gui._run_claude(job, "x", None, finish=finish))
+    assert seen["options"].effort is None and "WebSearch" not in seen["options"].allowed_tools

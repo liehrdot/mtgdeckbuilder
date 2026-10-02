@@ -200,10 +200,15 @@ function setMode(mode) {
   for (const el of buildForm.querySelectorAll(":is(.mode-build, .mode-find, .mode-meta) :is(input, textarea, select)")) {
     el.disabled = !el.closest(".mode-build, .mode-find, .mode-meta").classList.contains(`mode-${mode}`);
   }
+  buildForm.dataset.metaAction = buildForm.elements.meta_action.value || "suggest";
+  $("#meta-suggestions").hidden = mode !== "meta" || !metaResult;
   if (mode === "meta") renderMetaBox();
   if (mode === "import" && $("#import-box").dataset.imode === "precon" && !preconItems) searchPrecons();
 }
-buildForm.addEventListener("change", (e) => { if (e.target.name === "mode") setMode(e.target.value); });
+buildForm.addEventListener("change", (e) => {
+  if (e.target.name === "mode") setMode(e.target.value);
+  if (e.target.name === "meta_action") buildForm.dataset.metaAction = e.target.value;
+});
 
 $("#partner-toggle").addEventListener("click", () => {
   $("#partner-field").hidden = false;
@@ -271,6 +276,14 @@ buildForm.addEventListener("submit", async (e) => {
         strategy: f.strategy || null, notes: f.notes || null, prefer_collection: !!f.prefer_collection,
         profile: readProfile($("#build-profile .profile-fields")), table_rule: f.table_rule || null,
       };
+      if (f.meta_action === "suggest") {
+        const { job } = await api("/api/build-meta/suggest", { method: "POST", body: { ...body, commander: null,
+          count: Number(f.meta_count), research: !!f.meta_research } });
+        startJob(job, "Claude analysiert deine Runde (Opus 5.5 · extra hoch)", { kind: "meta", slot: "#finder-job-slot", route: "#/new" });
+        $("#finder-job-slot").scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (metaPick && body.commander === metaPick.name) body.partner = metaPick.partner || null;
       const { job } = await api("/api/build-meta", { method: "POST", body });
       startJob(job, body.commander ? `Claude baut ${body.commander} gegen deine Runde` : "Claude baut das stärkste Deck gegen deine Runde",
         { kind: "build", slot: "#job-slot-main", route: "#/job" });
@@ -605,6 +618,7 @@ function handleEvent(ev) {
     case "error": logLine("error", "Fehler: " + ev.text); if (jobInfo) jobInfo.error = ev.text; break;
     case "result": logLine("result", ev.text); break;
     case "suggestions": renderSuggestions(ev.items); break;
+    case "meta_suggestions": renderMetaSuggestions(ev.result); break;
     case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
     case "guide": onGuide(ev.guide, jobInfo?.slug); break;
     case "plan": onUpgradePlan(ev.plan, jobInfo?.slug); break;
@@ -659,6 +673,7 @@ async function finishJob(ev) {
       offerOrderAfterRebuild(info.slug, info.since);
       break;
     case "finder":
+    case "meta":
     case "upgrade":
     case "guide":
     case "plan":
@@ -2932,7 +2947,65 @@ function oppMeta(o) {
 }
 
 // "Neues Deck" → "Gegen meine Runde bauen": which opponent decks the build targets
+let metaResult = null;  // last meta suggestions {created, analysis, suggestions, sources, research, …}
+let metaPick = null;    // the suggestion chosen for building
+let metaLoaded = false;
+
+function renderMetaSuggestions(result) {
+  metaResult = result && result.suggestions?.length ? result : null;
+  $("#meta-suggestions").hidden = !metaResult || buildForm.dataset.mode !== "meta";
+  if (!metaResult) return;
+  const r = metaResult;
+  $("#meta-meta").textContent = `vom ${fmtDate(r.created)} · Opus 5.5, extra hoher Denkaufwand · ${r.research ? "mit" : "ohne"} Web-Recherche`;
+  $("#meta-analysis").textContent = r.analysis || "";
+  $("#meta-analysis").hidden = !r.analysis;
+  $("#meta-list").innerHTML = r.suggestions.map((s, i) => {
+    const colors = (s.color_identity || []).map((c) => COLOR_NAMES[c] || c).join(", ") || "Farblos";
+    return `<article class="suggestion">
+      ${s.image ? `<img src="${esc(s.image)}" alt="${esc(s.name)}" loading="lazy">` : ""}
+      <h3>${i + 1}. ${esc(s.name)}${s.partner ? " + " + esc(s.partner) : ""}</h3>
+      <p class="muted small">${esc(s.archetype || "")} · ${esc(colors)}</p>
+      ${s.difficulty ? `<span class="difficulty ${esc(s.difficulty)}" title="${esc(s.difficulty_note || "")}">${esc(s.difficulty[0].toUpperCase() + s.difficulty.slice(1))} zu spielen</span>` : ""}
+      <p><span class="why-label">Warum gegen deine Runde?</span> ${esc(s.why || "")}</p>
+      ${s.win_plan ? `<p><span class="label">So gewinnt es:</span> ${esc(s.win_plan)}</p>` : ""}
+      ${s.matchups?.length ? `<details class="more"><summary>Gegen deine Gegner</summary><ul>${s.matchups.map((m) =>
+        `<li><strong>${esc(m.opponent)}:</strong> ${esc(m.plan)}</li>`).join("")}</ul></details>` : ""}
+      ${s.key_cards?.length ? `<div class="key-cards" aria-label="Schlüsselkarten">${s.key_cards.map((c) => `<span>${esc(c)}</span>`).join("")}</div>` : ""}
+      ${s.risks ? `<p class="muted small">Schwäche: ${esc(s.risks)}</p>` : ""}
+      ${s.bracket_fit ? `<p class="muted small">${esc(s.bracket_fit)}</p>` : ""}
+      <div class="actions">
+        <button type="button" class="btn" data-meta-use="${i}">Übernehmen</button>
+        <button type="button" class="btn primary" data-meta-build="${i}">Dieses Deck bauen</button>
+      </div>
+    </article>`;
+  }).join("");
+  const src = r.sources || [];
+  $("#meta-sources-box").hidden = !src.length;
+  $("#meta-sources").innerHTML = src.map((u) => /^https?:\/\//.test(u)
+    ? `<li><a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a></li>` : `<li>${esc(u)}</li>`).join("");
+  if (!$("#meta-suggestions").hidden && jobInfo?.kind === "meta") $("#meta-suggestions").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("#meta-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-meta-use], button[data-meta-build]");
+  if (!btn || !metaResult) return;
+  const s = metaResult.suggestions[Number(btn.dataset.metaUse ?? btn.dataset.metaBuild)];
+  metaPick = s;
+  buildForm.elements.meta_action.value = "build";
+  buildForm.dataset.metaAction = "build";
+  buildForm.elements.meta_commander.value = s.name;
+  if (s.strategy) buildForm.elements.strategy.value = s.strategy;
+  if (btn.dataset.metaBuild !== undefined) buildForm.requestSubmit();
+  else {
+    buildForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast(`${s.name} übernommen – prüf noch Bracket, Tischregel und Budget, dann „Stärkstes Deck bauen lassen“.`);
+  }
+});
+
 async function renderMetaBox() {
+  if (!metaLoaded) {
+    metaLoaded = true;
+    api("/api/build-meta/suggestions").then((r) => { if (!metaResult) renderMetaSuggestions(r); }).catch(() => {});
+  }
   await refreshOpponents();
   const keep = new Set($$("#meta-opps input").filter((c) => !c.checked).map((c) => c.value));
   $("#meta-empty").hidden = !!oppIndex.length;

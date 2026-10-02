@@ -246,6 +246,12 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     Optionen wie beim normalen Bau. Das Deck merkt sich, gegen wen es gebaut wurde („Gebaut gegen …“), und
     spätere Upgrades achten besonders auf diese Gegner. In Claude Code genügt: „Bau mir das stärkste Deck gegen
     meine Runde, Bracket 3“.
+    Standard ist **„3–5 Decks vorschlagen“**: Claude analysiert die Runde und schlägt 3–5 deutlich verschiedene
+    Decks vor – je mit Begründung, Siegplan, Spielplan pro Gegner, Schlüsselkarten, Schwäche und Einordnung in
+    Bracket/Tischregel/Budget. Dieser Lauf nutzt **immer Opus 5.5 mit extra hohem Denkaufwand** (`xhigh`), optional
+    mit **Web-Recherche** (aktuelle Meta-Artikel, EDHREC, Turnier- und Decklisten; Quellen werden angezeigt). Die
+    letzten Vorschläge bleiben gespeichert (`decks/.meta-suggestions.json`); „Dieses Deck bauen“ startet den Bau mit
+    dem gewählten Commander und denselben Optionen, „Direkt ein Deck bauen“ überspringt die Vorschläge.
 - **Während Claude arbeitet:** Status in Klartext („Claude prüft EDHREC-Empfehlungen …“), Laufzeit,
   Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich.
 - **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und acht Tabs –

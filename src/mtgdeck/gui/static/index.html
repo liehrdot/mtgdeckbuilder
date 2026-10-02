@@ -110,7 +110,22 @@
               <div id="meta-opps" class="pick-chips"></div>
               <p id="meta-empty" class="empty-inline" hidden>Noch keine Gegnerdecks. Lege sie unter <a href="#/opponents">Gegnerdecks</a> an
                 oder halte im Deck unter „Partien“ fest, gegen wen du gespielt hast.</p>
-              <label class="field">Commander vorgeben <span class="muted">(optional – leer lassen, dann wählt Claude)</span>
+              <div class="field-block">
+                <span class="field-label">Was soll Claude tun?</span>
+                <div class="segmented small" role="radiogroup" aria-label="Was soll Claude tun?">
+                  <label><input type="radio" name="meta_action" value="suggest" checked><span>3–5 Decks vorschlagen</span></label>
+                  <label><input type="radio" name="meta_action" value="build"><span>Direkt ein Deck bauen</span></label>
+                </div>
+              </div>
+              <div class="meta-suggest-only meta-opts">
+                <label class="field inline">Anzahl Vorschläge
+                  <select name="meta_count"><option>3</option><option selected>4</option><option>5</option></select></label>
+                <label class="check"><input type="checkbox" name="meta_research" checked> Im Web recherchieren
+                  <span class="muted">– aktuelle Meta-Artikel, EDHREC, Turnier- und Decklisten</span></label>
+                <p class="muted small">Läuft automatisch mit <strong>Opus 5.5</strong> auf <strong>extra hohem Denkaufwand</strong>: gründlicher,
+                  aber langsamer und teurer als ein normaler Lauf. Danach wählst du einen Vorschlag und lässt ihn bauen.</p>
+              </div>
+              <label class="field meta-build-only">Commander vorgeben <span class="muted">(optional – leer lassen, dann wählt Claude)</span>
                 <input name="meta_commander" list="ac-meta-commander" placeholder="leer = Claude sucht den passenden Commander">
                 <datalist id="ac-meta-commander"></datalist>
               </label>
@@ -283,18 +298,27 @@
               <option value="haiku">Haiku</option>
             </select>
           </label>
+          <p class="muted small mode-meta meta-suggest-only">Vorschläge gegen deine Runde laufen immer mit Opus 5.5 (extra hoch); das Modell hier gilt fürs Bauen.</p>
         </details>
 
         <div class="form-actions not-import">
           <button type="submit" id="build-btn" class="btn primary lg">
-            <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span><span class="mode-meta">Stärkstes Deck bauen lassen</span></button>
+            <span class="mode-build">Deck bauen lassen</span><span class="mode-find">Commander vorschlagen</span><span class="mode-meta meta-build-only">Stärkstes Deck bauen lassen</span><span class="mode-meta meta-suggest-only">Vorschläge holen</span></button>
           <p class="muted small"><span class="mode-build">Dauert ein paar Minuten – du kannst währenddessen andere Decks ansehen.</span>
-            <span class="mode-meta">Claude analysiert zuerst deine Runde, das dauert etwas länger als ein normaler Bau.</span>
+            <span class="mode-meta meta-build-only">Claude analysiert zuerst deine Runde, das dauert etwas länger als ein normaler Bau.</span>
+            <span class="mode-meta meta-suggest-only">Rechne mit einigen Minuten – du kannst währenddessen weiterarbeiten.</span>
             <span class="mode-find">Bracket und Budget fließen in die Vorschläge ein.</span></p>
         </div>
       </form>
 
       <div id="finder-job-slot" class="job-slot"></div>
+      <section id="meta-suggestions" class="suggestions-wrap" hidden>
+        <h2 class="section-title">Vorschläge gegen deine Runde</h2>
+        <p id="meta-meta" class="muted small"></p>
+        <p id="meta-analysis" class="meta-analysis"></p>
+        <div id="meta-list" class="suggestions meta-list"></div>
+        <details class="more" id="meta-sources-box" hidden><summary>Quellen der Recherche</summary><ul id="meta-sources" class="small"></ul></details>
+      </section>
       <section id="suggestions" class="suggestions-wrap" hidden>
         <h2 class="section-title">Vorschläge</h2>
         <div id="suggestion-list" class="suggestions"></div>
