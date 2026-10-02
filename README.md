@@ -190,6 +190,15 @@ werden überall mit beiden Seiten behandelt:
   (`@keine Gedankenkontrolle`) wird als freier Begriff gespeichert, den Claude beachtet, der aber
   nicht automatisch geprüft wird. Suchergebnisse blenden Blacklist-Karten und Regel-Treffer aus,
   die Validierung meldet sie als Fehler („Blacklist-Regel „Günstige Tutoren“: Demonic Tutor“).
+- **Gegnerdecks:** Decks, gegen die du gespielt hast – nur Commander und was dir aufgefallen ist, keine
+  Kartenliste (Seite „Gegnerdecks“). Steckbrief mit eigenem Namen, Spieler, geschätztem Bracket, Runde
+  (Tischregel) und Merkmalen wie Combo, viele Board Wipes, Flieger, Stax; Beobachtungen mit Datum, auch
+  direkt aus „Partie festhalten“. Die Seite zeigt die Bilanz aller deiner Decks gegen das Gegnerdeck, verlinkt
+  die typischen Karten des Commanders auf EDHREC und bereitet „Wie spiele ich dagegen?“ (Fragen) oder
+  „Upgrades gegen dieses Deck“ vor. Umbauen, Bracket ändern, Upgrade-Vorschläge, Stufenplan und Fragen
+  berücksichtigen die Gegner, die zählen: gegen das Deck schon gespielt oder in seiner Runde, sonst die
+  häufigsten. Gespeichert in `decks/.opponents.json`; per Claude: „merk dir: Tims Atraxa gewinnt mit
+  Thassa's Oracle“ (Tools `opponent_decks`, `update_opponent_deck`).
 - **Tischregeln:** benannte Regelsätze für eine Runde („Freitagsrunde“, „Laden-Abend“). Anders als die
   Blacklist gelten sie nur für Decks, die sie gewählt haben – beim Bauen („Neues Deck“ → Tischregel) oder
   im Deck unter „Anpassen“; das Deck merkt sich seine Tischregel, Umbauen und Upgrade-Vorschläge halten
@@ -269,6 +278,8 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     Siegquote, Ø Zug, häufigste Probleme, Ergebnis pro Version, beste Karten und Gegner.
     „Aus den Partien lernen“ trägt die häufigsten Probleme als Fokus für Upgrade-Vorschläge ein; Fragen und
     Upgrades kennen die Partien auch (`deck_games`). Gespeichert in `decks/.games/<slug>.json`.
+    Zu jedem Gegner gibt es ein Feld „Aufgefallen“; bekannte Gegnerdecks wählst du per Klick aus,
+    neue Commander werden automatisch als Gegnerdeck gemerkt (abschaltbar).
   - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren.
   - **Drucken:** Bilder prüfen/tauschen, optional „Tokens mitdrucken“ und „Nur fehlende Karten“, dann
     1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung übernehmen.
@@ -415,6 +426,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
 | `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
+| `opponent_decks` / `update_opponent_deck` | Gegnerdecks mit Merkmalen, Beobachtungen und Bilanz lesen / anlegen, Beobachtung notieren, löschen |
 | `table_rules` / `update_table_rule` | Tischregeln lesen / anlegen, ändern, löschen; `validate_deck` und `save_deck` nehmen `table_rule` |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten und Begriffe (True Duals, Günstige Tutoren, teurer als 20 € …) hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |

@@ -24,7 +24,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, precons, printorders, proxy, rule0, scryfall, storage, tablerules
+from .. import opponents as opponents_mod
+from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -99,10 +100,10 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 # Tools for questions about a deck: research only, nothing that saves or changes anything.
 READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
-                   "bracket_rules", "validate_deck", "get_blacklist", "table_rules", "list_decks", "load_deck", "deck_games",
+                   "bracket_rules", "validate_deck", "get_blacklist", "table_rules", "opponent_decks", "list_decks", "load_deck", "deck_games",
                    "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons", "print_orders",
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
-WRITE_TOOLS = ["save_deck", "update_blacklist", "update_table_rule", "restore_deck_version", "copy_deck", "update_card_database",
+WRITE_TOOLS = ["save_deck", "update_blacklist", "update_table_rule", "update_opponent_deck", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
                "edit_deck", "update_collection", "import_precon", "create_deskmat", "update_print_order"]  # fmt: skip
 Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
@@ -319,6 +320,8 @@ def build_prompt(req: BuildRequest) -> str:
     if req.prefer_collection:
         lines.append(COLLECTION_LINE)
     lines += tablerules.prompt_lines(tablerules.get(req.table_rule))
+    if req.table_rule:  # the opponents of that table
+        lines += opponents_mod.prompt_lines({"table_rule": req.table_rule})
     lines += [
         "",
         "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
@@ -479,6 +482,7 @@ def retune_prompt(req: RetuneRequest, deck: dict[str, Any]) -> str:
         *profile_lines(req.bracket, req.profile),
         "- " + _budget_line(deck.get("budget"), bool(deck.get("proxy")), deck.get("currency", "eur")).lstrip("- "),
         *_deck_table_lines(deck),
+        *opponents_mod.prompt_lines(deck),
     ]
     if req.request:
         lines.append(f"- Zusätzlicher Wunsch: {req.request}")
@@ -506,6 +510,7 @@ def refine_prompt(req: RefineRequest, deck: dict[str, Any] | None = None) -> str
             f"Überarbeite das gespeicherte Commander-Deck `{req.slug}` (lade es mit `load_deck`).",
             f"Bisherige Vorgaben: {budget.lstrip('- ')}",
             *_deck_table_lines(deck),
+            *opponents_mod.prompt_lines(deck),
             "Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
             "Nutze den Skill `commander-deckbuilder` (Abschnitt „Deck überarbeiten“).",
             f"Änderungswunsch: {req.request}",
@@ -561,6 +566,7 @@ def ask_prompt(question: str, deck: dict[str, Any], history: list[dict[str, Any]
         "- Festgehaltene Partien (Ergebnisse, Probleme, Gegner) liefert `deck_games` – nutze sie bei Fragen zu "
         "Schwächen, Matchups oder Verbesserungen.",
         *[ln.replace("gilt für dieses Deck", "gilt für dieses Deck – beachte sie bei Tausch-Vorschlägen") for ln in _deck_table_lines(deck)[:-1]],
+        *opponents_mod.prompt_lines(deck),
         "- Schreibe Kartennamen als [[Kartenname]] (englischer Oracle-Name).",
         "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze oder Listen. "
         "Keine Vorrede über deine Arbeitsschritte.",
@@ -678,6 +684,7 @@ UPGRADE_SCHEMA = {
 class UpgradeRequest(BaseModel):
     budget: float | None = Field(default=None, ge=0)
     focus: str | None = None
+    opponent_id: str | None = None
     count: int = Field(default=8, ge=1, le=20)
     model: str | None = None
 
@@ -701,6 +708,7 @@ def upgrade_prompt(deck: dict[str, Any], req: UpgradeRequest, has_collection: bo
         "- Bracket, Hausregeln, Farbidentität und Blacklist (`get_blacklist`) einhalten; keine zusätzlichen Game Changer "
         "über dem Limit, keine im Bracket verbotenen Combos.",
         *_deck_table_lines(deck),
+        *opponents_mod.prompt_lines(deck, focus_id=req.opponent_id),
     ]
     if req.focus:
         lines.append(f"- Fokus des Nutzers: {req.focus}")
@@ -833,6 +841,9 @@ async def _clean_guide(deck: dict[str, Any], structured: Any) -> dict[str, Any] 
 class GameIn(BaseModel):
     result: str = Field(pattern="^(win|loss|draw)$")
     opponents: list[str] = Field(default_factory=list, max_length=5)
+    opponent_ids: list[str | None] = Field(default_factory=list, max_length=5)  # chosen opponent decks, same order
+    opponent_notes: list[str] = Field(default_factory=list, max_length=5)  # "what stood out", same order
+    remember_opponents: bool = True
     turn: int | None = Field(default=None, ge=1, le=60)
     issues: list[str] = Field(default_factory=list)
     mvp: str | None = None
@@ -848,7 +859,10 @@ async def api_games(slug: str) -> dict[str, Any]:
 @app.post("/api/decks/{slug}/games")
 async def api_game_add(slug: str, req: GameIn) -> dict[str, Any]:
     deck = _not_found(storage.load, slug)
-    mvp, opponents = req.mvp, req.opponents
+    slots = [{"commander": o.strip(), "id": (req.opponent_ids[i] if i < len(req.opponent_ids) else None),
+              "note": (req.opponent_notes[i] if i < len(req.opponent_notes) else "")}
+             for i, o in enumerate(req.opponents) if o.strip()]  # fmt: skip
+    mvp, opponents = req.mvp, [s["commander"] for s in slots]
     names = [n for n in [mvp or "", *opponents] if n.strip()]
     if names:  # English Oracle names where they resolve (German input works too)
         try:
@@ -857,9 +871,15 @@ async def api_game_add(slug: str, req: GameIn) -> dict[str, Any]:
             renames = {}
         mvp = renames.get(mvp or "", mvp)
         opponents = [renames.get(o, o) for o in opponents]
+    if req.result not in games.RESULTS or any(i not in games.ISSUES for i in req.issues):
+        raise HTTPException(400, "Ungültiges Ergebnis oder Problem")
+    game_id = uuid.uuid4().hex[:10]
+    for s, name in zip(slots, opponents):
+        s["commander"] = name
+    ids = await opponents_mod.link_game(slug, game_id, slots, remember=req.remember_opponents) if slots else []
     try:
         entry = games.add(slug, result=req.result, opponents=opponents, turn=req.turn, issues=req.issues, mvp=mvp,
-                          note=req.note, version=deck.get("version"))  # fmt: skip
+                          note=req.note, version=deck.get("version"), entry_id=game_id, opponent_ids=ids)  # fmt: skip
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"game": entry, **games.summary(slug)}
@@ -948,6 +968,7 @@ def plan_prompt(deck: dict[str, Any], req: PlanRequest, has_collection: bool) ->
         "hinzugefügt hat, jede Karte nur einmal entfernen.",
         "- Bracket, Hausregeln, Farbidentität und Blacklist (`get_blacklist`) einhalten.",
         *_deck_table_lines(deck),
+        *opponents_mod.prompt_lines(deck),
     ]
     if deck.get("precon"):
         lines.append(f"- Das Deck ist das Precon „{deck['precon'].get('name')}“: raus zuerst die schwächsten Karten des Precons.")
@@ -1513,6 +1534,61 @@ async def api_find_commander(req: FinderRequest) -> dict[str, str]:
 class BlacklistUpdate(BaseModel):
     add: list[str] = []
     remove: list[str] = []
+
+
+class OpponentIn(BaseModel):
+    commanders: list[str] | None = Field(None, max_length=2)
+    label: str | None = None
+    player: str | None = None
+    bracket: int | None = Field(None, ge=1, le=5)
+    table_rule: str | None = None
+    tags: list[str] | None = None
+    note: str = Field("", max_length=1000)
+    remove_note: str | None = None
+
+
+@app.get("/api/opponents")
+async def api_opponents() -> dict[str, Any]:
+    return {"opponents": opponents_mod.all_opponents(), "tags": {k: v[0] for k, v in opponents_mod.TAGS.items()}}
+
+
+@app.post("/api/opponents")
+async def api_opponent_create(req: OpponentIn) -> dict[str, Any]:
+    changes = req.model_dump(exclude_unset=True, exclude={"commanders", "note", "remove_note"})
+    try:
+        o = await opponents_mod.create(req.commanders or [], note=req.note, **changes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return opponents_mod.describe(o)
+
+
+@app.get("/api/opponents/{opp_id}")
+async def api_opponent(opp_id: str) -> dict[str, Any]:
+    o = opponents_mod.get(opp_id)
+    if o is None:
+        raise HTTPException(404, "Unbekanntes Gegnerdeck")
+    return opponents_mod.describe(o)
+
+
+@app.patch("/api/opponents/{opp_id}")
+async def api_opponent_update(opp_id: str, req: OpponentIn) -> dict[str, Any]:
+    changes = req.model_dump(exclude_unset=True, exclude={"commanders", "note", "remove_note"})
+    try:
+        o = await opponents_mod.update(opp_id, commanders=req.commanders, add_note=req.note, remove_note=req.remove_note, **changes)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return opponents_mod.describe(o)
+
+
+@app.delete("/api/opponents/{opp_id}")
+async def api_opponent_delete(opp_id: str) -> dict[str, str]:
+    try:
+        opponents_mod.delete(opp_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"deleted": opp_id}
 
 
 class TableRuleIn(BaseModel):

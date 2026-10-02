@@ -58,17 +58,19 @@ def _write(deck_slug: str, items: list[dict[str, Any]]) -> None:
 
 def add(deck_slug: str, *, result: str, opponents: list[str] | None = None, turn: int | None = None,
         issues: list[str] | None = None, mvp: str | None = None, note: str = "", version: int | None = None,
-        played: str | None = None) -> dict[str, Any]:  # fmt: skip
+        played: str | None = None, entry_id: str | None = None, opponent_ids: list[str | None] | None = None) -> dict[str, Any]:  # fmt: skip
     if result not in RESULTS:
         raise ValueError(f"Ergebnis muss eines von {', '.join(RESULTS)} sein")
     unknown = [i for i in issues or [] if i not in ISSUES]
     if unknown:
         raise ValueError(f"Unbekannte Probleme: {', '.join(unknown)}")
     entry = {
-        "id": uuid.uuid4().hex[:10], "played": played or storage._now(), "result": result,
+        "id": entry_id or uuid.uuid4().hex[:10], "played": played or storage._now(), "result": result,
         "opponents": [o.strip() for o in opponents or [] if o.strip()][:5], "turn": turn,
         "issues": list(dict.fromkeys(issues or [])), "mvp": (mvp or "").strip() or None, "note": note.strip(), "version": version,
     }  # fmt: skip
+    if opponent_ids and any(opponent_ids):
+        entry["opponent_ids"] = list(opponent_ids)[: len(entry["opponents"])]
     _write(deck_slug, games(deck_slug) + [entry])
     return entry
 

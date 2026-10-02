@@ -157,6 +157,10 @@ For "make it cheaper / stronger / bracket X / more draw / swap Y":
 1. `load_deck` the deck (or `import_deck` a deck link – Archidekt, Moxfield, MTGGoldfish, TappedOut,
    Deckstats, EDHREC average deck –, `import_precon` a starter deck found with `search_precons`, or parse a
    pasted list). `deck_games` shows logged games and their most common problems – use them to decide what to change.
+   `opponent_decks` lists the decks the user plays against (commander, traits, observations, record – no card
+   lists; typical cards via `edhrec_recommendations` for that commander). Prepare for the relevant ones with
+   fitting interaction and answers, without turning the deck into a pure hate deck. When the user tells you
+   something about an opponent ("Tims Atraxa gewinnt mit Thassa's Oracle"), offer to note it with `update_opponent_deck`.
 2. `validate_deck` to see the current state.
 3. Make targeted swaps (keep the count at 100, keep what works), research replacements as above;
    `similar_cards` lists replacements for one card (same role, fits the colours, not in the deck).

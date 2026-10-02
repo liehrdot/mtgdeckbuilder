@@ -81,7 +81,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "collection", "orders", "deskmat", "glossary", "tables", "blacklist", "settings"];
+const VIEWS = ["new", "job", "deck", "collection", "orders", "deskmat", "glossary", "opponents", "tables", "blacklist", "settings"];
 const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
@@ -110,6 +110,7 @@ async function route() {
   if (r.view === "deskmat") showDeskmat(r.slug);
   if (r.view === "orders") showOrders(r.slug);
   if (r.view === "tables") showTables(r.slug);
+  if (r.view === "opponents") showOpponents(r.slug);
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -121,7 +122,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", opponents: "Gegnerdecks", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -512,7 +513,7 @@ const TOOL_LABELS = {
   get_cards: "liest Kartentexte", find_commanders: "sucht Commander", find_combos: "sucht Combos",
   validate_deck: "prüft das Deck (Legalität, Bracket, Budget)", save_deck: "speichert das Deck",
   load_deck: "lädt das Deck", bracket_rules: "liest die Bracket-Regeln", game_changers: "prüft Game Changer",
-  get_blacklist: "liest deine Blacklist", table_rules: "liest deine Tischregeln", update_table_rule: "ändert eine Tischregel", deck_games: "liest deine Partien", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
+  get_blacklist: "liest deine Blacklist", table_rules: "liest deine Tischregeln", opponent_decks: "liest deine Gegnerdecks", update_opponent_deck: "notiert ein Gegnerdeck", update_table_rule: "ändert eine Tischregel", deck_games: "liest deine Partien", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
   list_deck_versions: "liest den Verlauf", compare_deck_versions: "vergleicht Versionen",
 };
 const toolText = (name) => `Claude ${TOOL_LABELS[name] || `nutzt ${name}`} …`;
@@ -1537,7 +1538,8 @@ $("#upgrade-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!currentDeck || currentJob) return;
   const f = new FormData(e.target);
-  const body = { budget: f.get("budget") ? Number(f.get("budget")) : null, focus: f.get("focus") || null, count: Number(f.get("count")) };
+  const body = { budget: f.get("budget") ? Number(f.get("budget")) : null, focus: f.get("focus") || null, count: Number(f.get("count")),
+    opponent_id: f.get("opponent_id") || null };
   const { slug, name } = currentDeck;
   try {
     const { job } = await api(`/api/decks/${enc(slug)}/upgrades`, { method: "POST", body });
@@ -1820,6 +1822,7 @@ $("#guide").addEventListener("click", (e) => {
 let gameData = null;  // { slug, games, stats, learn_focus, issue_labels, result_labels }
 
 async function loadGames(d) {
+  renderKnownOpps();
   $("#game-deck-cards").innerHTML = [...d.commanders, ...d.cards.map((c) => c.name)].map((n) => `<option value="${esc(n)}">`).join("");
   try {
     const data = await api(`/api/decks/${enc(d.slug)}/games`);
@@ -1851,7 +1854,7 @@ function renderGames(slug, data) {
   $("#game-empty").hidden = !!data.games.length;
   $("#game-list").innerHTML = data.games.slice().reverse().map((g) => `<li data-id="${esc(g.id)}">
       <div class="when"><span class="res ${esc(g.result)}">${esc(data.result_labels[g.result] || g.result)}</span><br><span class="meta">${esc(fmtDate(g.played))}${g.version ? ` · v${esc(g.version)}` : ""}</span></div>
-      <div>${g.opponents.length ? `gegen ${g.opponents.map(esc).join(", ")}` : '<span class="meta">Gegner nicht notiert</span>'}${g.turn ? ` · Zug ${esc(g.turn)}` : ""}
+      <div>${g.opponents.length ? `gegen ${g.opponents.map((o, i) => g.opponent_ids?.[i] ? `<a href="#/opponents/${enc(g.opponent_ids[i])}">${esc(o)}</a>` : esc(o)).join(", ")}` : '<span class="meta">Gegner nicht notiert</span>'}${g.turn ? ` · Zug ${esc(g.turn)}` : ""}
         ${g.mvp ? `<br>Beste Karte: <strong>${esc(g.mvp)}</strong>` : ""}${g.note ? `<br><span class="meta">${esc(g.note)}</span>` : ""}
         ${g.issues.length ? `<div class="issues">${g.issues.map((i) => `<span>${esc(data.issue_labels[i] || i)}</span>`).join("")}</div>` : ""}</div>
       <button type="button" class="icon-btn game-del" aria-label="Partie löschen" title="Partie löschen">${icon("x")}</button></li>`).join("");
@@ -1862,16 +1865,20 @@ $("#game-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!currentDeck) return;
   const f = new FormData(e.target);
+  const slots = [1, 2, 3].map((n) => ({ name: (f.get(`opp${n}`) || "").trim(), note: (f.get(`oppnote${n}`) || "").trim(),
+    id: e.target.elements[`opp${n}`].dataset.oid || null })).filter((s) => s.name);
   const body = {
     result: f.get("result"), turn: f.get("turn") ? Number(f.get("turn")) : null, mvp: f.get("mvp") || null,
-    opponents: [f.get("opp1"), f.get("opp2"), f.get("opp3")].filter((o) => o && o.trim()),
-    issues: f.getAll("issues"), note: f.get("note") || "",
+    opponents: slots.map((s) => s.name), opponent_ids: slots.map((s) => s.id), opponent_notes: slots.map((s) => s.note),
+    remember_opponents: !!f.get("remember_opponents"), issues: f.getAll("issues"), note: f.get("note") || "",
   };
   const slug = currentDeck.slug;
   try {
     const data = await api(`/api/decks/${enc(slug)}/games`, { method: "POST", body });
     e.target.reset();
+    for (const n of [1, 2, 3]) delete e.target.elements[`opp${n}`].dataset.oid;
     if (currentDeck?.slug === slug) renderGames(slug, data);
+    if (body.opponents.length) refreshOpponents().then(renderKnownOpps);
     toast(body.result === "win" ? "Sieg gespeichert – Glückwunsch!" : "Partie gespeichert.");
   } catch (err) { fail(err); }
 });
@@ -2879,6 +2886,184 @@ for (const list of ["#bl-list", "#bl-rules"]) {
 }
 
 // ============================================================================================
+// opponent decks ("Gegnerdecks"): commander + what stood out, linked from the game log
+// ============================================================================================
+let oppIndex = [];
+let oppTags = {};
+let currentOpp = null;
+
+async function refreshOpponents() {
+  const data = await api("/api/opponents").catch(() => ({ opponents: [], tags: {} }));
+  oppIndex = data.opponents;
+  oppTags = data.tags;
+  $("#opp-count").textContent = oppIndex.length || "";
+  const sel = $("#upgrade-opp");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">alle meine Gegner berücksichtigen</option>'
+    + oppIndex.map((o) => `<option value="${esc(o.id)}">${esc(o.title)}</option>`).join("");
+  sel.value = oppIndex.some((o) => o.id === keep) ? keep : "";
+  $(".upgrade-opp").hidden = !oppIndex.length;
+}
+
+function oppMeta(o) {
+  const r = o.record;
+  return [o.player && `spielt ${o.player}`, o.bracket && `etwa Bracket ${o.bracket}`,
+    r.games ? `deine Bilanz ${r.wins}–${r.losses}${r.draws ? "–" + r.draws : ""} in ${r.games} Partie${r.games === 1 ? "" : "n"}` : "noch keine Partie",
+    ...o.tag_labels].filter(Boolean).join(" · ");
+}
+
+// game form: quick picks of known opponents fill the next empty slot
+function renderKnownOpps() {
+  const box = $("#game-known-opps");
+  const top = oppIndex.slice(0, 12);
+  box.hidden = !top.length;
+  box.innerHTML = top.length ? '<em class="opp-known-label">Deine Gegner:</em>' + top.map((o) =>
+    `<button type="button" class="chip" data-oid="${esc(o.id)}" title="${esc(oppMeta(o))}">${esc(o.title)}</button>`).join("") : "";
+}
+$("#game-known-opps").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-oid]");
+  if (!b) return;
+  const o = oppIndex.find((x) => x.id === b.dataset.oid);
+  const els = $("#game-form").elements;
+  const slot = [1, 2, 3].map((n) => els[`opp${n}`]).find((el) => !el.value.trim() || el.dataset.oid === o.id);
+  if (!slot) { toast("Alle drei Gegner-Felder sind belegt.", "error"); return; }
+  slot.value = o.commanders.join(" + ").split(" + ")[0];
+  slot.dataset.oid = o.id;
+  els[slot.name.replace("opp", "oppnote")].focus();
+});
+for (const n of [1, 2, 3]) {
+  $(`#game-form [name=opp${n}]`).addEventListener("input", (e) => { delete e.target.dataset.oid; });
+}
+
+async function showOpponents(id) {
+  $("#opp-list-view").hidden = !!id;
+  $("#opp-view").hidden = !id;
+  await refreshOpponents();
+  if (!id) {
+    currentOpp = null;
+    $("#opp-empty").hidden = !!oppIndex.length;
+    $("#opp-list").innerHTML = oppIndex.map((o) => `<a class="panel order-row opp-row" href="#/opponents/${enc(o.id)}">
+        ${o.image ? `<img src="${esc(o.image)}" alt="" loading="lazy">` : ""}
+        <div><h3>${esc(o.title)}</h3><p class="muted small">${esc(oppMeta(o))}</p>
+          ${o.notes.length ? `<p class="small opp-last">„${esc(o.notes[o.notes.length - 1].text)}“</p>` : ""}</div>
+        <span class="muted small">${o.record.last ? esc(fmtDate(o.record.last)) : ""}</span></a>`).join("");
+    return;
+  }
+  try { currentOpp = await api(`/api/opponents/${enc(id)}`); } catch (err) { fail(err); go("#/opponents"); return; }
+  renderOpponent();
+}
+
+function renderOpponent() {
+  const o = currentOpp;
+  $("#opp-name").textContent = o.title;
+  $("#opp-meta").textContent = oppMeta(o);
+  $("#opp-thumb").hidden = !o.image;
+  if (o.image) $("#opp-thumb").src = o.image;
+  $("#opp-edhrec").href = o.edhrec_url;
+  const f = $("#opp-form").elements;
+  f.commander.value = o.commanders[0] || "";
+  f.partner.value = o.commanders[1] || "";
+  f.label.value = o.label || "";
+  f.player.value = o.player || "";
+  f.bracket.value = o.bracket || "";
+  $("#opp-table").innerHTML = '<option value="">–</option>' + tableSets.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+  $("#opp-table").value = o.table_rule && tableById(o.table_rule) ? o.table_rule : "";
+  $("#opp-tags").innerHTML = Object.entries(oppTags).map(([k, label]) =>
+    `<label><input type="checkbox" name="tags" value="${esc(k)}"${o.tags.includes(k) ? " checked" : ""}><span>${esc(label)}</span></label>`).join("");
+  $("#opp-notes-empty").hidden = !!o.notes.length;
+  const deckName = (slug) => deckIndex.find((d) => d.slug === slug)?.name || slug;
+  $("#opp-notes").innerHTML = o.notes.slice().reverse().map((n) => `<li>
+      <div><p>${esc(n.text)}</p><span class="muted small">${esc(fmtDate(n.at))}${n.deck_slug ? ` · Partie mit <a href="#/deck/${enc(n.deck_slug)}/partien">${esc(deckName(n.deck_slug))}</a>` : ""}</span></div>
+      <button type="button" class="icon-btn" data-note="${esc(n.id)}" aria-label="Notiz löschen" title="Notiz löschen">${icon("x")}</button></li>`).join("");
+  const r = o.record;
+  $("#opp-record").innerHTML = !r.games ? '<p class="empty-inline">Noch keine Partie gegen dieses Deck festgehalten.</p>'
+    : `<div class="kpis"><div><b>${r.games}</b><span>Partien</span></div><div><b>${r.wins}–${r.losses}${r.draws ? "–" + r.draws : ""}</b><span>Siege–Niederlagen</span></div></div>
+       ${r.per_deck.length > 1 ? `<p class="game-stats-more">${r.per_deck.map((p) => `${esc(p.name)} ${p.wins}–${p.losses}`).join(" · ")}</p>` : ""}`;
+  const labels = { win: "Sieg", loss: "Niederlage", draw: "Unentschieden" };
+  $("#opp-games").innerHTML = r.history.map((g) => `<li>
+      <div class="when"><span class="res ${esc(g.result)}">${esc(labels[g.result] || g.result)}</span><br><span class="meta">${esc(fmtDate(g.played))}</span></div>
+      <div>mit <a href="#/deck/${enc(g.deck_slug)}/partien">${esc(g.deck)}</a>${g.turn ? ` · Zug ${esc(g.turn)}` : ""}${g.note ? `<br><span class="meta">${esc(g.note)}</span>` : ""}</div><span></span></li>`).join("");
+  const mine = $("#opp-my-deck");
+  const faced = r.per_deck[0]?.slug;
+  mine.innerHTML = deckIndex.map((d) => `<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join("") || '<option value="">– noch keine Decks –</option>';
+  if (faced && deckIndex.some((d) => d.slug === faced)) mine.value = faced;
+  $("#opp-ask").disabled = $("#opp-upgrade").disabled = !deckIndex.length;
+}
+
+async function patchOpp(body, msg = "") {
+  currentOpp = await api(`/api/opponents/${enc(currentOpp.id)}`, { method: "PATCH", body });
+  renderOpponent();
+  refreshOpponents();
+  if (msg) toast(msg);
+}
+$("#opp-new").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  try {
+    const o = await api("/api/opponents", { method: "POST", body: { commanders: [f.commander.value], label: f.label.value, note: f.note.value } });
+    e.target.reset();
+    toast(`„${o.title}“ gemerkt.`);
+    go(`#/opponents/${enc(o.id)}`);
+  } catch (err) { fail(err); }
+});
+$("#opp-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const fd = new FormData(e.target);
+  try {
+    await patchOpp({ commanders: [f.commander.value, f.partner.value].filter((x) => x.trim()), label: f.label.value, player: f.player.value,
+      bracket: f.bracket.value ? Number(f.bracket.value) : null, table_rule: f.table_rule.value || null, tags: fd.getAll("tags") }, "Gespeichert.");
+  } catch (err) { fail(err); }
+});
+$("#opp-note-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const note = e.target.elements.note.value.trim();
+  if (!note) return;
+  try { await patchOpp({ note }); e.target.reset(); } catch (err) { fail(err); }
+});
+$("#opp-notes").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-note]");
+  if (b) await patchOpp({ remove_note: b.dataset.note }).catch(fail);
+});
+$("#opp-delete").addEventListener("click", async () => {
+  $("#opp-menu").open = false;
+  const o = currentOpp;
+  if (!(await ask({ title: `„${o.title}“ löschen?`, danger: true, ok: "Löschen",
+    text: "Notizen und Steckbrief gehen verloren. Deine Partien bleiben erhalten, nur ohne Verknüpfung." }))) return;
+  try {
+    await api(`/api/opponents/${enc(o.id)}`, { method: "DELETE" });
+    toast(`„${o.title}“ gelöscht.`);
+    go("#/opponents");
+  } catch (err) { fail(err); }
+});
+$("#opp-ask").addEventListener("click", async () => {
+  const slug = $("#opp-my-deck").value;
+  if (!slug) return;
+  const o = currentOpp;
+  go(`#/deck/${enc(slug)}/fragen`);
+  await new Promise((r) => setTimeout(r, 50));
+  if (currentDeck?.slug !== slug && !(await openDeck(slug))) return;
+  const q = $("#qa-form").elements.question;
+  q.value = `Wie spiele ich mit diesem Deck gegen ${o.title}? Worauf muss ich achten, welche Karten halte ich zurück, was ist ihre Schwachstelle?`
+    + (o.notes.length ? ` Mir ist aufgefallen: ${o.notes.slice(-3).map((n) => n.text).join("; ")}.` : "");
+  q.focus();
+  toast("Frage vorbereitet – „Fragen“ schickt sie an Claude.");
+});
+$("#opp-upgrade").addEventListener("click", async () => {
+  const slug = $("#opp-my-deck").value;
+  if (!slug) return;
+  const id = currentOpp.id;
+  go(`#/deck/${enc(slug)}/anpassen`);
+  await new Promise((r) => setTimeout(r, 50));
+  if (currentDeck?.slug !== slug && !(await openDeck(slug))) return;
+  $("#upgrade-opp").value = id;
+  const f = $("#upgrade-form");
+  f.scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#upgrade-btn").focus({ preventScroll: true });
+  toast("Gegner eingetragen – „Vorschläge holen“ startet die Suche.");
+});
+
+// ============================================================================================
 // table rules ("Tischregeln"): rule sets per playgroup, chosen per deck
 // ============================================================================================
 let tableSets = [];
@@ -3884,6 +4069,8 @@ function paletteItems() {
     { label: "Neue Sammelbestellung", hint: "Sammelbestellungen", run: () => { go("#/orders"); $("#order-new").click(); } },
     { label: "Deskmat-Studio", hint: "Seite", run: () => go("#/deskmat") },
     { label: "Glossar", hint: "Seite", run: () => go("#/glossary") },
+    { label: "Gegnerdecks", hint: "Seite", run: () => go("#/opponents") },
+    ...oppIndex.map((o) => ({ label: o.title, hint: "Gegnerdeck", run: () => go(`#/opponents/${enc(o.id)}`) })),
     { label: "Tischregeln", hint: "Seite", run: () => go("#/tables") },
     ...tableSets.map((t) => ({ label: t.name, hint: "Tischregel", run: () => go(`#/tables/${enc(t.id)}`) })),
     { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
@@ -3950,7 +4137,10 @@ wireAutocomplete($("#commander"), $("#ac-commander"), previewCommander);
 wireAutocomplete($("#partner"), $("#ac-partner"));
 wireAutocomplete($("#bl-input"), $("#ac-bl"));
 wireAutocomplete($("#tr-input"), $("#ac-tr"));
+wireAutocomplete($("#opp-new [name=commander]"), $("#ac-opp-new"));
+wireAutocomplete($("#opp-form [name=commander]"), $("#ac-opp-edit"));
+wireAutocomplete($("#opp-form [name=partner]"), $("#ac-opp-partner"));
 setMode("build");
 refreshBlacklist();
 loadSettings().catch((err) => console.error(err));
-Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary(), refreshTableRules()]).then(route, (err) => { fail(err); route(); });
+Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary(), refreshTableRules(), refreshOpponents()]).then(route, (err) => { fail(err); route(); });

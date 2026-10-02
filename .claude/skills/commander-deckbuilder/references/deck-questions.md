@@ -41,6 +41,8 @@ as `[[Card Name]]`. Keep it short enough to read at the table.
 - Name the threats you must answer, which of your cards answer them, the dangerous cards of
   theirs for your plan, and a verdict (favoured / even / unfavoured, with why).
 - Optional: 2–4 sideboard-style swaps that improve the matchup without breaking the bracket.
+- If the opponent is one of the user's `opponent_decks`, use its traits, the user's observations and
+  the record against it – they describe how that player's version actually plays.
 
 **Weaknesses / "Was fehlt?"**
 - Role counts vs. the minimums (ramp, draw, removal, wipes), curve, colour sources, single points

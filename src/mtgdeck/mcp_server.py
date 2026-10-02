@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, printorders, proxy, scryfall, spellbook, storage, tablerules
+from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, opponents, printorders, proxy, scryfall, spellbook, storage, tablerules
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -451,6 +451,57 @@ async def update_table_rule(
         out = await tablerules.update(rs["id"], add=add, remove=remove, **changes)
         await tablerules.revalidate_decks(rs["id"])
     return {"id": out["id"], "name": out["name"], "rules": out["summary"], "not_found": out.get("not_found", [])}
+
+
+# --- opponent decks ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def opponent_decks() -> dict[str, Any]:
+    """Decks the user played against: commander(s), label/player, rough bracket, traits (tags), the user's
+    observations and the record of the user's decks against them. No card lists – look up typical cards of a
+    commander with edhrec_recommendations. Use them when tuning a deck for the user's playgroup."""
+    items = opponents.all_opponents()
+    return {"count": len(items), "opponent_decks": [
+        {"id": o["id"], "name": o["title"], "commanders": o["commanders"], "player": o.get("player") or None,
+         "bracket": o.get("bracket"), "table_rule": o.get("table_rule"), "traits": o["tag_labels"],
+         "notes": [n["text"] for n in (o.get("notes") or [])[-8:]],
+         "record": {k: o["record"][k] for k in ("games", "wins", "losses", "draws", "per_deck")}} for o in items],
+        "tags": {k: v[0] for k, v in opponents.TAGS.items()}}  # fmt: skip
+
+
+@mcp.tool()
+async def update_opponent_deck(
+    commander: Annotated[str, Field(description="Commander of the opponent deck (any language); finds or creates it")],
+    note: Annotated[str, Field(description="Observation to add, e.g. 'gewinnt mit Thassa's Oracle', 'viele Board Wipes'")] = "",
+    tags: Annotated[list[str] | None, Field(description="Traits, keys from opponent_decks.tags (combo, fast, stax, wipes, …); replaces the list")] = None,
+    label: Annotated[str | None, Field(description="Own name, e.g. 'Tims Atraxa'")] = None,
+    player: str | None = None,
+    bracket: Annotated[int | None, Field(ge=1, le=5)] = None,
+    opponent_id: Annotated[str | None, Field(description="Id when several decks share the commander")] = None,
+    delete: bool = False,
+) -> dict[str, Any]:
+    """Create or change an opponent deck, or add an observation. Only on explicit user request."""
+    o = opponents.get(opponent_id) if opponent_id else None
+    if o is None:
+        _, renames, _ = await resolve([commander])
+        found = opponents.find(renames.get(commander, commander))
+        o = found[0] if len(found) == 1 else None
+        if len(found) > 1:
+            return {"error": "Mehrere Gegnerdecks mit diesem Commander – gib opponent_id an.",
+                    "candidates": [{"id": x["id"], "name": opponents.title(x)} for x in found]}  # fmt: skip
+    if delete:
+        if not o:
+            return {"error": f"Kein Gegnerdeck mit {commander}"}
+        opponents.delete(o["id"])
+        return {"deleted": opponents.title(o)}
+    changes = {k: v for k, v in {"tags": tags, "label": label, "player": player, "bracket": bracket}.items() if v is not None}
+    try:
+        o = await (opponents.update(o["id"], add_note=note, **changes) if o else opponents.create([commander], note=note, **changes))
+    except ValueError as exc:
+        return {"error": str(exc)}
+    d = opponents.describe(o)
+    return {"id": d["id"], "name": d["title"], "traits": d["tag_labels"], "notes": [n["text"] for n in d["notes"][-8:]]}
 
 
 @mcp.tool()

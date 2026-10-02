@@ -595,6 +595,30 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .bl-rule-main { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); min-width: 0; }
 .bl-rule-main p, .bl-rule-main details { flex-basis: 100%; margin: 0; }
 .tr-rules { margin-top: var(--space-4); }
+/* opponent decks */
+.opp-slots { display: grid; gap: var(--space-2); }
+.opp-slot { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: var(--space-2); }
+.opp-slot datalist { display: none; }
+.opp-known { margin-bottom: var(--space-2); align-items: center; }
+.opp-known .chip { font-size: var(--fs-sm); }
+.opp-known-label { font-style: normal; color: var(--muted); font-size: var(--fs-sm); margin-right: 2px; }
+.opp-slots + .check { margin-top: var(--space-3); }
+.opp-row { justify-content: flex-start; }
+.opp-row > div { flex: 1; min-width: 0; }
+.opp-row img { width: 46px; height: 64px; object-fit: cover; border-radius: 4px; flex: none; }
+.opp-last { margin: 2px 0 0; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opp-head { align-items: flex-start; justify-content: flex-start; }
+.opp-head > div:nth-child(2) { flex: 1; min-width: 0; }
+.opp-thumb { width: 72px; height: 100px; object-fit: cover; border-radius: 6px; flex: none; }
+.opp-notes { list-style: none; margin: var(--space-3) 0 0; padding: 0; }
+.opp-notes li { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+.opp-notes li:first-child { border-top: none; }
+.opp-notes p { margin: 0 0 2px; }
+.opp-prepare { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.opp-prepare .field { margin: 0; min-width: 220px; flex: 1; }
+.upgrade-opp { grid-column: 1 / -1; }
+@media (max-width: 640px) { .opp-slot { grid-template-columns: 1fr; } .opp-thumb { width: 54px; height: 75px; } .opp-prepare > * { flex-basis: 100%; } .opp-prepare .btn { white-space: normal; height: auto; min-height: 40px; } }
+
 .tr-rules + .chips { margin-top: var(--space-3); }
 .table-field { margin-top: var(--space-3); max-width: 420px; }
 .warn-text { color: var(--warn); }

@@ -89,6 +89,11 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `validate_deck` reports blacklisted cards and `card_rules()` hits as errors ("Blacklist-Regel „…“"), and 2-card Spellbook combos when `two-card-combos` is set.
   - The MCP search tools (`search_cards`, `local_card_search`, `find_commanders`, `edhrec_recommendations`) and `deckedit` suggestions filter them out via `filter_cards()` / `card_rules()`; name-only EDHREC entries are looked up in the local DB for predicate rules.
   - `GET /api/blacklist` → `{cards, rules, catalog}`.
+- **`opponents.py`** (Gegnerdecks): decks the user played against in `decks/.opponents.json` – `commanders`, `label`, `player`, `bracket`, `table_rule`, `tags` (keys of `TAGS`: label + what helps against it), `notes` `[{id, text, at, game_id, deck_slug}]`, `color_identity`, `image`. No card lists.
+  - Games link to them: `games.add(opponent_ids=)` (same order as `opponents`); `link_game()` matches by id, else by commander, else creates one (`remember`), and stores the per-opponent note. `POST /games` takes `opponent_ids`, `opponent_notes`, `remember_opponents`.
+  - `record()` = games against it over all decks (`opponent_ids`, or the commander name for unlinked games); `describe()` adds `title`, `tag_labels`, `record`, `edhrec_url`.
+  - `relevant(deck)` picks the opponents that matter (faced with the deck ×3, same table rule +5, else the most played); `prompt_lines(deck, focus_id=)` goes into the refine/retune/upgrade/plan/ask prompts and into builds with a table rule; `UpgradeRequest.opponent_id` = "besser gegen".
+  - MCP `opponent_decks` (read-only) and `update_opponent_deck` (write). Routes `/api/opponents[/{id}]`; GUI page `#/opponents[/<id>]`, quick picks + note fields in the game form, select in the upgrade form.
 - **`tablerules.py`** (Tischregeln): named rule sets per playgroup in `tablerules.json` (`MTG_TABLERULES_FILE`, gitignored): `rules` (blacklist rule lines), `cards`, `max_bracket`, `max_game_changers`, `max_tutors`, `deck_budget` (+ `currency`, counts for proxy decks too), `no_proxies`.
   - A deck stores one id as `deck["table_rule"]` (a content key, so changing it is a new version). `validate_deck(table_rule=)` adds `violations()` to `errors` and returns `validation["table_rule"]` (`{id, name, compliant, violations, warnings, notes, summary}`); `revalidate()` passes the deck's rule. Power-profile house rules stay separate; both are checked, so the stricter wins.
   - MCP `save_deck(table_rule=)`: omitted keeps the deck's current rule on a refine, `""` removes it. `load_deck` adds `table_rule_info`. Tools `table_rules` (read-only) and `update_table_rule` (write).
@@ -137,7 +142,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `save_deck` re-validates before writing and stores the validation result inside the deck JSON.
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
   - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
-    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/orders[/<id>]` · `#/deskmat[/<id>]` · `#/glossary[/<term>]` · `#/tables[/<id>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
+    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/orders[/<id>]` · `#/deskmat[/<id>]` · `#/glossary[/<term>]` · `#/opponents[/<id>]` · `#/tables[/<id>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
     - „Neues Deck“ has three modes (`buildForm.dataset.mode` build|find|import); import has sub-modes link|text|precon (`#import-box[data-imode]`).
     - The print studio (`#print-studio`) is one block: `mountPrintStudio()` moves it into the deck tab or the order page; print code uses `pctx()` (deck or `currentOrder`) instead of `currentDeck`.
     - After every rebuild (refine/retune job via `startJob({since})`, manual edit, upgrades, plan stage) `offerOrderAfterRebuild(slug, since)` asks via `orderDialog()` whether the new cards go into a collective order.
@@ -177,6 +182,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - redirects the cache, DB, decks, blacklist, table rules, collection and proxies to `tmp_path`;
   - disables throttling.
 - Any card name starting with `Filler` is synthesized on demand. `deck_lines()` builds a legal 99-card main deck for Meren (BG).
+- `CARDS` includes two opponent commanders (Atraxa, Praetors' Voice; Krenko, Mob Boss).
 - `PRINTINGS` fakes specific printings for `/cards/collection` id and set+number lookups; "Pitiless Plunderer" carries `all_parts` (Treasure token, The Monarch) for token tests; `otag:`/`t:` searches return replacement candidates.
 - Add new endpoints to the mock `handler`. It also fakes `cards.scryfall.io`, the MPC Autofill server (`MPC_SERVER`) and its CDN, returning generated images.
 - `test_proxy.py` drives the terminal with a fake `autofill.py` that shows the same InquirerPy menu (inquirerpy is a dev dependency). The test answers it with raw arrow-key input.

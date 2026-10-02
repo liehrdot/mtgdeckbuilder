@@ -31,6 +31,7 @@
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h7"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/></symbol>
   <symbol id="i-table" viewBox="0 0 24 24"><path d="M3 10h18M6 10v9M18 10v9M9 14h6"/><circle cx="8" cy="5" r="1.8"/><circle cx="16" cy="5" r="1.8"/></symbol>
+  <symbol id="i-swords" viewBox="0 0 24 24"><path d="M4 4l9 9M4 4h4M4 4v4M20 4l-9 9M20 4h-4M20 4v4"/><path d="M8.5 15.5 5 19M15.5 15.5 19 19M7 13l4 4M17 13l-4 4"/></symbol>
   <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11l2-8H6.3"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
@@ -63,6 +64,7 @@
       <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
       <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
       <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
+      <a href="#/opponents" data-nav="opponents"><svg class="icon"><use href="#i-swords"/></svg>Gegnerdecks <span id="opp-count" class="count"></span></a>
       <a href="#/tables" data-nav="tables"><svg class="icon"><use href="#i-table"/></svg>Tischregeln <span id="tr-count" class="count"></span></a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
       <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
@@ -486,6 +488,8 @@
           <p class="muted">Claude sucht die wirkungsvollsten Tausche für dein Budget. Du wählst aus, was übernommen wird –
             ohne weiteren KI-Lauf.</p>
           <form id="upgrade-form" class="upgrade-form" autocomplete="off">
+            <label class="field upgrade-opp" hidden><span>Besser gegen <span class="muted">(optional)</span></span>
+              <select name="opponent_id" id="upgrade-opp"><option value="">alle meine Gegner berücksichtigen</option></select></label>
             <label class="field" id="upgrade-budget-field"><span>Budget <span class="muted" id="upgrade-cur">(EUR)</span></span>
               <input name="budget" type="number" min="0" step="5" placeholder="unbegrenzt" inputmode="numeric"></label>
             <label class="field"><span>Fokus <span class="muted">(optional)</span></span>
@@ -608,12 +612,17 @@
                 </div>
               </div>
               <div class="field-block">
-                <span class="field-label" id="opp-label">Gegner-Commander <span class="muted">(optional)</span></span>
-                <div class="game-row" role="group" aria-labelledby="opp-label">
-                  <input name="opp1" list="ac-opp1" placeholder="z. B. Atraxa" aria-label="Erster Gegner"><datalist id="ac-opp1"></datalist>
-                  <input name="opp2" list="ac-opp2" placeholder="2. Gegner" aria-label="Zweiter Gegner"><datalist id="ac-opp2"></datalist>
-                  <input name="opp3" list="ac-opp3" placeholder="3. Gegner" aria-label="Dritter Gegner"><datalist id="ac-opp3"></datalist>
+                <span class="field-label" id="opp-label">Gegner <span class="muted">(optional) – Commander und was dir aufgefallen ist</span></span>
+                <div class="pick-chips opp-known" id="game-known-opps" hidden></div>
+                <div class="opp-slots" role="group" aria-labelledby="opp-label">
+                  <div class="opp-slot"><input name="opp1" list="ac-opp1" placeholder="z. B. Atraxa" aria-label="Commander des ersten Gegners"><datalist id="ac-opp1"></datalist>
+                    <input name="oppnote1" placeholder="Aufgefallen, z. B. Combo mit Thassa's Oracle" aria-label="Aufgefallen beim ersten Gegner"></div>
+                  <div class="opp-slot"><input name="opp2" list="ac-opp2" placeholder="2. Gegner" aria-label="Commander des zweiten Gegners"><datalist id="ac-opp2"></datalist>
+                    <input name="oppnote2" placeholder="Aufgefallen (optional)" aria-label="Aufgefallen beim zweiten Gegner"></div>
+                  <div class="opp-slot"><input name="opp3" list="ac-opp3" placeholder="3. Gegner" aria-label="Commander des dritten Gegners"><datalist id="ac-opp3"></datalist>
+                    <input name="oppnote3" placeholder="Aufgefallen (optional)" aria-label="Aufgefallen beim dritten Gegner"></div>
                 </div>
+                <label class="check small"><input type="checkbox" name="remember_opponents" checked> Neue Gegner unter „Gegnerdecks“ merken</label>
               </div>
               <div class="field-block">
                 <span class="field-label">Was lief schief? <span class="muted">(Mehrfachwahl)</span></span>
@@ -1057,6 +1066,95 @@
       </header>
       <input id="gl-filter" type="search" class="gl-filter" placeholder="Begriff suchen, z. B. Trampelschaden oder Ward …" aria-label="Begriff suchen">
       <div id="gl-list" aria-live="polite"></div>
+    </section>
+
+    <!-- ============ opponent decks ============ -->
+    <section id="view-opponents" class="view narrow" data-view="opponents" hidden>
+      <div id="opp-list-view">
+        <header class="page-head">
+          <div>
+            <h1>Gegnerdecks</h1>
+            <p class="lead">Decks, gegen die du gespielt hast – nur der Commander und was dir aufgefallen ist, keine Kartenliste.
+              Beim Umbauen und bei Upgrade-Vorschlägen achtet Claude darauf; beim Festhalten einer Partie wählst du sie aus.</p>
+          </div>
+        </header>
+        <form class="panel" id="opp-new" autocomplete="off">
+          <h2>Gegnerdeck merken</h2>
+          <div class="row2">
+            <label class="field">Commander <input name="commander" list="ac-opp-new" required placeholder="z. B. Atraxa (auch deutsch)"><datalist id="ac-opp-new"></datalist></label>
+            <label class="field">Spieler / eigener Name <span class="muted">(optional)</span><input name="label" placeholder="z. B. Tims Atraxa" maxlength="80"></label>
+          </div>
+          <label class="field">Was ist dir aufgefallen? <span class="muted">(optional)</span>
+            <input name="note" placeholder="z. B. gewinnt mit Combo, viele Board Wipes, sehr schnell" maxlength="1000"></label>
+          <div class="form-actions"><button type="submit" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Merken</button></div>
+        </form>
+        <div id="opp-list" class="orders-list"></div>
+        <p id="opp-empty" class="empty-inline">Noch keine Gegnerdecks. Sie entstehen auch automatisch, wenn du im Deck unter „Partien“ eine Partie mit Gegner-Commandern festhältst.</p>
+      </div>
+
+      <div id="opp-view" hidden>
+        <header class="page-head opp-head">
+          <img id="opp-thumb" class="opp-thumb" alt="" hidden>
+          <div>
+            <a class="link small" href="#/opponents">← Alle Gegnerdecks</a>
+            <h1 id="opp-name"></h1>
+            <p id="opp-meta" class="lead"></p>
+          </div>
+          <div class="page-actions">
+            <details class="menu" id="opp-menu">
+              <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
+              <div class="menu-list" role="menu">
+                <a id="opp-edhrec" role="menuitem" target="_blank" rel="noopener">Typische Karten auf EDHREC ↗</a>
+                <button type="button" id="opp-delete" role="menuitem" class="danger">Löschen …</button>
+              </div>
+            </details>
+          </div>
+        </header>
+
+        <section class="panel">
+          <h2>Aufgefallen</h2>
+          <form id="opp-note-form" class="inline-form" autocomplete="off">
+            <input name="note" placeholder="z. B. hat in Zug 5 mit Thassa's Oracle gewonnen" aria-label="Neue Beobachtung" maxlength="1000" required>
+            <button type="submit" class="btn">Notieren</button>
+          </form>
+          <ul id="opp-notes" class="opp-notes"></ul>
+          <p id="opp-notes-empty" class="empty-inline">Noch nichts notiert.</p>
+        </section>
+
+        <form class="panel" id="opp-form" autocomplete="off">
+          <h2>Steckbrief</h2>
+          <div class="row2">
+            <label class="field">Commander <input name="commander" list="ac-opp-edit" required><datalist id="ac-opp-edit"></datalist></label>
+            <label class="field">Partner<input name="partner" placeholder="optional" list="ac-opp-partner"><datalist id="ac-opp-partner"></datalist></label>
+            <label class="field">Eigener Name <input name="label" maxlength="80" placeholder="z. B. Tims Atraxa"></label>
+            <label class="field">Spieler <input name="player" maxlength="80"></label>
+            <label class="field">Etwa Bracket
+              <select name="bracket"><option value="">unbekannt</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+            <label class="field">Spielt in Runde
+              <select name="table_rule" id="opp-table"><option value="">–</option></select></label>
+          </div>
+          <div class="field-block">
+            <span class="field-label">Merkmale <span class="muted">(Mehrfachwahl)</span></span>
+            <div id="opp-tags" class="pick-chips"></div>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn primary">Speichern</button></div>
+        </form>
+
+        <section class="panel">
+          <h2>Mit meinem Deck vorbereiten</h2>
+          <div class="opp-prepare">
+            <label class="field"><span class="sr-only">Mein Deck</span><select id="opp-my-deck" aria-label="Mein Deck"></select></label>
+            <button type="button" class="btn" id="opp-ask">Claude fragen: Wie spiele ich dagegen?</button>
+            <button type="button" class="btn" id="opp-upgrade">Upgrades gegen dieses Deck</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Partien gegen dieses Deck</h2>
+          <div id="opp-record"></div>
+          <ul id="opp-games" class="game-list"></ul>
+        </section>
+      </div>
     </section>
 
     <!-- ============ table rules ============ -->
