@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, printorders, proxy, scryfall, spellbook, storage
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -541,6 +541,42 @@ async def proxy_settings(
     return {**cfg, "autofill_found": str(found) if found else None,
             "upscaler_found": str(upscaler) if upscaler else None,
             "upscale_models": proxy.upscale_models(upscaler), "stocks": proxy.STOCKS}  # fmt: skip
+
+
+@mcp.tool()
+async def print_orders() -> dict[str, Any]:
+    """Collective print orders (Sammelbestellungen): name, id, counts and positions (cards/tokens with source)."""
+    return {"orders": printorders.orders()}
+
+
+class OrderPos(BaseModel):
+    name: str
+    qty: int = 1
+
+
+@mcp.tool()
+async def update_print_order(
+    order: Annotated[str | None, Field(description="Id or exact name of an order; a new order with this name is created if none matches")] = None,
+    add_cards: Annotated[list[OrderPos] | None, Field(description="Cards to print (any language, resolved to Oracle names)")] = None,
+    add_tokens: Annotated[list[OrderPos] | None, Field(description="Tokens/emblems by name, e.g. Treasure x 50")] = None,
+    from_deck: Annotated[str | None, Field(description="Add the cards of this saved deck (slug)")] = None,
+    only_missing: Annotated[bool, Field(description="With from_deck: only cards the collection lacks")] = False,
+    source: Annotated[str, Field(description="Label of the added positions, e.g. 'Upgrades Aesi'")] = "",
+) -> dict[str, Any]:
+    """Add cards and tokens to a collective print order, printed together like one deck in the GUI
+    (MPC Autofill / PDF). Returns the order with counts."""
+    existing = next((o for o in printorders.orders() if order and (o["id"] == order or o["name"].lower() == order.lower())), None)
+    target = existing or printorders.create(order or "Sammelbestellung")
+    items = [{"kind": "card", "name": c.name, "qty": c.qty, "source": source or "Claude"} for c in add_cards or []]
+    items += [{"kind": "token", "name": t.name, "qty": t.qty, "source": source or "Tokens"} for t in add_tokens or []]
+    try:
+        if from_deck:
+            items += printorders.deck_items(storage.load(from_deck), only_missing=only_missing)
+        if not items:
+            return {"error": "Nichts hinzuzufügen.", "order": target}
+        return await printorders.add(target["id"], items)
+    except (ValueError, FileNotFoundError) as exc:
+        return {"error": str(exc)}
 
 
 @mcp.tool()

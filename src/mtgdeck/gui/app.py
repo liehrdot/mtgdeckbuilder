@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, precons, proxy, rule0, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, precons, printorders, proxy, rule0, scryfall, storage
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -100,11 +100,11 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
                    "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck", "deck_games",
-                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons",
+                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons", "print_orders",
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
-               "edit_deck", "update_collection", "import_precon", "create_deskmat"]  # fmt: skip
+               "edit_deck", "update_collection", "import_precon", "create_deskmat", "update_print_order"]  # fmt: skip
 Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
 
 
@@ -1259,6 +1259,143 @@ async def api_deskmat_open_folder(pid: str) -> dict[str, Any]:
     return {"opened": True, "path": str(folder)}
 
 
+# --- collective print orders (Sammelbestellung) ------------------------------------------------------
+
+
+class OrderCreate(BaseModel):
+    name: str = ""
+
+
+class OrderItem(BaseModel):
+    kind: str = Field("card", pattern="^(card|token)$")
+    name: str = Field(min_length=1, max_length=200)
+    qty: int = Field(1, ge=1, le=printorders.MAX_QTY)
+    source: str | None = None
+    source_slug: str | None = None
+    type_line: str | None = None
+    token_id: str | None = Field(None, pattern="^[0-9a-f-]{36}$")
+    image: str | None = None
+
+
+class OrderAdd(BaseModel):
+    items: list[OrderItem] = Field(default_factory=list)
+    deck: str | None = None  # add cards of this deck ...
+    names: list[str] | None = None  # ... only these
+    only_missing: bool = False  # ... only what the collection lacks
+    since_version: int | None = None  # ... only the cards that came in after this version of the deck
+    text: str | None = None  # pasted list "2 Sol Ring"
+    url: str | None = None  # deck link (Moxfield, Archidekt, ...): all its cards incl. commanders
+
+
+@app.get("/api/orders")
+async def api_orders() -> list[dict[str, Any]]:
+    return printorders.orders()
+
+
+@app.post("/api/orders")
+async def api_order_create(req: OrderCreate) -> dict[str, Any]:
+    return printorders.create(req.name)
+
+
+@app.get("/api/orders/{oid}")
+async def api_order(oid: str) -> dict[str, Any]:
+    return printorders.summary(_not_found(printorders.load, oid))
+
+
+@app.patch("/api/orders/{oid}")
+async def api_order_rename(oid: str, req: OrderCreate) -> dict[str, Any]:
+    return _not_found(printorders.rename, oid, req.name)
+
+
+@app.delete("/api/orders/{oid}")
+async def api_order_delete(oid: str) -> dict[str, bool]:
+    _not_found(printorders.delete, oid)
+    return {"deleted": True}
+
+
+@app.post("/api/orders/{oid}/items")
+async def api_order_add(oid: str, req: OrderAdd) -> dict[str, Any]:
+    _not_found(printorders.load, oid)
+    items = [i.model_dump() for i in req.items]
+    if req.deck and req.since_version:
+        items += _not_found(lambda: printorders.added_since(req.deck, req.since_version, only_missing=req.only_missing))
+    elif req.deck:
+        deck = _not_found(storage.load, req.deck)
+        items += printorders.deck_items(deck, names=req.names, only_missing=req.only_missing)
+    if req.text and req.text.strip():
+        from ..deck import parse_decklist
+
+        parsed = parse_decklist(req.text)
+        items += [{"kind": "card", "name": n, "qty": 1, "source": "Liste"} for n in parsed.commanders]
+        items += [{"kind": "card", "name": e.name, "qty": e.qty, "source": "Liste"} for e in parsed.entries]
+    if req.url and req.url.strip():
+        try:
+            data = await importers.import_url(req.url)
+        except HttpError as exc:  # before RuntimeError: HttpError is one
+            raise HTTPException(404 if exc.status == 404 else 502, "Deck nicht gefunden – ist es öffentlich?"
+                                if exc.status == 404 else f"Seite nicht erreichbar: {exc}") from exc  # fmt: skip
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(502, f"Seite nicht erreichbar: {exc}") from exc
+        label = f"{data.get('name') or 'Deck'} ({data.get('site')})"
+        items += [{"kind": "card", "name": n, "qty": 1, "source": label} for n in data["commanders"]]
+        for line in data["cards"]:
+            qty, name = line.split(" ", 1)
+            items.append({"kind": "card", "name": name, "qty": int(qty), "source": label})
+    if not items:
+        raise HTTPException(400, "Nichts hinzuzufügen" + (" – die Sammlung hat schon alle Karten." if req.only_missing else "."))
+    try:
+        return await printorders.add(oid, items)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class OrderQty(BaseModel):
+    qty: int = Field(ge=0, le=printorders.MAX_QTY)
+
+
+@app.patch("/api/orders/{oid}/items/{item_id}")
+async def api_order_item(oid: str, item_id: str, req: OrderQty) -> dict[str, Any]:
+    return _not_found(printorders.update_item, oid, item_id, req.qty)
+
+
+@app.delete("/api/orders/{oid}/items")
+async def api_order_remove(oid: str, item: str | None = None, source: str | None = None) -> dict[str, Any]:
+    if not item and not source:
+        raise HTTPException(400, "item oder source angeben")
+    try:
+        return printorders.remove(oid, item_id=item, source=source)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/decks/{slug}/added")
+async def api_deck_added(slug: str, since: int, only_missing: bool = False) -> dict[str, Any]:
+    """Cards a rebuild brought in since version ``since`` (for "add to a collective order?")."""
+    items = _not_found(lambda: printorders.added_since(slug, since, only_missing=only_missing))
+    return {"version": storage.load(slug).get("version"), "since": since, "items": items,
+            "cards": sum(i["qty"] for i in items)}  # fmt: skip
+
+
+@app.get("/api/tokens/search")
+async def api_token_search(q: str) -> list[dict[str, Any]]:
+    """Tokens and emblems by name (Scryfall), one entry per artwork: ``[{name, type_line, id, image}]``."""
+    if len(q.strip()) < 2:
+        return []
+    try:
+        res = await scryfall.search(f'(t:token or t:emblem) name:"{q.strip()}"', order="released", unique="art", max_results=60)
+    except HttpError as exc:
+        raise HTTPException(502, f"Scryfall nicht erreichbar: {exc}") from exc
+    out = []
+    for c in res["cards"]:
+        cid = c.get("id")
+        if cid and c.get("name"):
+            out.append({"name": c["name"], "type_line": c.get("type_line", ""), "id": cid,
+                        "image": scryfall.compact(c).get("image"), "set_name": c.get("set_name")})  # fmt: skip
+    return out
+
+
 @app.get("/api/precons")
 async def api_precons(q: str = "", limit: int = 60) -> list[dict[str, Any]]:
     try:
@@ -1718,6 +1855,8 @@ class PrintRequest(BaseModel):
 
 
 def _print_deck(slug: str, version: int | None = None) -> dict[str, Any]:
+    if printorders.is_order_slug(slug):  # a collective order prints like a deck
+        return _not_found(printorders.as_deck, slug)
     deck = _not_found(storage.load_version, slug, version)
     deck["slug"] = storage.slug(slug)
     return deck

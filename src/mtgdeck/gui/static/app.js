@@ -81,7 +81,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "collection", "deskmat", "glossary", "blacklist", "settings"];
+const VIEWS = ["new", "job", "deck", "collection", "orders", "deskmat", "glossary", "blacklist", "settings"];
 const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
@@ -108,6 +108,7 @@ async function route() {
   if (r.view === "collection") loadCollection();
   if (r.view === "glossary") showGlossary(r.slug);
   if (r.view === "deskmat") showDeskmat(r.slug);
+  if (r.view === "orders") showOrders(r.slug);
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -119,7 +120,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", deskmat: "Deskmat-Studio", glossary: "Glossar", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -515,9 +516,9 @@ const TOOL_LABELS = {
 };
 const toolText = (name) => `Claude ${TOOL_LABELS[name] || `nutzt ${name}`} …`;
 
-function startJob(jobId, title, { kind = "build", slot = "#job-slot-main", route: home = "#/job", slug = null } = {}) {
+function startJob(jobId, title, { kind = "build", slot = "#job-slot-main", route: home = "#/job", slug = null, since = null } = {}) {
   currentJob = jobId;
-  jobInfo = { id: jobId, kind, slot, route: home, slug, title, started: Date.now(), error: null, dismissed: false };
+  jobInfo = { id: jobId, kind, slot, route: home, slug, since, title, started: Date.now(), error: null, dismissed: false };
   const panel = $("#job");
   panel.classList.remove("finished", "failed");
   $("#job-title").textContent = title;
@@ -542,7 +543,8 @@ function startJob(jobId, title, { kind = "build", slot = "#job-slot-main", route
 // the job panel lives in the slot of the view that started it (build page, deck tab, finder)
 function placeJobPanel() {
   const panel = $("#job");
-  const visible = jobInfo && !jobInfo.dismissed && (!jobInfo.slug || (currentDeck && currentDeck.slug === jobInfo.slug));
+  const visible = jobInfo && !jobInfo.dismissed && (!jobInfo.slug || (currentDeck && currentDeck.slug === jobInfo.slug)
+    || (parseHash().view === "orders" && currentOrder?.slug === jobInfo.slug));
   if (visible) { $(jobInfo.slot).appendChild(panel); panel.hidden = false; }
   else { document.body.appendChild(panel); panel.hidden = true; }
   for (const ind of [$("#job-indicator"), $("#job-indicator-top")]) {
@@ -636,6 +638,7 @@ async function finishJob(ev) {
       if (currentDeck?.slug === info.slug) currentDeck = null;  // reload on the next route
       toast("Deck aktualisiert – die Änderungen stehen im Verlauf.");
       go(`#/deck/${enc(info.slug)}/verlauf`);
+      offerOrderAfterRebuild(info.slug, info.since);
       break;
     case "finder":
     case "upgrade":
@@ -744,6 +747,7 @@ function selectTab(tab, updateHash = true, focus = false) {
   for (const p of $$("#view-deck [role=tabpanel]")) p.hidden = p.id !== `panel-${tab}`;
   if (updateHash && currentDeck) history.replaceState(null, "", `#/deck/${enc(currentDeck.slug)}/${tab}`);
   if (tab === "anleitung" && currentDeck && rule0For !== currentDeck.slug) loadRule0();
+  if (tab === "drucken") mountPrintStudio("#panel-drucken");
   if (tab === "drucken" && currentDeck && printLoadedFor !== currentDeck.slug) {
     printLoadedFor = currentDeck.slug;
     loadPlan();
@@ -1044,13 +1048,15 @@ $("#edit-save").addEventListener("click", async () => {
   const btn = $("#edit-save");
   btn.disabled = true;
   btn.textContent = "Speichere …";
+  const slug = edit.slug, since = currentDeck?.version;
   try {
-    const r = await api(`/api/decks/${enc(edit.slug)}/cards`, { method: "POST", body });
+    const r = await api(`/api/decks/${enc(slug)}/cards`, { method: "POST", body });
     setEditing(false);
     currentDeck = null;
     await refreshDeckList();
     await route();
     toast(`Gespeichert als v${r.version}.${r.legal ? "" : " Achtung: das Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
+    offerOrderAfterRebuild(slug, since);
   } catch (err) { fail(err); }
   finally { btn.disabled = false; btn.textContent = "Speichern & prüfen"; }
 });
@@ -1508,7 +1514,7 @@ $("#refine-form").addEventListener("submit", async (e) => {
   try {
     const { job } = await api("/api/refine", { method: "POST", body: { slug, request } });
     e.target.reset();
-    startJob(job, `Claude überarbeitet ${name}`, { kind: "deck", slug, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
+    startJob(job, `Claude überarbeitet ${name}`, { kind: "deck", slug, since: currentDeck?.version, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
   } catch (err) { fail(err); }
 });
 $("#refine-chips").addEventListener("click", (e) => {
@@ -1583,6 +1589,7 @@ $("#upgrade-apply").addEventListener("click", async () => {
     note: `Upgrades: ${sel.map((u) => `${u.remove} → ${u.add}`).join(", ")}`,
   };
   try {
+    const since = currentDeck.version;
     const r = await api(`/api/decks/${enc(currentDeck.slug)}/cards`, { method: "POST", body });
     const slug = currentDeck.slug;
     upgrades = null;
@@ -1591,6 +1598,7 @@ $("#upgrade-apply").addEventListener("click", async () => {
     await refreshDeckList();
     go(`#/deck/${enc(slug)}/verlauf`);
     toast(`${sel.length} Upgrades übernommen (v${r.version}).${r.legal ? "" : " Achtung: Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
+    offerOrderAfterRebuild(slug, since);
   } catch (err) { fail(err); }
 });
 
@@ -1618,7 +1626,8 @@ function renderUpgradePlan(d) {
     return `<li class="${applied ? "applied" : ""}">
       <div class="plan-head"><h3>Stufe ${i + 1}: ${esc(st.title)}<span class="cost">${esc(fmtPrice(st.cost, cur))}${esc(budget)}</span></h3>
         ${applied ? '<span class="done">✓ übernommen</span>'
-          : `<button type="button" class="btn small${canApply ? " primary" : ""}" data-stage="${i}"${canApply ? "" : ' disabled title="Erst die vorige Stufe übernehmen"'}>Stufe übernehmen</button>`}</div>
+          : `<span class="btn-group"><button type="button" class="btn small ghost" data-stage-order="${i}" title="Die neuen Karten dieser Stufe drucken">Zur Sammelbestellung</button>
+             <button type="button" class="btn small${canApply ? " primary" : ""}" data-stage="${i}"${canApply ? "" : ' disabled title="Erst die vorige Stufe übernehmen"'}>Stufe übernehmen</button></span>`}</div>
       ${st.goal ? `<p class="muted small">${esc(st.goal)}</p>` : ""}
       <ul class="upgrade-list">${st.upgrades.map((u) => upgradeRow(u, cur)).join("")}</ul></li>`;
   }).join("");
@@ -1644,6 +1653,13 @@ function onUpgradePlan(plan, slug) {
   $("#plan-result").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 $("#plan-stages").addEventListener("click", async (e) => {
+  const o = e.target.closest("button[data-stage-order]");
+  if (o && currentDeck?.upgrade_plan) {
+    const i = Number(o.dataset.stageOrder), st = currentDeck.upgrade_plan.stages[i];
+    orderDialog({ title: `Stufe ${i + 1} drucken`, text: `${st.upgrades.length} neue Karten aus „${st.title}“ – ohne sie schon ins Deck zu übernehmen.`,
+      body: { items: st.upgrades.map((u) => ({ kind: "card", name: u.add, qty: 1, source: `Upgrade-Plan ${currentDeck.name}`, source_slug: currentDeck.slug })) } });
+    return;
+  }
   const b = e.target.closest("button[data-stage]");
   if (!b || !currentDeck?.upgrade_plan) return;
   const i = Number(b.dataset.stage);
@@ -1654,11 +1670,13 @@ $("#plan-stages").addEventListener("click", async (e) => {
   };
   b.disabled = true;
   try {
+    const since = currentDeck.version;
     const r = await api(`/api/decks/${enc(currentDeck.slug)}/cards`, { method: "POST", body });
     const slug = currentDeck.slug;
     currentDeck = null;
     await refreshDeckList();
     go(`#/deck/${enc(slug)}/anpassen`);
+    offerOrderAfterRebuild(slug, since);
     toast(`Stufe ${i + 1} übernommen (v${r.version}).${r.legal ? "" : " Achtung: Deck ist nicht legal – siehe Prüfung."}`, r.legal ? "info" : "error");
   } catch (err) { b.disabled = false; fail(err); }
 });
@@ -1713,7 +1731,7 @@ $("#retune-form").addEventListener("submit", async (e) => {
   const { slug, name } = currentDeck;
   try {
     const { job } = await api("/api/retune", { method: "POST", body: { slug, bracket, profile, request } });
-    startJob(job, `Claude stimmt ${name} ab: ${levelText(bracket, profile.tier)}`, { kind: "deck", slug, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
+    startJob(job, `Claude stimmt ${name} ab: ${levelText(bracket, profile.tier)}`, { kind: "deck", slug, since: currentDeck?.version, slot: "#tune-job-slot", route: `#/deck/${enc(slug)}/anpassen` });
     $("#tune-job-slot").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (err) { fail(err); }
 });
@@ -2118,6 +2136,20 @@ $("#history").addEventListener("click", async (e) => {
 // tab "Drucken": print studio (MPC Autofill, PDF)
 // ============================================================================================
 let printPlan = null;
+let currentOrder = null;  // the open collective order (page #/orders/<id>)
+// what the print studio works on: the open deck or a collective order (same print routes, slug sammel-<id>)
+function pctx() {
+  if (parseHash().view === "orders" && currentOrder) {
+    return { slug: currentOrder.slug, name: currentOrder.name, route: `#/orders/${enc(currentOrder.id)}`, order: true };
+  }
+  return currentDeck ? { slug: currentDeck.slug, name: currentDeck.name, route: `#/deck/${enc(currentDeck.slug)}/drucken`, order: false } : null;
+}
+// the print studio is one block that moves into the deck tab or the order page
+function mountPrintStudio(slot) {
+  const studio = $("#print-studio");
+  if (studio.parentElement !== $(slot)) $(slot).appendChild(studio);
+  $("#print-form .token-opt").hidden = !!pctx()?.order;  // orders list their tokens explicitly
+}
 let prepared = { faces: {} };
 const printOpts = () => {
   const f = $("#print-form").elements;
@@ -2131,14 +2163,14 @@ const planQuery = () => { const o = printOpts(); return new URLSearchParams({ so
 async function loadPlan() {
   $("#print-summary").textContent = "Lade Vorschau …";
   $("#print-grid").innerHTML = "";
-  const slug = currentDeck.slug;
+  const slug = pctx().slug;
   try {
     [printPlan, prepared] = await Promise.all([
       api(`/api/decks/${enc(slug)}/print/plan?${planQuery()}`),
       api(`/api/decks/${enc(slug)}/print/prepared`),
     ]);
   } catch (err) { $("#print-summary").textContent = err.message; return; }
-  if (currentDeck?.slug !== slug) return;
+  if (pctx()?.slug !== slug) return;
   renderPlan();
   renderPreparedInfo();
   updateDownloadLinks();
@@ -2225,7 +2257,7 @@ async function loadPickerPage() {
   ctx.loading = true;
   $("#picker-more-btn").disabled = $("#picker-all-btn").disabled = true;
   try {
-    const r = await api(`/api/decks/${enc(currentDeck.slug)}/print/alternatives?card=${enc(ctx.card.name)}&side=${ctx.side}&token=${ctx.token}&page=${ctx.page + 1}`);
+    const r = await api(`/api/decks/${enc(pctx().slug)}/print/alternatives?card=${enc(ctx.card.name)}&side=${ctx.side}&token=${ctx.token}&page=${ctx.page + 1}`);
     if (pickerCtx !== ctx) return;
     ctx.options.push(...r.options);
     ctx.page = r.page;
@@ -2261,12 +2293,12 @@ $("#picker-all-btn").addEventListener("click", async () => {
 
 async function pick(option) {
   const { i, card, side, face } = pickerCtx;
-  const slug = currentDeck.slug;
+  const slug = pctx().slug;
   await api(`/api/decks/${enc(slug)}/print/choose`, { method: "POST", body: { face, option } });
   $("#picker").close();
   // update just this tile: re-rendering the whole grid would make the page jump to the top
   const plan = await api(`/api/decks/${enc(slug)}/print/plan?${planQuery()}`);
-  if (currentDeck?.slug !== slug) return;
+  if (pctx()?.slug !== slug) return;
   printPlan = plan;
   renderPlanSummary();
   const j = plan.cards.findIndex((c) => c.name === card.name);
@@ -2283,11 +2315,12 @@ $("#picker-auto").addEventListener("click", () => pick(null).catch(fail));
 $("#picker-close").addEventListener("click", () => $("#picker").close());
 
 $("#prepare-btn").addEventListener("click", async () => {
-  if (!currentDeck || currentJob) return;
-  const { slug, name } = currentDeck;
+  const ctx0 = pctx();
+  if (!ctx0 || currentJob) return;
+  const { slug, name, route: back } = ctx0;
   try {
     const { job } = await api(`/api/decks/${enc(slug)}/print/prepare`, { method: "POST", body: printOpts() });
-    startJob(job, `Druckdateien für ${name}`, { kind: "print", slug, slot: "#print-job-slot", route: `#/deck/${enc(slug)}/drucken` });
+    startJob(job, `Druckdateien für ${name}`, { kind: "print", slug, slot: "#print-job-slot", route: back });
     $("#print-job-slot").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (err) { fail(err); }
 });
@@ -2295,7 +2328,7 @@ $("#prepare-btn").addEventListener("click", async () => {
 // ---------- before/after comparison ----------
 let compareFace = null;
 function imageUrl(face, kind) {
-  return `/api/decks/${enc(currentDeck.slug)}/print/image?face=${enc(face)}&kind=${kind}&t=${Date.now()}`;
+  return `/api/decks/${enc(pctx().slug)}/print/image?face=${enc(face)}&kind=${kind}&t=${Date.now()}`;
 }
 function openCompare(face) {
   compareFace = face;
@@ -2355,7 +2388,7 @@ $("#compare-close").addEventListener("click", () => $("#compare").close());
 
 $("#open-folder-btn").addEventListener("click", async () => {
   try {
-    const r = await api(`/api/decks/${enc(currentDeck.slug)}/print/open-folder`, { method: "POST" });
+    const r = await api(`/api/decks/${enc(pctx().slug)}/print/open-folder`, { method: "POST" });
     if (!r.opened) toast(`Ordner: ${r.path}`);
   } catch (err) { fail(err); }
 });
@@ -2363,8 +2396,8 @@ $("#open-folder-btn").addEventListener("click", async () => {
 async function onPrepared(result) {
   logLine("result", `Druckbilder: ${result.images_dir}`);
   if (result.missing.length) toast(`Ohne Bild: ${result.missing.join(", ")}`, "error");
-  if (currentDeck && printLoadedFor === currentDeck.slug) {
-    prepared = await api(`/api/decks/${enc(currentDeck.slug)}/print/prepared`).catch(() => prepared);
+  if (pctx() && printLoadedFor === pctx().slug) {
+    prepared = await api(`/api/decks/${enc(pctx().slug)}/print/prepared`).catch(() => prepared);
     renderPlan();
     renderPreparedInfo();
     updateDownloadLinks();
@@ -2372,7 +2405,7 @@ async function onPrepared(result) {
 }
 
 async function updateDownloadLinks() {
-  const base = `/api/decks/${enc(currentDeck.slug)}/print/files`;
+  const base = `/api/decks/${enc(pctx().slug)}/print/files`;
   for (const [id, kind] of [["#xml-link", "xml"], ["#pdf-link", "pdf"]]) {
     const ok = (await fetch(`${base}/${kind}`, { method: "HEAD" }).catch(() => null))?.ok;
     $(id).href = `${base}/${kind}`;
@@ -2385,7 +2418,7 @@ $("#pdf-btn").addEventListener("click", async () => {
   btn.disabled = true;
   btn.textContent = "Erstelle PDF …";
   try {
-    const r = await api(`/api/decks/${enc(currentDeck.slug)}/print/pdf`, { method: "POST", body: { paper: $("#pdf-paper").value, include_backs: $("#pdf-backs").checked } });
+    const r = await api(`/api/decks/${enc(pctx().slug)}/print/pdf`, { method: "POST", body: { paper: $("#pdf-paper").value, include_backs: $("#pdf-backs").checked } });
     await updateDownloadLinks();
     window.open($("#pdf-link").href, "_blank");
     toast(`PDF erstellt: ${r.cards} Karten auf ${r.pages} Seiten.`);
@@ -2394,12 +2427,13 @@ $("#pdf-btn").addEventListener("click", async () => {
 });
 
 $("#mpc-btn").addEventListener("click", async () => {
-  if (!currentDeck || currentJob) return;
-  const { slug, name } = currentDeck;
+  const ctx0 = pctx();
+  if (!ctx0 || currentJob) return;
+  const { slug, name, route: back } = ctx0;
   try {
     const r = await api(`/api/decks/${enc(slug)}/print/autofill`, { method: "POST", body: { mode: "mpc", window: $("#mpc-window").checked, ...TERM_SIZE } });
     if (r.job) {
-      startJob(r.job, `MPC Autofill: ${name}`, { kind: "autofill", slug, slot: "#print-job-slot", route: `#/deck/${enc(slug)}/drucken` });
+      startJob(r.job, `MPC Autofill: ${name}`, { kind: "autofill", slug, slot: "#print-job-slot", route: back });
       $("#print-job-slot").scrollIntoView({ behavior: "smooth", block: "start" });
     } else toast("MPC Autofill läuft in einem eigenen Konsolenfenster – dort weiter bedienen.");
   } catch (err) { fail(err); }
@@ -2756,16 +2790,16 @@ $("#own-summary").addEventListener("click", async (e) => {
 });
 
 $("#add-printed-btn").addEventListener("click", async () => {
-  if (!currentDeck) return;
+  if (!pctx()) return;
   const opts = printOpts();
   const ok = await ask({ title: "Gedruckte Karten übernehmen?", ok: "Übernehmen",
     text: `${printPlan?.quantity ?? "Alle"} Karten dieses Druckauftrags kommen als Proxy (mit dem gewählten Artwork) in deine Sammlung.` });
   if (!ok) return;
   try {
-    const r = await api(`/api/decks/${enc(currentDeck.slug)}/collection/add-printed`, { method: "POST", body: opts });
+    const r = await api(`/api/decks/${enc(pctx().slug)}/collection/add-printed`, { method: "POST", body: opts });
     toast(`${r.added} Proxies zur Sammlung hinzugefügt.`);
     await refreshCollectionSummary();
-    loadOwnership(currentDeck);
+    if (currentDeck && !pctx().order) loadOwnership(currentDeck);
   } catch (err) { fail(err); }
 });
 
@@ -2854,6 +2888,277 @@ $("#db-btn").addEventListener("click", async () => {
   await api("/api/carddb/refresh", { method: "POST" }).catch(fail);
   refreshDbStatus();
 });
+
+// ============================================================================================
+// collective print orders (Sammelbestellung): cards from several decks + tokens, printed like a deck
+// ============================================================================================
+let orderIndex = [];
+async function refreshOrders() {
+  orderIndex = await api("/api/orders").catch(() => orderIndex);
+  $("#order-count").textContent = orderIndex.length || "";
+  return orderIndex;
+}
+const orderMeta = (c) => `${c.cards} Karten · ${c.tokens} Tokens · ${c.slots} Druckplätze` + (c.slots ? ` · MPC-Staffel ${c.mpc_bracket}` : "");
+
+async function showOrders(id) {
+  $("#orders-list-view").hidden = !!id;
+  $("#order-view").hidden = !id;
+  if (!id) {
+    currentOrder = null;
+    await refreshOrders();
+    $("#orders-empty").hidden = !!orderIndex.length;
+    $("#orders-list").innerHTML = orderIndex.map((o) => `<a class="panel order-row" href="#/orders/${enc(o.id)}">
+        <div><h3>${esc(o.name)}</h3><p class="muted small">${esc(orderMeta(o.counts))}${o.counts.sources.length ? " · " + esc(o.counts.sources.join(", ")) : ""}</p></div>
+        <span class="muted small">${esc(fmtDate(o.updated))}</span></a>`).join("");
+    return;
+  }
+  try { currentOrder = await api(`/api/orders/${enc(id)}`); } catch (err) { fail(err); go("#/orders"); return; }
+  const decks = deckIndex.map((d) => `<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join("");
+  $("#oadd-deck").elements.deck.innerHTML = decks || '<option value="">– noch keine Decks –</option>';
+  $("#oadd-token-deck").innerHTML = '<option value="">… oder Tokens eines Decks</option>' + decks;
+  renderOrder();
+  mountPrintStudio("#order-print-slot");
+  if (printLoadedFor !== currentOrder.slug) { printLoadedFor = currentOrder.slug; refreshOrderPlan(true); }
+}
+
+function renderOrder() {
+  const o = currentOrder;
+  $("#order-name").textContent = o.name;
+  $("#order-meta").textContent = orderMeta(o.counts);
+  $("#order-total").textContent = o.counts.slots || "";
+  $("#order-items-empty").hidden = !!o.items.length;
+  const groups = new Map();
+  for (const i of o.items) {
+    if (!groups.has(i.source)) groups.set(i.source, []);
+    groups.get(i.source).push(i);
+  }
+  $("#order-items").innerHTML = [...groups].map(([source, items]) => `<section class="order-group">
+      <div class="order-group-head"><h3>${esc(source)} <span class="count">${items.reduce((n, i) => n + i.qty, 0)}</span></h3>
+        <button type="button" class="link-btn" data-source="${esc(source)}">Gruppe entfernen</button></div>
+      <ul class="order-items">${items.map((i) => `<li data-item="${esc(i.id)}">
+        <input type="number" min="0" max="500" value="${i.qty}" aria-label="Anzahl ${esc(i.name)}">
+        <span>${esc(i.name)}${i.kind === "token" ? ` <span class="muted">${esc(i.type_line || "Token")}</span>` : ""}</span>
+        <button type="button" class="icon-btn" data-remove="${esc(i.id)}" aria-label="${esc(i.name)} entfernen" title="Entfernen">${icon("x")}</button></li>`).join("")}</ul></section>`).join("");
+}
+
+// the print preview follows the order (MPC searches are cached, so this is cheap)
+const refreshOrderPlan = (() => {
+  const run = () => {
+    if (!currentOrder || parseHash().view !== "orders") return;
+    if (currentOrder.counts.slots) loadPlan();
+    else { printPlan = null; $("#print-grid").innerHTML = ""; $("#print-summary").textContent = "Noch nichts zu drucken – füge oben Karten oder Tokens hinzu."; }
+  };
+  const later = debounce(run, 700);
+  return (now = false) => (now ? run() : later());
+})();
+
+function orderChanged(o, msg) {
+  currentOrder = o;
+  renderOrder();
+  refreshOrderPlan();
+  refreshOrders();
+  if (msg) toast(msg);
+}
+
+async function addToOrder(body, msg) {
+  const r = await api(`/api/orders/${enc(currentOrder.id)}/items`, { method: "POST", body });
+  orderChanged(r, msg ? msg(r) : `${r.added} hinzugefügt.`);
+  return r;
+}
+
+$("#order-new").addEventListener("click", async () => {
+  const name = await ask({ title: "Neue Sammelbestellung", text: "Wie soll sie heißen?", value: `Bestellung ${new Date().toLocaleDateString("de-DE")}`, ok: "Anlegen" });
+  if (!name) return;
+  try {
+    const o = await api("/api/orders", { method: "POST", body: { name } });
+    await refreshOrders();
+    go(`#/orders/${enc(o.id)}`);
+  } catch (err) { fail(err); }
+});
+$("#order-rename").addEventListener("click", async () => {
+  $("#order-menu").open = false;
+  const name = await ask({ title: "Umbenennen", value: currentOrder.name, ok: "Speichern" });
+  if (!name) return;
+  try { orderChanged(await api(`/api/orders/${enc(currentOrder.id)}`, { method: "PATCH", body: { name } })); } catch (err) { fail(err); }
+});
+$("#order-delete").addEventListener("click", async () => {
+  $("#order-menu").open = false;
+  if (!(await ask({ title: "Sammelbestellung löschen?", text: `„${currentOrder.name}“ und ihre Druckdateien werden gelöscht.`, ok: "Löschen", danger: true }))) return;
+  try {
+    await api(`/api/orders/${enc(currentOrder.id)}`, { method: "DELETE" });
+    currentOrder = null;
+    printLoadedFor = null;
+    mountPrintStudio("#panel-drucken");
+    go("#/orders");
+  } catch (err) { fail(err); }
+});
+
+$("#order-add-kind").addEventListener("change", (e) => {
+  for (const f of $$("#order-view .order-add")) f.hidden = f.dataset.kind !== e.target.value;
+});
+wireAutocomplete($("#oadd-card").elements.name, $("#ac-oadd"));
+$("#oadd-card").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  try {
+    await addToOrder({ items: [{ kind: "card", name: f.name.value.trim(), qty: Number(f.qty.value) || 1, source: "Einzelkarten" }] });
+    e.target.reset();
+    f.name.focus();
+  } catch (err) { fail(err); }
+});
+$("#oadd-text").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements, url = f.url.value.trim(), text = f.text.value.trim();
+  if (!url && !text) { toast("Füge eine Liste oder einen Deck-Link ein.", "error"); f.url.focus(); return; }
+  const btn = e.target.querySelector("[type=submit]");
+  btn.disabled = true;
+  try {
+    await addToOrder({ url: url || null, text: text || null }, (r) => `${r.added} ${r.added === 1 ? "Karte" : "Karten"} hinzugefügt.`);
+    e.target.reset();
+  } catch (err) { fail(err); }
+  finally { btn.disabled = false; }
+});
+async function renderDeckPick() {
+  const f = $("#oadd-deck").elements;
+  const pick = f.which.value === "pick";
+  $("#oadd-pick").hidden = !pick;
+  if (!pick || !f.deck.value) return;
+  try {
+    const d = await api(`/api/decks/${enc(f.deck.value)}`);
+    const names = [...d.commanders, ...d.cards.map((c) => c.name)];
+    $("#oadd-pick").innerHTML = names.map((n) => `<label><input type="checkbox" value="${esc(n)}"> ${esc(n)}</label>`).join("");
+  } catch (err) { fail(err); }
+}
+$("#oadd-deck").addEventListener("change", (e) => { if (e.target.name === "which" || e.target.name === "deck") renderDeckPick(); });
+$("#oadd-deck").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const body = { deck: f.deck.value };
+  if (f.which.value === "missing") body.only_missing = true;
+  if (f.which.value === "pick") {
+    body.names = $$("#oadd-pick input:checked").map((c) => c.value);
+    if (!body.names.length) { toast("Wähle mindestens eine Karte aus.", "error"); return; }
+  }
+  try { await addToOrder(body, (r) => `${r.added} Karten aus „${f.deck.selectedOptions[0].textContent}“ hinzugefügt.`); } catch (err) { fail(err); }
+});
+
+// tokens: Scryfall search or the tokens of a deck; one click adds "je N"
+let tokenHits = [];
+function renderTokenHits(items, msg) {
+  tokenHits = items;
+  $("#oadd-token-msg").textContent = msg;
+  $("#oadd-token-grid").innerHTML = items.map((t, i) => `<button type="button" class="similar" data-t="${i}" title="${esc(t.type_line)}">
+      ${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : `<div class="noimg">${esc(t.name)}</div>`}
+      <span class="sim-name">${esc(t.name)}</span><span class="muted">${esc(t.type_line || "")}${t.set_name ? " · " + esc(t.set_name) : ""}</span></button>`).join("");
+}
+$("#oadd-token-q").addEventListener("input", debounce(async (e) => {
+  const q = e.target.value.trim();
+  if (q.length < 2) return renderTokenHits([], "");
+  $("#oadd-token-deck").value = "";
+  try {
+    const items = await api(`/api/tokens/search?q=${enc(q)}`);
+    renderTokenHits(items, items.length ? "Klick fügt das Token in der gewählten Anzahl hinzu." : "Kein Token gefunden.");
+  } catch (err) { renderTokenHits([], err.message); }
+}, 300));
+$("#oadd-token-deck").addEventListener("change", async (e) => {
+  const slug = e.target.value;
+  if (!slug) return renderTokenHits([], "");
+  try {
+    const items = await api(`/api/decks/${enc(slug)}/tokens`);
+    const deckName = e.target.selectedOptions[0].textContent;
+    renderTokenHits(items.map((t) => ({ ...t, source: `Tokens ${deckName}` })), items.length ? `Tokens, Embleme und Marker von „${deckName}“.` : "Dieses Deck erzeugt keine Tokens.");
+  } catch (err) { renderTokenHits([], err.message); }
+});
+$("#oadd-token-grid").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-t]");
+  if (!b) return;
+  const t = tokenHits[Number(b.dataset.t)];
+  const qty = Math.max(1, Number($("#oadd-token-qty").value) || 1);
+  try {
+    await addToOrder({ items: [{ kind: "token", name: t.name, qty, type_line: t.type_line, token_id: t.id || null, image: t.image || null, source: t.source || "Tokens" }] },
+      () => `${qty}× ${t.name} hinzugefügt.`);
+  } catch (err) { fail(err); }
+});
+
+$("#order-items").addEventListener("change", async (e) => {
+  const li = e.target.closest("li[data-item]");
+  if (!li || e.target.type !== "number") return;
+  try { orderChanged(await api(`/api/orders/${enc(currentOrder.id)}/items/${enc(li.dataset.item)}`, { method: "PATCH", body: { qty: Number(e.target.value) || 0 } })); }
+  catch (err) { fail(err); }
+});
+$("#order-items").addEventListener("click", async (e) => {
+  const rm = e.target.closest("[data-remove]"), grp = e.target.closest("[data-source]");
+  try {
+    if (rm) orderChanged(await api(`/api/orders/${enc(currentOrder.id)}/items?item=${enc(rm.dataset.remove)}`, { method: "DELETE" }));
+    if (grp && (await ask({ title: "Gruppe entfernen?", text: `Alle Positionen aus „${grp.dataset.source}“ entfernen.`, ok: "Entfernen", danger: true }))) {
+      orderChanged(await api(`/api/orders/${enc(currentOrder.id)}/items?source=${enc(grp.dataset.source)}`, { method: "DELETE" }));
+    }
+  } catch (err) { fail(err); }
+});
+
+// "In eine Sammelbestellung packen?" – after a rebuild, from upgrades, a plan stage or the deck menu
+function orderDialog({ title, text, body, missingToggle = false }) {
+  return refreshOrders().then(() => new Promise((resolve) => {
+    const dlg = $("#order-dialog"), sel = $("#order-dialog-target");
+    $("#order-dialog-title").textContent = title;
+    $("#order-dialog-text").textContent = text;
+    sel.innerHTML = orderIndex.map((o) => `<option value="${esc(o.id)}">${esc(o.name)} (${o.counts.slots} Druckplätze)</option>`).join("")
+      + '<option value="">+ Neue Sammelbestellung …</option>';
+    sel.value = orderIndex[0]?.id || "";
+    $("#order-dialog-name").value = `Bestellung ${new Date().toLocaleDateString("de-DE")}`;
+    const syncName = () => { $("#order-dialog-name-field").hidden = !!sel.value; };
+    sel.onchange = syncName;
+    syncName();
+    $("#order-dialog-missing-row").hidden = !missingToggle;
+    $("#order-dialog-missing").checked = missingToggle && !!collSummary?.entries;
+    const done = (r) => { dlg.onclose = null; if (dlg.open) dlg.close(); resolve(r); };
+    $("#order-dialog-cancel").onclick = () => done(null);
+    dlg.onclose = () => resolve(null);
+    $("#order-dialog-form").onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        let id = sel.value;
+        if (!id) id = (await api("/api/orders", { method: "POST", body: { name: $("#order-dialog-name").value } })).id;
+        const payload = { ...body, ...(missingToggle ? { only_missing: $("#order-dialog-missing").checked } : {}) };
+        const r = await api(`/api/orders/${enc(id)}/items`, { method: "POST", body: payload });
+        refreshOrders();
+        toast(`${r.added} ${r.added === 1 ? "Karte" : "Karten"} in „${r.name}“ – zu finden unter „Sammelbestellungen“.`);
+        done(r);
+      } catch (err) { fail(err); }
+    };
+    dlg.showModal();
+  }));
+}
+
+async function offerOrderAfterRebuild(slug, since) {
+  if (!slug || !since) return;
+  try {
+    const r = await api(`/api/decks/${enc(slug)}/added?since=${since}`);
+    if (!r.cards || r.version === since) return;
+    const names = r.items.map((i) => (i.qty > 1 ? `${i.qty}× ${i.name}` : i.name));
+    await orderDialog({
+      title: "Neue Karten bestellen?",
+      text: `Der Umbau (v${since} → v${r.version}) bringt ${r.cards} neue ${r.cards === 1 ? "Karte" : "Karten"}: `
+        + names.slice(0, 8).join(", ") + (names.length > 8 ? ` und ${names.length - 8} weitere` : "") + ". In eine Sammelbestellung packen?",
+      body: { deck: slug, since_version: since }, missingToggle: true,
+    });
+  } catch { /* the rebuild itself worked – the offer is optional */ }
+}
+
+$("#order-from-deck").addEventListener("click", () => {
+  if (!currentDeck) return;
+  $("#deck-menu").open = false;
+  const total = currentDeck.cards.reduce((n, c) => n + (c.qty || 1), 0) + currentDeck.commanders.length;
+  orderDialog({ title: "Deck drucken", text: `Karten aus „${currentDeck.name}“ (${total} insgesamt) in eine Sammelbestellung packen.`,
+    body: { deck: currentDeck.slug }, missingToggle: true });
+});
+$("#upgrade-order").addEventListener("click", () => {
+  const sel = selectedUpgrades();
+  if (!sel.length || !currentDeck) return;
+  orderDialog({ title: "Upgrades drucken", text: `${sel.length} neue Karten (${sel.map((u) => u.add).join(", ")}) drucken – ohne sie schon ins Deck zu übernehmen.`,
+    body: { items: sel.map((u) => ({ kind: "card", name: u.add, qty: 1, source: `Upgrades ${currentDeck.name}`, source_slug: currentDeck.slug })) } });
+});
+refreshOrders();
 
 // ============================================================================================
 // deskmat studio: motif (card art, generated, upload) -> crop to the mat format -> print file at 300 or 600 DPI
@@ -3303,6 +3608,8 @@ function paletteItems() {
     { label: "Meine Sammlung", hint: "Seite", run: () => go("#/collection") },
     { label: "Karte zur Sammlung hinzufügen", hint: "Sammlung", run: () => { go("#/collection"); openCollAdd(); } },
     { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },
+    { label: "Sammelbestellungen", hint: "Seite", run: () => go("#/orders") },
+    { label: "Neue Sammelbestellung", hint: "Sammelbestellungen", run: () => { go("#/orders"); $("#order-new").click(); } },
     { label: "Deskmat-Studio", hint: "Seite", run: () => go("#/deskmat") },
     { label: "Glossar", hint: "Seite", run: () => go("#/glossary") },
     { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
@@ -3318,6 +3625,7 @@ function paletteItems() {
     items.push({ label: "Partie festhalten", hint: d.name, run: () => { selectTab("partien"); $("#game-form input[name=result]").focus(); } });
   }
   for (const d of deckIndex) items.push({ label: d.name, hint: `Deck · ${d.commanders.join(" + ")} · ${d.level || ""}`, run: () => go(`#/deck/${enc(d.slug)}`) });
+  for (const o of orderIndex) items.push({ label: o.name, hint: `Sammelbestellung · ${o.counts.slots} Druckplätze`, run: () => go(`#/orders/${enc(o.id)}`) });
   for (const t of glossaryItems || []) items.push({ label: t.de ? `${t.de} (${t.term})` : t.term, hint: "Glossar", run: () => go(`#/glossary/${enc(t.term)}`) });
   return items;
 }

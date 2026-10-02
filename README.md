@@ -194,7 +194,7 @@ uv run mtg-gui              # → http://127.0.0.1:8765
 Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
 - **Seitenleiste:** „+ Neues Deck“, deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
-  legale), unten Meine Sammlung, Deskmat-Studio, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
+  legale), unten Meine Sammlung, Sammelbestellungen, Deskmat-Studio, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
   hinter ☰ weg.
 - **Neues Deck** – drei Einstiege:
@@ -265,6 +265,28 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 - Hell/Dunkel folgt dem Betriebssystem; bedienbar mit Tastatur (Pfeiltasten in den Tabs, Esc schließt
   Dialoge und Menüs).
 - Die GUI nutzt deine Claude-Code-Anmeldung; Kosten fallen wie bei einer normalen Claude-Code-Sitzung an.
+
+## Sammelbestellungen
+
+Mehrere Dinge auf einmal drucken – wie ein Deck, nur als Sammlung: z. B. 18 neue Karten für Aesi, 20 aus einem
+anderen Deck und 50 Treasure-Tokens, zusammen in **einer** MakePlayingCards-Bestellung oder einem PDF.
+
+- **Hinzufügen** auf der Seite „Sammelbestellungen“:
+  - **Karte** (Suche mit Autovervollständigung, auch deutsche Namen) mit Anzahl;
+  - **Aus einem Deck:** nur fehlende (was die Sammlung nicht abdeckt), alle oder ausgewählte Karten;
+  - **Tokens:** Scryfall-Suche („Treasure“, „Zombie“ …) oder die Tokens eines Decks, „je N“ Stück;
+  - **Liste / Link:** eingefügte Liste („1 Craterhoof Behemoth“) oder ein Deck-Link (Moxfield, Archidekt,
+    MTGGoldfish, TappedOut, Deckstats, EDHREC).
+- **Von überall:** Upgrade-Vorschläge („Zur Sammelbestellung“ – drucken, ohne sie schon ins Deck zu übernehmen),
+  eine Stufe des Upgrade-Plans, das ⋯-Menü eines Decks und Claude (`update_print_order`).
+- **Nach jedem Umbau** eines Decks (Claude überarbeitet oder ändert die Stärke, manuelles Bearbeiten, Upgrades
+  oder eine Plan-Stufe übernommen) fragt die App, ob die **neu hinzugekommenen Karten** in eine Sammelbestellung
+  sollen – auf Wunsch nur die, die in der Sammlung fehlen.
+- **Inhalt** gruppiert nach Herkunft (Deck, Upgrades, Liste, Tokens …), Anzahl änderbar, einzelne Positionen oder
+  ganze Gruppen entfernen; oben stehen Karten, Tokens, Druckplätze und die MPC-Staffel (18, 36, 55, 72 …).
+- **Drucken** wie bei einem Deck – derselbe Bereich mit Bildauswahl (MPC Autofill/Scryfall, eigene Wahl pro
+  Karte), KI-Hochskalierung, Druckdateien, PDF, MakePlayingCards und „In die Sammlung übernehmen“. Tokens ohne
+  gewähltes Bild bekommen das neueste passende Scryfall-Token.
 
 ## Deskmat-Studio
 
@@ -373,6 +395,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `collection_search` / `collection_status` / `update_collection` | Sammlung durchsuchen, Deck mit Sammlung abgleichen, Karten eintragen |
 | `import_deck` | Deck-Link importieren (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats, EDHREC) |
 | `search_precons` / `import_precon` | Starterdecks (Precons) von MTGJSON suchen / als Deck speichern |
+| `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
 | `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten hinzufügen oder entfernen |

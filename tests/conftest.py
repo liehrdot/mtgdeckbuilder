@@ -181,6 +181,13 @@ def handler(request: httpx.Request) -> httpx.Response:
                 data = [{**base, "set_name": f"Set {i}", "collector_number": str(i),
                          "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/p{i}.jpg"}} for i in ids]  # fmt: skip
                 return httpx.Response(200, json={"total_cards": total, "has_more": page * 175 < total, "data": data})
+            if "t:token" in q:  # token search for collective print orders
+                tokens = [{"object": "card", "id": f"7c0d0000-0000-0000-0000-00000000000{i}", "name": "Treasure",
+                           "type_line": "Token Artifact — Treasure", "set_name": f"Set {i}", "layout": "token",
+                           "image_uris": {"normal": f"https://cards.scryfall.io/normal/front/7/c/7c0d0000-0000-0000-0000-00000000000{i}.jpg"}}
+                          for i in (1, 2)]  # fmt: skip
+                hits = [t for t in tokens if t["name"].lower() in q.lower()]
+                return httpx.Response(200, json={"total_cards": len(hits), "has_more": False, "data": hits}) if hits else httpx.Response(404, json={})
             if "otag:" in q or q.startswith("t:"):  # role search for replacement suggestions
                 data = [lookup_card("Filler Ramp Rock"), CARDS["Cultivate"], CARDS["Sol Ring"]]
                 return httpx.Response(200, json={"total_cards": len(data), "has_more": False, "data": data})

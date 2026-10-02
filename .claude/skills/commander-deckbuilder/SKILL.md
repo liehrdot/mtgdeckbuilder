@@ -154,6 +154,13 @@ For "make it cheaper / stronger / bracket X / more draw / swap Y":
    and saves a new version without resending the list. For bigger rebuilds use `save_deck` with the
    **same slug** and a short `change_note`. Then list the changes as `+ in` / `- out` with reasons.
 
+## Sammelbestellungen (collective print orders)
+
+To print cards from several decks, single cards and tokens together (e.g. "pack die Upgrades und 50 Treasure in
+meine Bestellung"): `print_orders` lists the orders, `update_print_order` adds cards (`add_cards`), tokens
+(`add_tokens`, any amount) or a deck (`from_deck`, optionally `only_missing`) – a new order is created when the
+name does not exist. Printing itself (images, MPC Autofill, PDF) happens in the GUI page „Sammelbestellungen“.
+
 ## Meine Sammlung (collection)
 
 The user can keep a collection (cards they own, real or proxy, with quantity and printing).

@@ -915,3 +915,30 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .dm-compare-grid.real img { width: auto; max-width: none; image-rendering: pixelated; }
 .dm-compare-grid figcaption { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); font-size: var(--fs-sm); }
 .dm-tip { background: var(--surface-2); border-radius: var(--radius); padding: var(--space-3); margin: var(--space-4) 0 0; }
+
+/* ---------- collective print orders ---------- */
+.orders-list { display: grid; gap: var(--space-3); }
+.order-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-4); text-decoration: none; color: var(--text); }
+.order-row:hover { border-color: var(--accent); }
+.order-row h3 { font-size: var(--fs-md); margin-bottom: 2px; }
+#order-add-kind { margin-bottom: var(--space-3); }
+.order-add { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.order-add[data-kind="card"] input[name="name"] { flex: 1 1 260px; }
+.order-add input[type="number"] { width: 90px; }
+.order-add[data-kind="deck"], .order-add[data-kind="token"], .order-add[data-kind="text"] { display: block; }
+.order-add textarea, .order-add input[type="url"] { width: 100%; margin-bottom: var(--space-2); }
+.oadd-deck-row, .oadd-token-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.oadd-deck-row select { flex: 1 1 220px; }
+.oadd-token-row input[type="search"] { flex: 1 1 260px; }
+.oadd-token-row .field { margin: 0; }
+.oadd-pick { columns: 3 220px; column-gap: var(--space-5); margin-top: var(--space-3); max-height: 340px; overflow: auto; font-size: var(--fs-sm); }
+.oadd-pick label { display: flex; gap: var(--space-2); align-items: center; padding: 2px 0; break-inside: avoid; }
+#oadd-token-grid .similar .muted { font-size: var(--fs-xs); }
+.order-group { margin-bottom: var(--space-4); }
+.order-group-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 4px; }
+.order-group-head h3 { font-size: var(--fs-sm); }
+.order-items { list-style: none; margin: 0; padding: 0; columns: 2 320px; column-gap: var(--space-6); }
+.order-items li { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; padding: 3px 0; break-inside: avoid; font-size: var(--fs-sm); }
+.order-items input { width: 64px; height: 30px; padding: 2px 6px; }
+.order-items .muted { font-size: var(--fs-xs); }
+#order-print-slot #print-panel { margin-top: 0; }

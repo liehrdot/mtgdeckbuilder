@@ -228,16 +228,18 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
     source: 'auto' (own choices > MPC Autofill > Scryfall), 'mpcfill' (requires a server) or 'scryfall'.
     only_missing: leave out cards the collection already has (real or proxy).
     tokens: copies of every token/emblem/marker the deck creates (0 = none).
+    A collective order (``printorders.as_deck``) brings its own ``print_tokens`` with quantities.
     """
     cfg = settings_mod.load()
     if source == "mpcfill" and not cfg.get("mpcfill_server"):
         raise ValueError("Kein MPC-Autofill-Server eingestellt (Einstellungen → MPC-Autofill-Server).")
     slug = deck["slug"]
     slots = _slot_names(deck, only_missing)
-    if not slots:
-        raise ValueError("Nichts zu drucken – deine Sammlung enthält schon alle Karten dieses Decks.")
+    if not slots and not deck.get("print_tokens"):
+        raise ValueError("Nichts zu drucken – deine Sammlung enthält schon alle Karten dieses Decks."
+                         if deck.get("cards") else "Nichts zu drucken – füge zuerst Karten oder Tokens hinzu.")  # fmt: skip
     unique = list(dict.fromkeys(n for n, _ in slots))
-    card_data, _, not_found = await resolve(unique)
+    card_data, _, not_found = await resolve(unique) if unique else ({}, {}, [])
 
     faces: dict[str, dict[str, Any]] = {}
     for name in unique:
@@ -286,6 +288,12 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
         cards.append(entry)
     if tokens > 0:
         cards += await _token_entries(deck, tokens, mpc, warnings)
+    if deck.get("print_tokens"):
+        toks = [{**t, "image": scryfall.image_url(t["id"]) if t.get("id") else t.get("image")} for t in deck["print_tokens"]]
+        for t in toks:
+            if not t["image"]:  # typed name only: newest Scryfall token of that name as fallback image
+                t["image"] = await _token_image(t["name"])
+        cards += await _plan_tokens(deck["slug"], toks, mpc, warnings)
     missing = sorted(set(not_found) | {c["name"] for c in cards if not c["front"]["image"]})
     quantity = sum(c["qty"] for c in cards)
     return {
@@ -303,7 +311,20 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
 async def _token_entries(deck: dict[str, Any], copies: int, mpc: MpcFill | None, warnings: list[str]) -> list[dict[str, Any]]:
     """Plan entries for the tokens/emblems/markers of a deck (MPC Autofill token scans, else Scryfall)."""
     names = deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])]
-    toks = await deck_tokens(names)
+    return await _plan_tokens(deck["slug"], [{**t, "qty": copies} for t in await deck_tokens(names)], mpc, warnings)
+
+
+async def _token_image(name: str) -> str | None:
+    try:
+        res = await scryfall.search(f'(t:token or t:emblem) !"{name}"', order="released", unique="art", max_results=1)
+    except Exception:
+        return None
+    return scryfall.compact(res["cards"][0]).get("image") if res["cards"] else None
+
+
+async def _plan_tokens(slug: str, toks: list[dict[str, Any]], mpc: MpcFill | None, warnings: list[str]) -> list[dict[str, Any]]:
+    """Plan entries for tokens ``[{name, type_line, image, from, qty}]``: equal names get a number suffix
+    (two different Treasure tokens), images from MPC Autofill (card type TOKEN), else Scryfall."""
     faces: dict[str, dict[str, Any]] = {}
     for t in toks:
         face = t["name"]
@@ -316,18 +337,19 @@ async def _token_entries(deck: dict[str, Any], copies: int, mpc: MpcFill | None,
     hits: dict[str, list[str]] = {}
     if mpc and faces:
         try:
-            hits = await mpc.search(list(faces), card_type="TOKEN")
-            best = {face: ids[0] for face, ids in hits.items() if ids}
-            details = await mpc.cards(list(best.values()))
-            for face, ident in best.items():
-                chosen[face] = mpc.option(ident, details.get(ident, {}), face)
+            hits = await mpc.search(list(dict.fromkeys(t["name"] for t in faces.values())), card_type="TOKEN")
+            details = await mpc.cards([ids[0] for ids in hits.values() if ids])
+            for face, t in faces.items():
+                if ids := hits.get(t["name"]):
+                    chosen[face] = mpc.option(ids[0], details.get(ids[0], {}), face)
         except Exception as exc:
             warnings.append(f"Token-Suche bei MPC Autofill fehlgeschlagen ({exc}) – verwende Scryfall-Bilder.")
-    for face, opt in load_selection(deck["slug"]).items():
+    for face, opt in load_selection(slug).items():
         if face in faces:
             chosen[face] = {**opt, "custom": True}
-    return [{"name": face, "qty": copies, "commander": False, "token": True, "type_line": t["type_line"], "from": t["from"],
-             "front": {"face": face, "image": chosen.get(face), "mpc_hits": len(hits.get(face, []))}, "back": None}
+    return [{"name": face, "qty": int(t.get("qty") or 1), "commander": False, "token": True, "type_line": t.get("type_line") or "Token",
+             "from": t.get("from") or [], "front": {"face": face, "image": chosen.get(face),
+                                                    "mpc_hits": len(hits.get(t["name"], []))}, "back": None}
             for face, t in faces.items()]  # fmt: skip
 
 

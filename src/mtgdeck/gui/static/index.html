@@ -30,6 +30,7 @@
   <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h7"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11l2-8H6.3"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
 
@@ -58,6 +59,7 @@
 
     <nav class="nav-bottom" aria-label="Weitere Bereiche">
       <a href="#/collection" data-nav="collection"><svg class="icon"><use href="#i-box"/></svg>Meine Sammlung <span id="coll-count" class="count"></span></a>
+      <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
       <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
       <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
@@ -302,6 +304,7 @@
               <a id="export-tts" role="menuitem" href="#" download>Export für Tabletop Simulator (.json)</a>
               <a id="export-txt" role="menuitem" href="#" download>Decklist als Textdatei</a>
               <hr>
+              <button type="button" id="order-from-deck" role="menuitem">Zur Sammelbestellung …</button>
               <button type="button" id="deskmat-from-deck" role="menuitem">Deskmat aus diesem Deck …</button>
               <hr>
               <button type="button" id="delete-btn" role="menuitem" class="danger">Deck löschen …</button>
@@ -478,6 +481,7 @@
             <ul id="upgrade-list" class="upgrade-list"></ul>
             <div class="upgrade-actions">
               <span id="upgrade-total" class="small"></span>
+              <button type="button" class="btn" id="upgrade-order" title="Ausgewählte neue Karten drucken, ohne sie schon ins Deck zu übernehmen">Zur Sammelbestellung</button>
               <button type="button" class="btn primary" id="upgrade-apply">Ausgewählte übernehmen</button>
             </div>
           </div>
@@ -641,6 +645,7 @@
 
       <!-- print studio -->
       <div role="tabpanel" id="panel-drucken" aria-labelledby="tab-drucken" class="tabpanel" hidden>
+       <div id="print-studio">
         <div id="print-job-slot" class="job-slot"></div>
         <section class="panel" id="print-panel">
           <div class="panel-head">
@@ -722,6 +727,7 @@
             </li>
           </ol>
         </section>
+       </div>
       </div>
     </section>
 
@@ -776,6 +782,94 @@
           </div>
         </div>
       </section>
+    </section>
+
+    <!-- ============ collective print orders ============ -->
+    <section id="view-orders" class="view" data-view="orders" hidden>
+      <div id="orders-list-view">
+        <header class="page-head">
+          <div>
+            <h1>Sammelbestellungen</h1>
+            <p class="lead">Karten aus mehreren Decks, einzelne Karten und Tokens in beliebiger Menge – zusammen gedruckt wie ein
+              Deck: als MakePlayingCards-Bestellung über MPC Autofill oder als PDF zum Selbstdrucken.</p>
+          </div>
+          <div class="page-actions"><button type="button" class="btn primary" id="order-new"><svg class="icon"><use href="#i-plus"/></svg>Neue Sammelbestellung</button></div>
+        </header>
+        <div id="orders-list" class="orders-list"></div>
+        <p id="orders-empty" class="empty-inline">Noch keine Sammelbestellung. Tipp: Nach jedem Deck-Umbau fragt die App, ob die neuen Karten hier hinein sollen.</p>
+      </div>
+
+      <div id="order-view" hidden>
+        <header class="page-head">
+          <div>
+            <a class="link small" href="#/orders">← Alle Sammelbestellungen</a>
+            <h1 id="order-name"></h1>
+            <p id="order-meta" class="lead"></p>
+          </div>
+          <div class="page-actions">
+            <details class="menu" id="order-menu">
+              <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
+              <div class="menu-list" role="menu">
+                <button type="button" id="order-rename" role="menuitem">Umbenennen …</button>
+                <button type="button" id="order-delete" role="menuitem" class="danger">Löschen …</button>
+              </div>
+            </details>
+          </div>
+        </header>
+
+        <section class="panel">
+          <h2>Hinzufügen</h2>
+          <div class="segmented small" role="radiogroup" aria-label="Was hinzufügen?" id="order-add-kind">
+            <label><input type="radio" name="oadd" value="card" checked><span>Karte</span></label>
+            <label><input type="radio" name="oadd" value="deck"><span>Aus einem Deck</span></label>
+            <label><input type="radio" name="oadd" value="token"><span>Tokens</span></label>
+            <label><input type="radio" name="oadd" value="text"><span>Liste / Link</span></label>
+          </div>
+          <form class="order-add" data-kind="card" id="oadd-card" autocomplete="off">
+            <input name="name" list="ac-oadd" placeholder="Kartenname (auch deutsch)" aria-label="Kartenname" required><datalist id="ac-oadd"></datalist>
+            <input name="qty" type="number" min="1" max="500" value="1" aria-label="Anzahl">
+            <button type="submit" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Hinzufügen</button>
+          </form>
+          <form class="order-add" data-kind="deck" id="oadd-deck" hidden autocomplete="off">
+            <div class="oadd-deck-row">
+              <select name="deck" aria-label="Deck" required></select>
+              <div class="segmented small" role="radiogroup" aria-label="Welche Karten?">
+                <label><input type="radio" name="which" value="missing" checked><span>Nur fehlende</span></label>
+                <label><input type="radio" name="which" value="all"><span>Alle</span></label>
+                <label><input type="radio" name="which" value="pick"><span>Auswählen …</span></label>
+              </div>
+              <button type="submit" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Hinzufügen</button>
+            </div>
+            <p class="muted small">„Nur fehlende“ nimmt, was deine Sammlung (echt oder Proxy) nicht abdeckt; Basic Lands zählen als vorhanden.</p>
+            <div id="oadd-pick" class="oadd-pick" hidden></div>
+          </form>
+          <div class="order-add" data-kind="token" id="oadd-token" hidden>
+            <div class="oadd-token-row">
+              <input id="oadd-token-q" type="search" placeholder="Token suchen, z. B. Treasure, Zombie, Soldier …" aria-label="Token suchen">
+              <select id="oadd-token-deck" aria-label="Tokens eines Decks"><option value="">… oder Tokens eines Decks</option></select>
+              <label class="field inline small">Je <input id="oadd-token-qty" type="number" min="1" max="500" value="10" aria-label="Anzahl je Token"></label>
+            </div>
+            <p id="oadd-token-msg" class="muted small"></p>
+            <div id="oadd-token-grid" class="similar-grid"></div>
+          </div>
+          <form class="order-add" data-kind="text" id="oadd-text" hidden autocomplete="off">
+            <p class="muted small">Eine Liste (Moxfield-Export, Arena, „1 Sol Ring“, auch deutsche Namen) <b>oder</b> ein Deck-Link von
+              Moxfield, Archidekt, MTGGoldfish, TappedOut, Deckstats oder EDHREC.</p>
+            <input name="url" type="url" inputmode="url" placeholder="https://www.moxfield.com/decks/…" aria-label="Deck-Link">
+            <textarea name="text" rows="6" placeholder="1 Aetherspouts&#10;1 Craterhoof Behemoth&#10;1 Ezuri's Predation&#10;1 Hornet Queen" aria-label="Kartenliste"></textarea>
+            <button type="submit" class="btn primary">Hinzufügen</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Inhalt <span id="order-total" class="count"></span></h2>
+          <div id="order-items"></div>
+          <p id="order-items-empty" class="empty-inline">Noch leer – füge oben Karten, ein Deck oder Tokens hinzu.</p>
+        </section>
+
+        <h2 class="section-title">Drucken</h2>
+        <div id="order-print-slot"></div>
+      </div>
     </section>
 
     <!-- ============ deskmat studio ============ -->
@@ -1252,6 +1346,20 @@
   </div>
   <dl id="rule0-full-rows" class="rule0-rows big"></dl>
   <p class="rule0-ask">Passt das für eure Runde?</p>
+</dialog>
+
+<dialog id="order-dialog" class="dialog small-dialog" aria-labelledby="order-dialog-title">
+  <form method="dialog" id="order-dialog-form">
+    <h2 id="order-dialog-title">In eine Sammelbestellung packen?</h2>
+    <p id="order-dialog-text" class="muted"></p>
+    <label class="field"><span>Sammelbestellung</span><select id="order-dialog-target"></select></label>
+    <label class="field" id="order-dialog-name-field"><span>Name der neuen Bestellung</span><input id="order-dialog-name" maxlength="120"></label>
+    <label class="check small" id="order-dialog-missing-row"><input type="checkbox" id="order-dialog-missing"> Nur Karten, die in meiner Sammlung fehlen</label>
+    <div class="dialog-actions">
+      <button type="button" class="btn ghost" id="order-dialog-cancel">Nicht jetzt</button>
+      <button type="submit" class="btn primary" id="order-dialog-ok">Hinzufügen</button>
+    </div>
+  </form>
 </dialog>
 
 <template id="profile-template">
