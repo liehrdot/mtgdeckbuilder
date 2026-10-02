@@ -190,6 +190,17 @@ werden überall mit beiden Seiten behandelt:
   (`@keine Gedankenkontrolle`) wird als freier Begriff gespeichert, den Claude beachtet, der aber
   nicht automatisch geprüft wird. Suchergebnisse blenden Blacklist-Karten und Regel-Treffer aus,
   die Validierung meldet sie als Fehler („Blacklist-Regel „Günstige Tutoren“: Demonic Tutor“).
+- **Tischregeln:** benannte Regelsätze für eine Runde („Freitagsrunde“, „Laden-Abend“). Anders als die
+  Blacklist gelten sie nur für Decks, die sie gewählt haben – beim Bauen („Neues Deck“ → Tischregel) oder
+  im Deck unter „Anpassen“; das Deck merkt sich seine Tischregel, Umbauen und Upgrade-Vorschläge halten
+  sie ein. Ein Regelsatz kann enthalten: höchstes Bracket, max. Game Changer, max. Tutoren, Deckbudget
+  (zählt auch für Proxy-Decks), „keine Proxies“, verbotene Begriffe wie bei der Blacklist (True Duals,
+  Stax, 2-Karten-Combos, teurer als 10 € …), einzelne verbotene Karten und freie Absprachen, die Claude
+  beachtet. Verstöße sind Fehler der Prüfung, die Deck-Ampel und der Rule-0-Text zeigen sie; gilt
+  zusätzlich ein Power-Profil mit Hausregeln, gewinnt die strengere Regel. Ändert sich ein Regelsatz,
+  werden seine Decks neu geprüft. „Welche meiner Decks passen?“ prüft alle Decks gegen eine Runde.
+  Gespeichert in `tablerules.json` (gitignored); per Claude: „leg die Tischregel Freitagsrunde an:
+  höchstens Bracket 3, keine Combos“ (Tools `table_rules`, `update_table_rule`).
 
 ## Web-GUI
 
@@ -404,6 +415,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
 | `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
+| `table_rules` / `update_table_rule` | Tischregeln lesen / anlegen, ändern, löschen; `validate_deck` und `save_deck` nehmen `table_rule` |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten und Begriffe (True Duals, Günstige Tutoren, teurer als 20 € …) hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
 | `restore_deck_version` / `copy_deck` | alte Version wiederherstellen, Deck (oder alte Version) kopieren |
@@ -424,6 +436,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_CACHE_TTL` | `86400` | HTTP-Cache-Dauer in Sekunden |
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
+| `MTG_TABLERULES_FILE` | `./tablerules.json` | Tischregeln |
 | `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
 | `MTG_DESKMAT_DIR` | `./deskmats` | Deskmat-Projekte und fertige Dateien |

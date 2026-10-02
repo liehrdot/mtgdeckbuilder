@@ -89,6 +89,11 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `validate_deck` reports blacklisted cards and `card_rules()` hits as errors ("Blacklist-Regel „…“"), and 2-card Spellbook combos when `two-card-combos` is set.
   - The MCP search tools (`search_cards`, `local_card_search`, `find_commanders`, `edhrec_recommendations`) and `deckedit` suggestions filter them out via `filter_cards()` / `card_rules()`; name-only EDHREC entries are looked up in the local DB for predicate rules.
   - `GET /api/blacklist` → `{cards, rules, catalog}`.
+- **`tablerules.py`** (Tischregeln): named rule sets per playgroup in `tablerules.json` (`MTG_TABLERULES_FILE`, gitignored): `rules` (blacklist rule lines), `cards`, `max_bracket`, `max_game_changers`, `max_tutors`, `deck_budget` (+ `currency`, counts for proxy decks too), `no_proxies`.
+  - A deck stores one id as `deck["table_rule"]` (a content key, so changing it is a new version). `validate_deck(table_rule=)` adds `violations()` to `errors` and returns `validation["table_rule"]` (`{id, name, compliant, violations, warnings, notes, summary}`); `revalidate()` passes the deck's rule. Power-profile house rules stay separate; both are checked, so the stricter wins.
+  - MCP `save_deck(table_rule=)`: omitted keeps the deck's current rule on a refine, `""` removes it. `load_deck` adds `table_rule_info`. Tools `table_rules` (read-only) and `update_table_rule` (write).
+  - `check_saved()` / `check_all()` check saved decks without re-validating ("Welche Decks passen?"); `revalidate_decks()` runs after a rule set changes. `prompt_lines()` goes into the build/refine/retune/upgrade/plan/ask prompts; a build job sets the rule afterwards if Claude forgot (`_set_table_rule`).
+  - Health has a `table_rule` item, Rule 0 a „Tischregel“ row. Routes `/api/tablerules[/{id}[/decks]]`, `PUT /api/decks/{slug}/table-rule`; GUI page `#/tables[/<id>]`, select in the build form and the „Anpassen“ tab.
 - **`power.py`**: sub-tiers inside a bracket.
   - `PowerProfile` (pydantic) holds: tier low/mid/high, stricter house rules (`max_game_changers`, `max_tutors`, `allow_*`), `style` and `notes`.
   - `score()` is a transparent heuristic on the 1.0–5.99 bracket scale (3.8 = upper bracket 3). Hard rules set a floor.
@@ -132,7 +137,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `save_deck` re-validates before writing and stores the validation result inside the deck JSON.
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
   - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
-    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/orders[/<id>]` · `#/deskmat[/<id>]` · `#/glossary[/<term>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
+    - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/orders[/<id>]` · `#/deskmat[/<id>]` · `#/glossary[/<term>]` · `#/tables[/<id>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
     - „Neues Deck“ has three modes (`buildForm.dataset.mode` build|find|import); import has sub-modes link|text|precon (`#import-box[data-imode]`).
     - The print studio (`#print-studio`) is one block: `mountPrintStudio()` moves it into the deck tab or the order page; print code uses `pctx()` (deck or `currentOrder`) instead of `currentDeck`.
     - After every rebuild (refine/retune job via `startJob({since})`, manual edit, upgrades, plan stage) `offerOrderAfterRebuild(slug, since)` asks via `orderDialog()` whether the new cards go into a collective order.
@@ -169,7 +174,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 - The mock also fakes MTGJSON (`GraveTroupe_C99`), Archidekt deck 4242, Moxfield (v3 blocked, v2 answers; `blocked` ids fail), MTGGoldfish 777, TappedOut, Deckstats, the EDHREC average deck for Meren and German printings (`GERMAN`, `lang:de` searches).
 - `tests/conftest.py` sets up an autouse fixture that:
   - replaces `http._client` with an `httpx.MockTransport` that fakes Scryfall, EDHREC and Spellbook;
-  - redirects the cache, DB, decks, blacklist, collection and proxies to `tmp_path`;
+  - redirects the cache, DB, decks, blacklist, table rules, collection and proxies to `tmp_path`;
   - disables throttling.
 - Any card name starting with `Filler` is synthesized on demand. `deck_lines()` builds a legal 99-card main deck for Meren (BG).
 - `PRINTINGS` fakes specific printings for `/cards/collection` id and set+number lookups; "Pitiless Plunderer" carries `all_parts` (Treasure token, The Monarch) for token tests; `otag:`/`t:` searches return replacement candidates.
@@ -182,6 +187,6 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_DESKMAT_DIR`
+- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_TABLERULES_FILE`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_DESKMAT_DIR`
 - `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`, `MTG_UPSCALER_PATH`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`

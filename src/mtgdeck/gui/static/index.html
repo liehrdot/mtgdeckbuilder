@@ -30,6 +30,7 @@
   <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h7"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/></symbol>
+  <symbol id="i-table" viewBox="0 0 24 24"><path d="M3 10h18M6 10v9M18 10v9M9 14h6"/><circle cx="8" cy="5" r="1.8"/><circle cx="16" cy="5" r="1.8"/></symbol>
   <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11l2-8H6.3"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
@@ -62,6 +63,7 @@
       <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
       <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
       <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
+      <a href="#/tables" data-nav="tables"><svg class="icon"><use href="#i-table"/></svg>Tischregeln <span id="tr-count" class="count"></span></a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
       <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
     </nav>
@@ -205,6 +207,10 @@
             <h2 class="step-title">Stärke (Bracket)</h2>
             <div id="bracket-options" class="brackets" role="radiogroup" aria-label="Bracket"></div>
             <p id="bracket-desc" class="muted small"></p>
+            <label class="field table-field">Tischregel <span class="muted">– worauf sich deine Runde geeinigt hat</span>
+              <select name="table_rule" id="build-table"><option value="">Keine Tischregel</option></select>
+            </label>
+            <p id="build-table-hint" class="muted small" hidden></p>
             <details class="more" id="build-profile">
               <summary>Feinabstimmung <span class="muted">– Stufe im Bracket, Hausregeln, Stil</span></summary>
               <div class="profile-fields"></div>
@@ -448,6 +454,18 @@
       <!-- tune -->
       <div role="tabpanel" id="panel-anpassen" aria-labelledby="tab-anpassen" class="tabpanel" hidden>
         <div id="tune-job-slot" class="job-slot"></div>
+        <section class="panel" id="table-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Tischregel</h2>
+              <p class="muted small">Für welche Runde ist das Deck? Verstöße gegen ihre Regeln zeigt die Prüfung als Fehler.</p>
+            </div>
+          </div>
+          <label class="field table-field"><span class="sr-only">Tischregel des Decks</span>
+            <select id="deck-table" aria-label="Tischregel des Decks"><option value="">Keine Tischregel</option></select>
+          </label>
+          <div id="deck-table-status" aria-live="polite"></div>
+        </section>
         <section class="panel">
           <h2>Mit eigenen Worten ändern</h2>
           <p class="muted">Claude tauscht gezielt Karten aus, prüft das Deck und speichert eine neue Version – rückgängig machen geht im Verlauf.</p>
@@ -1039,6 +1057,94 @@
       </header>
       <input id="gl-filter" type="search" class="gl-filter" placeholder="Begriff suchen, z. B. Trampelschaden oder Ward …" aria-label="Begriff suchen">
       <div id="gl-list" aria-live="polite"></div>
+    </section>
+
+    <!-- ============ table rules ============ -->
+    <section id="view-tables" class="view narrow" data-view="tables" hidden>
+      <div id="tr-list-view">
+        <header class="page-head">
+          <div>
+            <h1>Tischregeln</h1>
+            <p class="lead">Regeln für eine Runde, z. B. „Freitagsrunde: höchstens Bracket 3, keine 2-Karten-Combos, kein Stax“.
+              Beim Bauen und Umbauen wählst du, welche gilt – das Deck merkt sie sich und die Prüfung meldet Verstöße.
+              Anders als die Blacklist gilt eine Tischregel nur für die Decks, die sie gewählt haben.</p>
+          </div>
+        </header>
+        <section class="panel">
+          <form id="tr-new" class="inline-form" autocomplete="off">
+            <input name="name" placeholder="Neue Tischregel, z. B. Freitagsrunde" aria-label="Name der neuen Tischregel" required maxlength="80">
+            <button type="submit" class="btn primary"><svg class="icon"><use href="#i-plus"/></svg>Anlegen</button>
+          </form>
+        </section>
+        <div id="tr-list" class="orders-list"></div>
+        <p id="tr-empty" class="empty-inline">Noch keine Tischregeln. Leg eine für jede Runde an, mit der du spielst.</p>
+      </div>
+
+      <div id="tr-view" hidden>
+        <header class="page-head">
+          <div>
+            <a class="link small" href="#/tables">← Alle Tischregeln</a>
+            <h1 id="tr-name"></h1>
+            <p id="tr-meta" class="lead"></p>
+          </div>
+          <div class="page-actions">
+            <details class="menu" id="tr-menu">
+              <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
+              <div class="menu-list" role="menu">
+                <button type="button" id="tr-delete" role="menuitem" class="danger">Löschen …</button>
+              </div>
+            </details>
+          </div>
+        </header>
+
+        <form class="panel" id="tr-form" autocomplete="off">
+          <h2>Rahmen für das ganze Deck</h2>
+          <div class="row2">
+            <label class="field">Name <input name="name" required maxlength="80"></label>
+            <label class="field">Höchstes Bracket
+              <select name="max_bracket"><option value="">egal</option><option value="1">1</option><option value="2">2</option>
+                <option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+            </label>
+            <label class="field">Höchstens Game Changer <input name="max_game_changers" type="number" min="0" step="1" placeholder="egal" inputmode="numeric"></label>
+            <label class="field">Höchstens Tutoren <input name="max_tutors" type="number" min="0" step="1" placeholder="egal" inputmode="numeric"></label>
+            <label class="field">Deckbudget in €
+              <input name="deck_budget" type="number" min="0" step="10" placeholder="egal" inputmode="numeric"></label>
+            <label class="field">Notiz <input name="description" maxlength="500" placeholder="z. B. donnerstags im Laden, eher locker"></label>
+          </div>
+          <label class="switch">
+            <input type="checkbox" name="no_proxies">
+            <span class="slider" aria-hidden="true"></span>
+            <span>Keine Proxies <span class="muted">– Proxy-Decks verstoßen gegen die Regel</span></span>
+          </label>
+          <div class="form-actions"><button type="submit" class="btn primary">Speichern</button></div>
+        </form>
+
+        <section class="panel">
+          <h2>Verboten &amp; Absprachen</h2>
+          <form id="tr-add" class="inline-form" autocomplete="off">
+            <input id="tr-input" list="ac-tr" placeholder="Karte oder Begriff, z. B. Cyclonic Rift; Stax; teurer als 10 €" aria-label="Karte oder Begriff hinzufügen">
+            <datalist id="ac-tr"></datalist>
+            <button type="submit" class="btn"><svg class="icon"><use href="#i-plus"/></svg>Hinzufügen</button>
+          </form>
+          <p id="tr-msg" class="muted small" aria-live="polite"></p>
+          <p class="muted small bl-quick-label">Schnell hinzufügen:</p>
+          <div class="chips-row" id="tr-quick"></div>
+          <ul id="tr-rules" class="bl-rules tr-rules"></ul>
+          <ul id="tr-cards" class="chips"></ul>
+          <p id="tr-rules-empty" class="empty-inline">Noch nichts verboten.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Welche meiner Decks passen?</h2>
+              <p class="muted small">Alle gespeicherten Decks gegen diese Tischregel geprüft – praktisch vor dem Spieleabend.</p>
+            </div>
+            <button type="button" class="btn" id="tr-check">Prüfen</button>
+          </div>
+          <ul id="tr-decks" class="tr-decks"></ul>
+        </section>
+      </div>
     </section>
 
     <!-- ============ blacklist ============ -->

@@ -27,7 +27,7 @@ VERSIONS_DIRNAME = ".versions"  # decks/.versions/<slug>/v0001.json – full sna
 
 # Fields whose change creates a new version (re-validation alone does not).
 _CONTENT_KEYS = ("name", "commanders", "cards", "bracket", "power_profile", "proxy", "budget", "currency",
-                 "description", "strategy", "notes")  # fmt: skip
+                 "description", "strategy", "notes", "table_rule")  # fmt: skip
 
 
 def _now() -> str:
@@ -309,6 +309,7 @@ def list_decks() -> list[dict[str, Any]]:
                 "updated": d.get("updated"),
                 "version": d.get("version"),
                 "valid": (d.get("validation") or {}).get("legal"),
+                "table_rule": d.get("table_rule"),
             }
         )
     return out

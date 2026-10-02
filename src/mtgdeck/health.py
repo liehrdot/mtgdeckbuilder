@@ -125,6 +125,19 @@ def check(deck: dict[str, Any]) -> dict[str, Any]:
         {"focus": "klarere Siegbedingungen"} if status != GREEN else None, wincons,
     ))  # fmt: skip
 
+    table = validation.get("table_rule")
+    if table and table.get("name"):
+        bad = table.get("violations") or []
+        items.append(_item(
+            "table_rule", "Tischregel", RED if bad else YELLOW if table.get("warnings") else GREEN,
+            len(bad), "0 Verstöße",
+            f"Passt zur Tischregel „{table['name']}“." if not bad else f"{len(bad)} Verstoß gegen „{table['name']}“: "
+            + "; ".join(v.split(": ", 1)[-1] for v in bad[:3]),
+            "Die Tischregel ist das, worauf sich deine Runde geeinigt hat. Ein Deck, das sie bricht, sorgt am Tisch für "
+            "Frust – tausche die genannten Karten aus oder wähle eine andere Tischregel.",
+            {"focus": f"Tischregel „{table['name']}“ einhalten"} if bad else None,
+        ))  # fmt: skip
+
     worst = max((i["status"] for i in items), key=_RANK.__getitem__, default=GREEN)
     n_bad = sum(1 for i in items if i["status"] != GREEN)
     summary = ("Alles im grünen Bereich." if not n_bad

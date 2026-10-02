@@ -29,6 +29,13 @@ Gather: commander (+ partner/background), **bracket (1-5)**, budget (total, EUR 
   Rules with `checked: false` are free-text wishes – respect them yourself. If the user says a card
   or a kind of card should *never* be played again, offer to add it with `update_blacklist`
   (terms like "Günstige Tutoren" or "teurer als 20 €" work directly; `@<text>` stores free text).
+- **Table rule (Tischregel)**: a named rule set of a playgroup (`table_rules`): max. bracket, Game
+  Changers, tutors, deck budget (counts for proxy decks too), no proxies, forbidden card groups and
+  cards, free-text agreements. A deck follows at most one (`load_deck` shows `table_rule_info`). If the
+  prompt or the user names one ("für die Freitagsrunde"), pass its id as `table_rule` to `validate_deck`
+  and `save_deck`; violations are errors. When refining, `save_deck` keeps the deck's table rule unless
+  you pass `table_rule` ("" removes it). The stricter of table rule, bracket and `power_profile` wins.
+  Create or change rule sets with `update_table_rule` only when the user asks.
 - GUI/non-interactive mode (prompt says so): never ask, make reasonable assumptions and
   mention them in the deck description. Default bracket 3 if absent.
 
@@ -85,8 +92,8 @@ Rules while picking:
 ## 3. Validate and fix (mandatory)
 
 1. Call `validate_deck` with commanders, the 99 (or 98) lines incl. basics (`"12 Forest"`), bracket,
-   currency, `budget` / `proxy` and `power_profile` (if any).
-2. Fix **every error** (card count, color identity, singleton, banned, blacklist, not found) and
+   currency, `budget` / `proxy`, `power_profile` and `table_rule` (if any).
+2. Fix **every error** (card count, color identity, singleton, banned, blacklist, table rule, not found) and
    **every bracket violation** (incl. the house rules of the power profile). If the power score
    (`bracket.power`) is far from the target tier, tune with the levers in power-tuning.md.
    Fix a budget overrun warning unless it is marginal. Check warnings (land count, low

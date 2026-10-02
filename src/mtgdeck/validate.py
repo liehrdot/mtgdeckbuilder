@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from . import blacklist, brackets, spellbook
+from . import blacklist, brackets, spellbook, tablerules
 from .cards import resolve
 from .deck import BASIC_LANDS, DeckEntry, deck_stats, parse_decklist
 from .http import HttpError
@@ -38,11 +38,13 @@ async def validate_deck(
     budget: float | None = None,
     proxy: bool = False,
     profile: PowerProfile | None = None,
+    table_rule: str | None = None,
 ) -> dict[str, Any]:
     """Validate a deck. ``cards`` are decklist lines ('1 Sol Ring' or 'Sol Ring'), without commanders.
 
     ``budget`` is the max. total price (warning when exceeded); ``proxy=True`` means the deck will
-    be printed as proxies, so prices are informational only. Blacklisted cards are errors.
+    be printed as proxies, so prices are informational only. Blacklisted cards are errors, and so
+    are breaches of the chosen ``table_rule`` (id or name of a rule set, see ``tablerules``).
     """
     parsed = parse_decklist(cards)
     commanders = [c for c in commanders if c] + parsed.commanders
@@ -152,6 +154,22 @@ async def validate_deck(
     bracket_result = brackets.evaluate(
         bracket, all_cards, spellbook_estimate=sb_estimate, two_card_combos=two_card, profile=profile
     )
+    table_block = None
+    if table_rule:
+        rs = tablerules.resolve_id(table_rule)
+        t_err: list[str] = []
+        t_warn: list[str] = []
+        if rs is None:
+            warnings.append(f"Die Tischregel „{table_rule}“ gibt es nicht mehr – keine Tischregel geprüft")
+        else:
+            t_err, t_warn = tablerules.violations(
+                rs, cards=all_cards, qty={**{c: 1 for c in commanders}, **qty}, bracket=bracket, proxy=proxy,
+                game_changers=bracket_result["game_changers"], tutors=bracket_result["tutors"],
+                two_card_combos=bracket_result["two_card_combos"], estimated=bracket_result["estimated"],
+            )  # fmt: skip
+            errors += t_err
+            warnings += t_warn
+        table_block = tablerules.result(rs, rs["id"] if rs else table_rule, t_err, t_warn)
 
     return {
         "legal": not errors,
@@ -168,6 +186,7 @@ async def validate_deck(
         "budget": None if proxy else budget,
         "proxy": proxy,
         "renamed": renames,
+        "table_rule": table_block,
         "commanders": commanders,
         "cards": [{"name": e.name, "qty": e.qty} for e in entries],
         "_card_data": card_data,

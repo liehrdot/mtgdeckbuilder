@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from mtgdeck import blacklist, carddb, collection, deskmat, http, proxy, settings, storage
+from mtgdeck import blacklist, carddb, collection, deskmat, http, proxy, settings, storage, tablerules
 
 
 def card(name: str, *, ci: str = "", type_line: str = "Creature — Human", text: str = "", cmc: float = 2,
@@ -277,6 +277,7 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(carddb, "DB_PATH", tmp_path / "data" / "cards.sqlite")
     monkeypatch.setattr(storage, "DECKS_DIR", tmp_path / "decks")
     monkeypatch.setattr(blacklist, "BLACKLIST_FILE", tmp_path / "blacklist.txt")
+    monkeypatch.setattr(tablerules, "TABLERULES_FILE", tmp_path / "tablerules.json")
     monkeypatch.setattr(collection, "COLLECTION_FILE", tmp_path / "collection.json")
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(proxy, "PROXIES_DIR", tmp_path / "proxies")

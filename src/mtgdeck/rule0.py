@@ -78,6 +78,10 @@ def build(deck: dict[str, Any]) -> dict[str, Any]:
     row("Land-Zerstörung", _names(mld) if mld else "keine", bool(mld))
     if deck.get("proxy"):
         row("Proxys", "Proxy-Deck – enthält selbst gedruckte Karten", True)
+    table = v.get("table_rule") or {}
+    if table.get("name"):
+        row("Tischregel", f"„{table['name']}“ – " + ("eingehalten" if table.get("compliant") else
+            f"{len(table.get('violations') or [])} Verstoß/Verstöße"), not table.get("compliant"))  # fmt: skip
     rules_text = _house_rules(profile)
     if rules_text:
         row("Hausregeln", ", ".join(rules_text))

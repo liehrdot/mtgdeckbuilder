@@ -13,3 +13,4 @@ mtgdeck.settings.json
 tools/*
 !tools/README.md
 deskmats/
+tablerules.json

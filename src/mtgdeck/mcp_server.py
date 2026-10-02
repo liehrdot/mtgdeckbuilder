@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, printorders, proxy, scryfall, spellbook, storage
+from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, printorders, proxy, scryfall, spellbook, storage, tablerules
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -217,12 +217,14 @@ async def validate_deck(
     budget: Annotated[float | None, Field(description="Max. total deck price; exceeding it is a warning")] = None,
     proxy: Annotated[bool, Field(description="Deck will be printed as proxies: prices don't matter")] = False,
     power_profile: Annotated[PowerProfile | None, Field(description="Sub-tier, house rules and style inside the bracket")] = None,
+    table_rule: Annotated[str | None, Field(description="Id (or name) of the table rule set the deck must follow, see table_rules")] = None,
 ) -> dict[str, Any]:
     """Check a deck: 100 cards, singleton, color identity, banned cards, user blacklist, budget,
     land/ramp/draw/removal counts, bracket rules (Game Changers, mass land denial, extra turns,
-    2-card combos via Commander Spellbook), power profile house rules and a heuristic power score."""
+    2-card combos via Commander Spellbook), power profile house rules, the table rule and a heuristic power score."""
     result = await _validate(
-        commanders, cards, bracket, currency=currency, budget=budget, proxy=proxy, profile=power_profile
+        commanders, cards, bracket, currency=currency, budget=budget, proxy=proxy, profile=power_profile,
+        table_rule=table_rule,
     )
     result.pop("_card_data", None)
     result.pop("cards", None)
@@ -254,11 +256,19 @@ async def save_deck(
     change_note: Annotated[str, Field(description="When updating a deck: what was changed and why (stored in the deck history)")] = "",
     notes: Annotated[str, Field(description="Notes for the player: mulligan tips, combos, upgrade ideas")] = "",
     slug: Annotated[str | None, Field(description="Existing deck slug to overwrite (when refining a deck)")] = None,
+    table_rule: Annotated[str | None, Field(description="Table rule set id/name the deck follows; omit to keep the deck's current one, '' for none")] = None,
 ) -> dict[str, Any]:
     """Validate and save a deck to decks/<slug>.json (+ .txt export for Moxfield/Archidekt). Shown in the GUI."""
     lines = [f"{c.qty} {c.name}" for c in cards]
+    if table_rule is None and slug:  # refining: the deck keeps its table rule
+        try:
+            table_rule = storage.load(slug).get("table_rule")
+        except FileNotFoundError:
+            table_rule = None
+    rs = tablerules.resolve_id(table_rule)
     result = await _validate(
-        commanders, lines, bracket, currency=currency, budget=budget, proxy=proxy, profile=power_profile
+        commanders, lines, bracket, currency=currency, budget=budget, proxy=proxy, profile=power_profile,
+        table_rule=rs["id"] if rs else table_rule or None,
     )
     card_data = result.pop("_card_data")
     categories = {c.name: c.category for c in cards}
@@ -279,6 +289,7 @@ async def save_deck(
         "currency": currency,
         "notes": notes,
         "change_note": change_note,
+        "table_rule": rs["id"] if rs else None,
         "cards": [{**c, "category": categories.get(c["name"], "")} for c in result.pop("cards")],
         "validation": result,
     }
@@ -295,6 +306,7 @@ async def save_deck(
         "power": {k: result["bracket"]["power"][k] for k in ("value", "text", "components")},
         "price_total": result["price_total"],
         "proxy": proxy,
+        "table_rule": result.get("table_rule"),
         "card_count": result["stats"]["card_count"] + len(result["commanders"]),
         "unresolved_cards": [n for n in categories if n not in card_data],
         "hint": "Fix errors/violations and call save_deck again with the same slug." if not result["legal"] or not result["bracket"]["compliant"] else "",
@@ -387,6 +399,60 @@ async def update_blacklist(
     return await blacklist.update(add, remove)
 
 
+# --- table rules ------------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def table_rules() -> dict[str, Any]:
+    """The user's table rules ("Tischregeln"): named rule sets for a playgroup (max. bracket, Game
+    Changers, tutors, deck budget, no proxies, forbidden card groups and cards, free-text agreements).
+    A deck follows at most one (deck field `table_rule`); pass its id to validate_deck/save_deck."""
+    sets = tablerules.all_sets()
+    return {"count": len(sets), "table_rules": [
+        {"id": s["id"], "name": s["name"], "description": s.get("description", ""), "rules": s["summary"]} for s in sets]}  # fmt: skip
+
+
+@mcp.tool()
+async def update_table_rule(
+    name: Annotated[str, Field(description="Name of the rule set, e.g. 'Freitagsrunde' (created if it does not exist)")],
+    add: Annotated[list[str] | None, Field(description="Forbidden cards or terms: 'True Duals', 'Günstige Tutoren', '2-Karten-Combos', 'teurer als 5 €', '@free-text agreement'")] = None,
+    remove: Annotated[list[str] | None, Field(description="Card names or rule lines ('@cheap-tutors') to take out")] = None,
+    max_bracket: Annotated[int | None, Field(ge=0, le=5, description="Highest bracket allowed; 0 clears")] = None,
+    max_game_changers: Annotated[int | None, Field(ge=-1, description="Max. Game Changers; -1 clears")] = None,
+    max_tutors: Annotated[int | None, Field(ge=-1, description="Max. tutors; -1 clears")] = None,
+    deck_budget: Annotated[float | None, Field(ge=0, description="Max. deck price (also for proxy decks); 0 clears")] = None,
+    no_proxies: bool | None = None,
+    description: str | None = None,
+    delete: bool = False,
+) -> dict[str, Any]:
+    """Create, change or delete a table rule set. Only on explicit user request."""
+    rs = tablerules.resolve_id(name)
+    if delete:
+        if not rs:
+            return {"error": f"Keine Tischregel „{name}“"}
+        tablerules.delete(rs["id"])
+        return {"deleted": rs["name"]}
+    changes: dict[str, Any] = {}
+    if max_bracket is not None:
+        changes["max_bracket"] = max_bracket or None
+    if max_game_changers is not None:
+        changes["max_game_changers"] = None if max_game_changers < 0 else max_game_changers
+    if max_tutors is not None:
+        changes["max_tutors"] = None if max_tutors < 0 else max_tutors
+    if deck_budget is not None:
+        changes["deck_budget"] = deck_budget or None
+    if no_proxies is not None:
+        changes["no_proxies"] = no_proxies
+    if description is not None:
+        changes["description"] = description
+    if rs is None:
+        out = await tablerules.create(name, add=add, remove=remove, **changes)
+    else:
+        out = await tablerules.update(rs["id"], add=add, remove=remove, **changes)
+        await tablerules.revalidate_decks(rs["id"])
+    return {"id": out["id"], "name": out["name"], "rules": out["summary"], "not_found": out.get("not_found", [])}
+
+
 @mcp.tool()
 async def list_decks() -> list[dict[str, Any]]:
     """Saved decks (newest first)."""
@@ -399,6 +465,10 @@ async def load_deck(slug: str) -> dict[str, Any]:
     deck = storage.load(slug)
     v = deck.get("validation") or {}
     deck["validation"] = {k: v.get(k) for k in ("legal", "errors", "warnings", "bracket", "price_total")}
+    rs = tablerules.get(deck.get("table_rule"))
+    if rs:
+        deck["table_rule_info"] = {"id": rs["id"], "name": rs["name"], "rules": tablerules.summary_lines(rs),
+                                   "hint": f"Pass table_rule='{rs['id']}' to validate_deck and save_deck."}  # fmt: skip
     deck["history"] = (deck.get("history") or [])[-5:]  # latest changes are enough for context
     return deck
 

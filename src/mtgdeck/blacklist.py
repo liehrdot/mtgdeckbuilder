@@ -238,37 +238,55 @@ def _write(names: list[str], rule_list: list[str]) -> None:
     BLACKLIST_FILE.write_text(_HEADER + body + ("\n" if body else ""), "utf-8")
 
 
-async def update(add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
-    """Add/remove cards and rules. Known terms ("True Duals", "Günstige Tutoren", "teurer als 20 €")
-    become rules, everything else is resolved as a card name (German etc. works). An entry starting
-    with ``@`` is always a rule – unknown ones are stored as free text."""
-    current = {n.lower(): n for n in load()}
-    current_rules = rule_lines()
-    not_found: list[str] = []
-    added: list[str] = []
-    added_rules: list[str] = []
+async def parse_entries(entries: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Typed entries -> (rule lines, Oracle card names, not found). Known terms ("True Duals",
+    "Günstige Tutoren", "teurer als 20 €") become rules, ``@…`` always does (unknown = free text),
+    everything else is resolved as a card name (German etc. works)."""
+    rule_list: list[str] = []
     wanted: list[str] = []
-    for a in add or []:
+    for a in entries:
         a = a.strip()
         if not a:
             continue
         rule = parse_rule(a)
         if rule:
-            if rule not in current_rules:
-                current_rules = [r for r in current_rules if not (rule.startswith("@price>") and r.startswith("@price>"))]
-                current_rules.append(rule)
-            added_rules.append(rule)
+            rule_list.append(rule)
         else:
             wanted.append(a)
+    names: list[str] = []
+    not_found: list[str] = []
     if wanted:
         try:
             cards, renames, not_found = await resolve(wanted)
         except Exception:  # offline: keep the names as typed
-            cards, renames, not_found = {}, {}, []
-            added = list(wanted)
-        added += [renames.get(w, w) for w in wanted if w not in not_found and renames.get(w, w) in cards]
-        for name in added:
-            current[name.lower()] = name
+            return rule_list, list(wanted), []
+        names = [renames.get(w, w) for w in wanted if w not in not_found and renames.get(w, w) in cards]
+    return rule_list, names, not_found
+
+
+def merge_rules(current: list[str], new: list[str]) -> list[str]:
+    """Add rule lines; a new price limit replaces the old one."""
+    out = list(current)
+    for rule in new:
+        if rule in out:
+            continue
+        if rule.startswith("@price>"):
+            out = [r for r in out if not r.startswith("@price>")]
+        out.append(rule)
+    return out
+
+
+def describe_rules(lines: list[str]) -> list[dict[str, Any]]:
+    return [_describe(ln) for ln in dict.fromkeys(lines)]
+
+
+async def update(add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
+    """Add/remove cards and rules (see ``parse_entries``)."""
+    current = {n.lower(): n for n in load()}
+    added_rules, added, not_found = await parse_entries(add or [])
+    current_rules = merge_rules(rule_lines(), added_rules)
+    for name in added:
+        current[name.lower()] = name
     removed = []
     for name in remove or []:
         name = name.strip()
@@ -279,7 +297,7 @@ async def update(add: list[str] | None = None, remove: list[str] | None = None) 
         elif current.pop(name.lower(), None) is not None:
             removed.append(name)
     _write(list(current.values()), current_rules)
-    return {"blacklist": load(), "rules": rules(), "added": added, "added_rules": [_describe(r) for r in added_rules],
+    return {"blacklist": load(), "rules": rules(), "added": added, "added_rules": describe_rules(added_rules),
             "removed": removed, "not_found": not_found}  # fmt: skip
 
 

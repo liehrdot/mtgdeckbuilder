@@ -81,7 +81,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "collection", "orders", "deskmat", "glossary", "blacklist", "settings"];
+const VIEWS = ["new", "job", "deck", "collection", "orders", "deskmat", "glossary", "tables", "blacklist", "settings"];
 const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
@@ -109,6 +109,7 @@ async function route() {
   if (r.view === "glossary") showGlossary(r.slug);
   if (r.view === "deskmat") showDeskmat(r.slug);
   if (r.view === "orders") showOrders(r.slug);
+  if (r.view === "tables") showTables(r.slug);
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -120,7 +121,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -274,7 +275,7 @@ buildForm.addEventListener("submit", async (e) => {
       const body = {
         ...buildSettings(), commander: f.commander, partner: f.partner || null,
         strategy: f.strategy || null, notes: f.notes || null, prefer_collection: !!f.prefer_collection,
-        profile: readProfile($("#build-profile .profile-fields")),
+        profile: readProfile($("#build-profile .profile-fields")), table_rule: f.table_rule || null,
       };
       const { job } = await api("/api/build", { method: "POST", body });
       startJob(job, `Claude baut ${body.commander}${body.partner ? " + " + body.partner : ""}`, { kind: "build", slot: "#job-slot-main", route: "#/job" });
@@ -511,7 +512,7 @@ const TOOL_LABELS = {
   get_cards: "liest Kartentexte", find_commanders: "sucht Commander", find_combos: "sucht Combos",
   validate_deck: "prüft das Deck (Legalität, Bracket, Budget)", save_deck: "speichert das Deck",
   load_deck: "lädt das Deck", bracket_rules: "liest die Bracket-Regeln", game_changers: "prüft Game Changer",
-  get_blacklist: "liest deine Blacklist", deck_games: "liest deine Partien", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
+  get_blacklist: "liest deine Blacklist", table_rules: "liest deine Tischregeln", update_table_rule: "ändert eine Tischregel", deck_games: "liest deine Partien", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
   list_deck_versions: "liest den Verlauf", compare_deck_versions: "vergleicht Versionen",
 };
 const toolText = (name) => `Claude ${TOOL_LABELS[name] || `nutzt ${name}`} …`;
@@ -688,6 +689,7 @@ async function openDeck(slug) {
   printLoadedFor = null;
   rule0For = null;
   renderDeckHead(d);
+  renderDeckTable(d);
   renderValidation(d.validation);
   renderHealth(d);
   renderStats(d.validation?.stats, d.validation);
@@ -728,6 +730,10 @@ function renderDeckHead(d) {
   if (d.proxy) pills.push('<span class="pill">Proxy-Deck</span>');
   else if (v.price_total != null) pills.push(`<span class="pill">${esc(fmtPrice(v.price_total, cur))}${d.budget ? ` / ${esc(d.budget)} ${cur}` : ""}</span>`);
   if (d.power_profile?.style) pills.push(`<span class="pill">Stil: ${esc(d.power_profile.style)}</span>`);
+  if (d.table_rule_info) {
+    const t = v.table_rule || {};
+    pills.push(`<a class="pill ${t.compliant === false ? "bad" : ""}" href="#/deck/${enc(d.slug)}/anpassen" title="Tischregel">${icon("table")}${esc(d.table_rule_info.name)}</a>`);
+  }
   pills.push(`<span class="muted small">${d.version ? `v${d.version} · ` : ""}${esc(fmtDate(d.updated))}</span>`);
   $("#deck-meta").innerHTML = pills.join("");
   $("#deck-desc").textContent = d.description || "";
@@ -2873,6 +2879,231 @@ for (const list of ["#bl-list", "#bl-rules"]) {
 }
 
 // ============================================================================================
+// table rules ("Tischregeln"): rule sets per playgroup, chosen per deck
+// ============================================================================================
+let tableSets = [];
+let tableCatalog = [];
+let currentTable = null;
+
+async function refreshTableRules() {
+  const data = await api("/api/tablerules").catch(() => ({ sets: [], catalog: [] }));
+  tableSets = data.sets;
+  tableCatalog = data.catalog;
+  $("#tr-count").textContent = tableSets.length || "";
+  const opts = (sel) => '<option value="">Keine Tischregel</option>'
+    + tableSets.map((t) => `<option value="${esc(t.id)}"${t.id === sel ? " selected" : ""}>${esc(t.name)}</option>`).join("");
+  const build = $("#build-table");
+  build.innerHTML = opts(build.value);
+  updateBuildTableHint();
+  if (currentDeck) renderDeckTable(currentDeck);
+}
+
+function tableById(id) { return tableSets.find((t) => t.id === id) || null; }
+
+function updateBuildTableHint() {
+  const t = tableById($("#build-table").value);
+  const hint = $("#build-table-hint");
+  hint.hidden = !t;
+  if (!t) return;
+  const notes = [];
+  const bracket = Number(new FormData(buildForm).get("bracket"));
+  if (t.max_bracket && bracket > t.max_bracket) notes.push(`<strong>Höchstens Bracket ${t.max_bracket}</strong> – stell das Bracket oben niedriger.`);
+  if (t.no_proxies && $("#proxy").checked) notes.push("<strong>Keine Proxies</strong> an diesem Tisch – schalte „Proxy-Deck“ aus.");
+  hint.innerHTML = (notes.length ? `<span class="warn-text">${notes.join(" ")}</span><br>` : "")
+    + (t.summary.length ? esc(t.summary.join(" · ")) : "Diese Tischregel ist noch leer.");
+}
+$("#build-table").addEventListener("change", updateBuildTableHint);
+$("#bracket-options").addEventListener("change", updateBuildTableHint);
+$("#proxy").addEventListener("change", updateBuildTableHint);
+
+function renderDeckTable(d) {
+  const sel = $("#deck-table");
+  const id = d.table_rule || "";
+  sel.innerHTML = '<option value="">Keine Tischregel</option>'
+    + tableSets.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("");
+  sel.value = tableById(id) ? id : "";
+  const box = $("#deck-table-status");
+  const t = d.validation?.table_rule;
+  if (!id || !t?.name) {
+    box.innerHTML = tableSets.length ? "" : `<p class="muted small">Noch keine Tischregeln – <a href="#/tables">jetzt eine anlegen</a>.</p>`;
+    return;
+  }
+  const bad = t.violations || [];
+  box.innerHTML = `<p class="${bad.length ? "bad-text" : "ok-text"}">${icon(bad.length ? "alert" : "check")}
+      ${bad.length ? `${bad.length} ${bad.length === 1 ? "Verstoß" : "Verstöße"} gegen „${esc(t.name)}“` : `Passt zu „${esc(t.name)}“`}</p>
+    ${bad.length ? `<ul class="tr-violations">${bad.map((v) => `<li>${esc(v.split(": ").slice(1).join(": ") || v)}</li>`).join("")}</ul>` : ""}
+    ${(t.warnings || []).map((w) => `<p class="muted small">${esc(w)}</p>`).join("")}
+    <p class="muted small">${esc((t.summary || []).join(" · "))}</p>
+    <div class="btn-row">
+      ${bad.length ? `<button type="button" class="btn" id="deck-table-fix">${icon("spark")}Claude soll das Deck anpassen</button>` : ""}
+      <a class="link small" href="#/tables/${enc(id)}">Tischregel bearbeiten</a>
+    </div>`;
+}
+$("#deck-table").addEventListener("change", async (e) => {
+  const d = currentDeck;
+  const id = e.target.value || null;
+  try {
+    await api(`/api/decks/${enc(d.slug)}/table-rule`, { method: "PUT", body: { table_rule: id } });
+    await openDeck(d.slug);
+    refreshDeckList();
+    const t = currentDeck.validation?.table_rule;
+    toast(!id ? "Tischregel entfernt." : t?.compliant ? `Passt zu „${t.name}“.` : `Tischregel gesetzt – ${t?.violations?.length || 0} Verstöße.`);
+  } catch (err) { fail(err); renderDeckTable(d); }
+});
+$("#deck-table-status").addEventListener("click", (e) => {
+  if (!e.target.closest("#deck-table-fix")) return;
+  const t = currentDeck.validation?.table_rule;
+  const form = $("#refine-form");
+  form.elements.request.value = `Halte die Tischregel „${t.name}“ ein: ${(t.violations || []).map((v) => v.split(": ").slice(1).join(": ")).join("; ")}`;
+  form.requestSubmit();
+});
+
+async function showTables(id) {
+  $("#tr-list-view").hidden = !!id;
+  $("#tr-view").hidden = !id;
+  await refreshTableRules();
+  if (!id) {
+    currentTable = null;
+    $("#tr-empty").hidden = !!tableSets.length;
+    $("#tr-list").innerHTML = tableSets.map((t) => `<a class="panel order-row" href="#/tables/${enc(t.id)}">
+        <div><h3>${esc(t.name)}</h3><p class="muted small">${esc(t.summary.join(" · ") || "noch leer")}</p></div>
+        <span class="muted small">${t.decks ? `${t.decks} Deck${t.decks === 1 ? "" : "s"}` : ""}</span></a>`).join("");
+    return;
+  }
+  currentTable = tableById(id);
+  if (!currentTable) { toast("Diese Tischregel gibt es nicht mehr.", "error"); go("#/tables"); return; }
+  $("#tr-decks").innerHTML = "";
+  renderTable();
+}
+
+function renderTable() {
+  const t = currentTable;
+  $("#tr-name").textContent = t.name;
+  $("#tr-meta").textContent = t.decks ? `Gilt für ${t.decks} Deck${t.decks === 1 ? "" : "s"}.` : "Noch von keinem Deck gewählt.";
+  const f = $("#tr-form").elements;
+  f.name.value = t.name;
+  f.description.value = t.description || "";
+  f.max_bracket.value = t.max_bracket || "";
+  f.max_game_changers.value = t.max_game_changers ?? "";
+  f.max_tutors.value = t.max_tutors ?? "";
+  f.deck_budget.value = t.deck_budget ?? "";
+  f.no_proxies.checked = !!t.no_proxies;
+  const active = new Set(t.rules);
+  $("#tr-rules").innerHTML = t.rule_info.map((r) => `<li>
+      <div class="bl-rule-main">
+        <strong>${esc(r.label)}</strong>
+        <span class="pill ${r.checked ? "ok" : "accent"}">${r.checked ? "wird geprüft" : "Absprache"}</span>
+        <p class="muted small">${esc(r.description)}</p>
+      </div>
+      <button type="button" class="btn ghost small" data-remove="${esc(r.rule)}" aria-label="${esc(r.label)} entfernen">Entfernen</button>
+    </li>`).join("");
+  $("#tr-cards").innerHTML = t.cards.map((n) => `<li>${esc(n)}<button type="button" title="Entfernen" aria-label="${esc(n)} entfernen" data-remove="${esc(n)}">×</button></li>`).join("");
+  $("#tr-rules-empty").hidden = !!(t.rules.length || t.cards.length);
+  $("#tr-quick").innerHTML = tableCatalog.filter((c) => !active.has(c.rule))
+    .map((c) => `<button type="button" class="chip" data-rule="${esc(c.rule)}" title="${esc(c.description)}">${esc(c.label)}</button>`).join("")
+    + (t.rules.some((r) => r.startsWith("@price>")) ? "" : `<button type="button" class="chip" data-price="1" title="Karten über einem Preis verbieten">Karten teurer als … €</button>`);
+}
+
+async function patchTable(body, msg = "") {
+  const r = await api(`/api/tablerules/${enc(currentTable.id)}`, { method: "PATCH", body });
+  await refreshTableRules();
+  currentTable = tableById(currentTable.id);
+  renderTable();
+  if (r.revalidated?.length) toast(`${r.revalidated.length} Deck${r.revalidated.length === 1 ? "" : "s"} neu geprüft.`);
+  else if (msg) toast(msg);
+  return r;
+}
+
+$("#tr-new").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const t = await api("/api/tablerules", { method: "POST", body: { name: e.target.elements.name.value } });
+    e.target.reset();
+    go(`#/tables/${enc(t.id)}`);
+  } catch (err) { fail(err); }
+});
+$("#tr-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  const num = (v) => (v === "" ? null : Number(v));
+  try {
+    await patchTable({
+      name: f.name.value, description: f.description.value, max_bracket: num(f.max_bracket.value),
+      max_game_changers: num(f.max_game_changers.value), max_tutors: num(f.max_tutors.value),
+      deck_budget: num(f.deck_budget.value), no_proxies: f.no_proxies.checked,
+    }, "Gespeichert.");
+  } catch (err) { fail(err); }
+});
+async function addToTable(add) {
+  const r = await patchTable({ add });
+  const parts = [];
+  if (r.added?.length) parts.push(`Karten: ${r.added.join(", ")}`);
+  if (r.added_rules?.length) parts.push(`Regeln: ${r.added_rules.map((x) => x.label).join(", ")}`);
+  $("#tr-msg").textContent = parts.length ? `Hinzugefügt – ${parts.join(" · ")}` : "";
+  for (const term of r.not_found || []) {
+    const ok = await ask({ title: `„${term}“ nicht gefunden`, ok: "Als Absprache speichern",
+      text: "Das ist weder eine Karte noch ein bekannter Begriff. Als freie Absprache speichern? Claude hält sich beim Bauen daran, automatisch geprüft wird sie nicht." });
+    if (ok) await patchTable({ add: [`@${term}`] }).catch(fail);
+  }
+}
+$("#tr-add").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const add = $("#tr-input").value.split(/[;\n]/).map((x) => x.trim()).filter(Boolean);
+  if (!add.length) return;
+  $("#tr-input").value = "";
+  await addToTable(add).catch(fail);
+});
+$("#tr-quick").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  let rule = btn.dataset.rule;
+  if (btn.dataset.price) {
+    const v = await ask({ title: "Karten über welchem Preis verbieten?", text: "Betrag in Euro (günstigster Druck).", value: "10", ok: "Verbieten" });
+    const n = parseFloat(String(v || "").replace(",", "."));
+    if (!(n > 0)) return;
+    rule = `@price>${n}`;
+  }
+  await addToTable([rule]).catch(fail);
+});
+for (const list of ["#tr-rules", "#tr-cards"]) {
+  $(list).addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-remove]");
+    if (!btn) return;
+    $("#tr-msg").textContent = "";
+    await patchTable({ remove: [btn.dataset.remove] }).catch(fail);
+  });
+}
+$("#tr-delete").addEventListener("click", async () => {
+  $("#tr-menu").open = false;
+  const t = currentTable;
+  const ok = await ask({ title: `Tischregel „${t.name}“ löschen?`, danger: true, ok: "Löschen",
+    text: t.decks ? `${t.decks} Deck${t.decks === 1 ? "" : "s"} verlieren damit ihre Tischregel (als neue Version gespeichert).` : "" });
+  if (!ok) return;
+  try {
+    await api(`/api/tablerules/${enc(t.id)}`, { method: "DELETE" });
+    toast(`„${t.name}“ gelöscht.`);
+    if (currentDeck?.table_rule === t.id) await openDeck(currentDeck.slug);
+    go("#/tables");
+  } catch (err) { fail(err); }
+});
+$("#tr-check").addEventListener("click", async () => {
+  const btn = $("#tr-check");
+  btn.disabled = true;
+  $("#tr-decks").innerHTML = '<li class="muted small">Prüfe …</li>';
+  try {
+    const rows = await api(`/api/tablerules/${enc(currentTable.id)}/decks`);
+    $("#tr-decks").innerHTML = rows.length ? rows.map((r) => `<li>
+        <span class="pill ${r.ok ? "ok" : "bad"}">${icon(r.ok ? "check" : "alert")}${r.ok ? "passt" : `${r.errors.length} ${r.errors.length === 1 ? "Verstoß" : "Verstöße"}`}</span>
+        <div><a href="#/deck/${enc(r.slug)}/anpassen">${esc(r.name)}</a>${r.uses ? ' <span class="muted small">· nutzt diese Tischregel</span>' : ""}
+          <span class="muted small">· ${esc(r.commanders.join(" + "))} · Bracket ${esc(r.bracket ?? "?")}</span>
+          ${r.errors.length ? `<ul class="tr-violations">${r.errors.map((v) => `<li>${esc(v.split(": ").slice(1).join(": ") || v)}</li>`).join("")}</ul>` : ""}
+          ${r.warnings.map((w) => `<p class="muted small">${esc(w.split(": ").slice(1).join(": ") || w)}</p>`).join("")}
+        </div></li>`).join("") : '<li class="muted small">Noch keine Decks gespeichert.</li>';
+  } catch (err) { fail(err); $("#tr-decks").innerHTML = ""; }
+  btn.disabled = false;
+});
+
+// ============================================================================================
 // settings: proxy printing, AI upscaling, local card DB
 // ============================================================================================
 let appSettings = {};
@@ -3653,6 +3884,8 @@ function paletteItems() {
     { label: "Neue Sammelbestellung", hint: "Sammelbestellungen", run: () => { go("#/orders"); $("#order-new").click(); } },
     { label: "Deskmat-Studio", hint: "Seite", run: () => go("#/deskmat") },
     { label: "Glossar", hint: "Seite", run: () => go("#/glossary") },
+    { label: "Tischregeln", hint: "Seite", run: () => go("#/tables") },
+    ...tableSets.map((t) => ({ label: t.name, hint: "Tischregel", run: () => go(`#/tables/${enc(t.id)}`) })),
     { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
     { label: "Einstellungen", hint: "Seite", run: () => go("#/settings") },
   ];
@@ -3716,7 +3949,8 @@ if (/Mac|iPhone|iPad/.test(navigator.platform)) $("#palette-btn kbd").textConten
 wireAutocomplete($("#commander"), $("#ac-commander"), previewCommander);
 wireAutocomplete($("#partner"), $("#ac-partner"));
 wireAutocomplete($("#bl-input"), $("#ac-bl"));
+wireAutocomplete($("#tr-input"), $("#ac-tr"));
 setMode("build");
 refreshBlacklist();
 loadSettings().catch((err) => console.error(err));
-Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary()]).then(route, (err) => { fail(err); route(); });
+Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary(), refreshTableRules()]).then(route, (err) => { fail(err); route(); });

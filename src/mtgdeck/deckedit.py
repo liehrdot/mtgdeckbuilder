@@ -38,6 +38,7 @@ async def revalidate(deck: dict[str, Any]) -> dict[str, Any]:
         deck["commanders"], lines, int(deck.get("bracket") or 3), currency=deck.get("currency", "eur"),
         budget=deck.get("budget"), proxy=bool(deck.get("proxy")),
         profile=PowerProfile(**deck["power_profile"]) if deck.get("power_profile") else None,
+        table_rule=deck.get("table_rule"),
     )  # fmt: skip
     result.pop("_card_data", None)
     result.pop("cards", None)

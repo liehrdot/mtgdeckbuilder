@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, precons, printorders, proxy, rule0, scryfall, storage
+from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, precons, printorders, proxy, rule0, scryfall, storage, tablerules
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -99,10 +99,10 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 # Tools for questions about a deck: research only, nothing that saves or changes anything.
 READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
-                   "bracket_rules", "validate_deck", "get_blacklist", "list_decks", "load_deck", "deck_games",
+                   "bracket_rules", "validate_deck", "get_blacklist", "table_rules", "list_decks", "load_deck", "deck_games",
                    "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons", "print_orders",
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
-WRITE_TOOLS = ["save_deck", "update_blacklist", "restore_deck_version", "copy_deck", "update_card_database",
+WRITE_TOOLS = ["save_deck", "update_blacklist", "update_table_rule", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
                "edit_deck", "update_collection", "import_precon", "create_deskmat", "update_print_order"]  # fmt: skip
 Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
@@ -116,6 +116,7 @@ async def _run_claude(
     *,
     read_only: bool = False,
     finish: Finish | None = None,
+    table_rule: str | None = None,
 ) -> None:
     """Run Claude Code on ``prompt``. ``read_only`` restricts the mtg tools to research;
     ``finish(job, ok, final_text, structured_output)`` replaces the default end (detect the saved deck)."""
@@ -191,8 +192,31 @@ async def _run_claude(
         return
 
     deck = next((d for d in storage.list_decks() if (d.get("updated") or "") >= _iso(job.started)), None)
+    if deck and table_rule and deck.get("table_rule") != table_rule:  # Claude forgot to pass it on
+        try:
+            await _set_table_rule(deck["slug"], table_rule)
+        except Exception as exc:
+            job.emit(type="error", text=f"Tischregel konnte nicht gesetzt werden: {exc}")
     job.emit(type="done", ok=ok and deck is not None, deck=deck["slug"] if deck else None)
     job.done = True
+
+
+async def _set_table_rule(slug: str, rule_id: str | None, note: str = "") -> dict[str, Any]:
+    """Give a saved deck a table rule (or none), re-validate and save it as a new version."""
+    deck = storage.load(slug)
+    rs = tablerules.get(rule_id) if rule_id else None
+    if rule_id and rs is None:
+        raise FileNotFoundError(f"Unbekannte Tischregel: {rule_id}")
+    old = tablerules.get(deck.get("table_rule"))
+    deck["table_rule"] = rs["id"] if rs else None
+    await deckedit.revalidate(deck)
+    deck["change_note"] = note or (f"Tischregel: {rs['name']}" if rs else "Tischregel entfernt" + (f" ({old['name']})" if old else ""))
+    storage.save(deck)
+    return deck
+
+
+def _deck_table_lines(deck: dict[str, Any]) -> list[str]:
+    return tablerules.prompt_lines(tablerules.get(deck.get("table_rule")))
 
 
 def _iso(ts: float) -> str:
@@ -217,6 +241,7 @@ class BuildRequest(BaseModel):
     notes: str | None = None
     profile: PowerProfile | None = None
     prefer_collection: bool = False
+    table_rule: str | None = None
     model: str | None = None
 
 
@@ -293,6 +318,7 @@ def build_prompt(req: BuildRequest) -> str:
         lines.append(f"- Weitere Wünsche: {req.notes}")
     if req.prefer_collection:
         lines.append(COLLECTION_LINE)
+    lines += tablerules.prompt_lines(tablerules.get(req.table_rule))
     lines += [
         "",
         "Du läufst im GUI-Modus: Stelle keine Rückfragen, triff sinnvolle Annahmen und nenne sie in der Deckbeschreibung.",
@@ -452,6 +478,7 @@ def retune_prompt(req: RetuneRequest, deck: dict[str, Any]) -> str:
         f"- Bracket: {req.bracket} ({brackets.BY_NUMBER[req.bracket]['name']})",
         *profile_lines(req.bracket, req.profile),
         "- " + _budget_line(deck.get("budget"), bool(deck.get("proxy")), deck.get("currency", "eur")).lstrip("- "),
+        *_deck_table_lines(deck),
     ]
     if req.request:
         lines.append(f"- Zusätzlicher Wunsch: {req.request}")
@@ -478,6 +505,7 @@ def refine_prompt(req: RefineRequest, deck: dict[str, Any] | None = None) -> str
         [
             f"Überarbeite das gespeicherte Commander-Deck `{req.slug}` (lade es mit `load_deck`).",
             f"Bisherige Vorgaben: {budget.lstrip('- ')}",
+            *_deck_table_lines(deck),
             "Karten und Regeln der Blacklist (`get_blacklist`) sind tabu.",
             "Nutze den Skill `commander-deckbuilder` (Abschnitt „Deck überarbeiten“).",
             f"Änderungswunsch: {req.request}",
@@ -532,6 +560,7 @@ def ask_prompt(question: str, deck: dict[str, Any], history: list[dict[str, Any]
         "Gegner-Commander über `edhrec_average_deck`/`edhrec_recommendations`) statt auf dein Gedächtnis.",
         "- Festgehaltene Partien (Ergebnisse, Probleme, Gegner) liefert `deck_games` – nutze sie bei Fragen zu "
         "Schwächen, Matchups oder Verbesserungen.",
+        *[ln.replace("gilt für dieses Deck", "gilt für dieses Deck – beachte sie bei Tausch-Vorschlägen") for ln in _deck_table_lines(deck)[:-1]],
         "- Schreibe Kartennamen als [[Kartenname]] (englischer Oracle-Name).",
         "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze oder Listen. "
         "Keine Vorrede über deine Arbeitsschritte.",
@@ -597,7 +626,9 @@ async def api_glossary() -> list[dict[str, Any]]:
 
 @app.post("/api/build")
 async def api_build(req: BuildRequest) -> dict[str, str]:
-    return _start(build_prompt(req), req.model)
+    if req.table_rule and not tablerules.get(req.table_rule):
+        raise HTTPException(404, "Diese Tischregel gibt es nicht mehr.")
+    return _start(build_prompt(req), req.model, table_rule=req.table_rule)
 
 
 @app.post("/api/refine")
@@ -669,6 +700,7 @@ def upgrade_prompt(deck: dict[str, Any], req: UpgradeRequest, has_collection: bo
         "(`add`), eine Karte raus (`remove`, muss im Deck sein, keine Basic Lands außer für Länder-Tausche).",
         "- Bracket, Hausregeln, Farbidentität und Blacklist (`get_blacklist`) einhalten; keine zusätzlichen Game Changer "
         "über dem Limit, keine im Bracket verbotenen Combos.",
+        *_deck_table_lines(deck),
     ]
     if req.focus:
         lines.append(f"- Fokus des Nutzers: {req.focus}")
@@ -915,6 +947,7 @@ def plan_prompt(deck: dict[str, Any], req: PlanRequest, has_collection: bool) ->
         "- Die Stufen bauen aufeinander auf: keine Karte zweimal hinzufügen, keine Karte entfernen, die eine frühere Stufe erst "
         "hinzugefügt hat, jede Karte nur einmal entfernen.",
         "- Bracket, Hausregeln, Farbidentität und Blacklist (`get_blacklist`) einhalten.",
+        *_deck_table_lines(deck),
     ]
     if deck.get("precon"):
         lines.append(f"- Das Deck ist das Precon „{deck['precon'].get('name')}“: raus zuerst die schwächsten Karten des Precons.")
@@ -1482,6 +1515,90 @@ class BlacklistUpdate(BaseModel):
     remove: list[str] = []
 
 
+class TableRuleIn(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    add: list[str] = []
+    remove: list[str] = []
+    max_bracket: int | None = Field(None, ge=1, le=5)
+    max_game_changers: int | None = Field(None, ge=0)
+    max_tutors: int | None = Field(None, ge=0)
+    deck_budget: float | None = Field(None, ge=0)
+    currency: str | None = None
+    no_proxies: bool | None = None
+
+
+def _table_changes(req: TableRuleIn) -> dict[str, Any]:
+    return {k: v for k, v in req.model_dump(exclude_unset=True).items() if k not in ("add", "remove")}
+
+
+@app.get("/api/tablerules")
+async def api_tablerules() -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for d in storage.list_decks():
+        if d.get("table_rule"):
+            counts[d["table_rule"]] = counts.get(d["table_rule"], 0) + 1
+    return {"sets": [{**s, "decks": counts.get(s["id"], 0)} for s in tablerules.all_sets()], "catalog": blacklist.catalog()}
+
+
+@app.post("/api/tablerules")
+async def api_tablerule_create(req: TableRuleIn) -> dict[str, Any]:
+    try:
+        changes = _table_changes(req)
+        name = changes.pop("name", None) or ""
+        return await tablerules.create(name, add=req.add, remove=req.remove, **changes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.patch("/api/tablerules/{rule_id}")
+async def api_tablerule_update(rule_id: str, req: TableRuleIn) -> dict[str, Any]:
+    try:
+        out = await tablerules.update(rule_id, add=req.add, remove=req.remove, **_table_changes(req))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    out["revalidated"] = await tablerules.revalidate_decks(rule_id)
+    return out
+
+
+@app.delete("/api/tablerules/{rule_id}")
+async def api_tablerule_delete(rule_id: str) -> dict[str, Any]:
+    rs = tablerules.get(rule_id)
+    try:
+        tablerules.delete(rule_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    cleared = []
+    for d in storage.list_decks():
+        if d.get("table_rule") == rule_id:
+            await _set_table_rule(d["slug"], None, f"Tischregel „{rs['name'] if rs else rule_id}“ gelöscht")
+            cleared.append(d["slug"])
+    return {"deleted": rule_id, "decks": cleared}
+
+
+@app.get("/api/tablerules/{rule_id}/decks")
+async def api_tablerule_decks(rule_id: str) -> list[dict[str, Any]]:
+    try:
+        return await tablerules.check_all(rule_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class DeckTableRule(BaseModel):
+    table_rule: str | None = None
+
+
+@app.put("/api/decks/{slug}/table-rule")
+async def api_deck_table_rule(slug: str, req: DeckTableRule) -> dict[str, Any]:
+    try:
+        deck = await _set_table_rule(slug, req.table_rule or None)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"slug": slug, "table_rule": deck.get("table_rule"), "validation": deck.get("validation")}
+
+
 @app.get("/api/blacklist")
 async def api_blacklist() -> dict[str, Any]:
     return {"cards": blacklist.load(), "rules": blacklist.rules(), "catalog": blacklist.catalog()}
@@ -1549,6 +1666,8 @@ async def api_deck(slug: str) -> dict[str, Any]:
     entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
     deck["export_text"] = to_text(deck.get("commanders", []), entries)
     deck["health"] = health.check(deck)
+    rs = tablerules.get(deck.get("table_rule"))
+    deck["table_rule_info"] = {"id": rs["id"], "name": rs["name"], "summary": tablerules.summary_lines(rs)} if rs else None
     return deck
 
 
