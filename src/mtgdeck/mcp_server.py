@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, precons, opponents, printorders, proxy, scryfall, spellbook, storage, tablerules
+from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, overview, precons, opponents, printorders, proxy, scryfall, spellbook, storage, tablerules
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -538,6 +538,16 @@ async def update_opponent_deck(
 async def list_decks() -> list[dict[str, Any]]:
     """Saved decks (newest first)."""
     return storage.list_decks()
+
+
+@mcp.tool()
+async def app_overview() -> dict[str, Any]:
+    """Everything at a glance: every saved deck with level, power score, legality, price/budget, table rule,
+    deck-check weak spots, game record (wins/losses, common problems, who it lost to), cards missing from the
+    collection and open upgrade-plan stages – plus opponent decks with records, table rules and a collection
+    summary. Use it for questions across decks ("which deck is strongest / has the most potential / should I
+    rebuild?"); then `load_deck` / `deck_games` for details."""
+    return overview.build()
 
 
 @mcp.tool()

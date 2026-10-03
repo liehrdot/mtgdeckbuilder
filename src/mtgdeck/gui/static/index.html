@@ -33,6 +33,7 @@
   <symbol id="i-table" viewBox="0 0 24 24"><path d="M3 10h18M6 10v9M18 10v9M9 14h6"/><circle cx="8" cy="5" r="1.8"/><circle cx="16" cy="5" r="1.8"/></symbol>
   <symbol id="i-swords" viewBox="0 0 24 24"><path d="M4 4l9 9M4 4h4M4 4v4M20 4l-9 9M20 4h-4M20 4v4"/><path d="M8.5 15.5 5 19M15.5 15.5 19 19M7 13l4 4M17 13l-4 4"/></symbol>
   <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h11l2-8H6.3"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/><rect x="13" y="15" width="7" height="5" rx="1.5"/></symbol>
 </svg>
 
@@ -50,6 +51,9 @@
     <a class="brand" href="#/new"><span class="logo" aria-hidden="true"></span>Commander Deckbuilder</a>
     <a class="btn primary block" href="#/new" data-nav="new"><svg class="icon"><use href="#i-plus"/></svg>Neues Deck</a>
     <button type="button" class="search-btn" id="palette-btn"><svg class="icon"><use href="#i-search"/></svg><span>Suchen …</span><kbd>Strg K</kbd></button>
+    <nav class="nav-top" aria-label="Chat">
+      <a href="#/chat" data-nav="chat"><svg class="icon"><use href="#i-chat"/></svg>Frag Claude <span id="chat-running" class="spinner" aria-label="Claude antwortet" hidden></span></a>
+    </nav>
     <a id="job-indicator" class="job-indicator" href="#/job" hidden>
       <span class="spinner" aria-hidden="true"></span><span id="job-indicator-text">Claude arbeitet …</span></a>
 
@@ -1116,6 +1120,66 @@
     </section>
 
     <!-- ============ glossary ============ -->
+    <!-- ============ chat with the whole app ============ -->
+    <section id="view-chat" class="view" data-view="chat" hidden>
+      <header class="page-head">
+        <div>
+          <h1>Frag Claude</h1>
+          <p class="lead">Frag alles über deine Decks, Partien, Gegner, Tischregeln und deine Sammlung. Claude sieht die ganze App, ändert aber nichts – Vorschläge setzt du im Deck unter „Anpassen“ um.</p>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn" id="chat-new"><svg class="icon"><use href="#i-plus"/></svg>Neues Gespräch</button>
+        </div>
+      </header>
+      <div class="chat-layout">
+        <section class="panel chat-main" aria-labelledby="chat-title">
+          <div class="chat-head">
+            <h2 id="chat-title">Neues Gespräch</h2>
+            <details class="menu" id="chat-menu" hidden>
+              <summary class="btn icon-only small" aria-label="Gespräch: weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
+              <div class="menu-list" role="menu">
+                <button type="button" id="chat-rename" role="menuitem">Umbenennen …</button>
+                <button type="button" id="chat-copy" role="menuitem">Als Text kopieren</button>
+                <button type="button" id="chat-delete" role="menuitem" class="danger">Löschen …</button>
+              </div>
+            </details>
+          </div>
+          <div id="chat-start" class="chat-start">
+            <p class="muted">Zum Beispiel:</p>
+            <div class="chips-row" id="chat-chips">
+              <button type="button" class="chip" data-q="Was ist mein stärkstes Deck und warum?">Stärkstes Deck</button>
+              <button type="button" class="chip" data-q="Welches meiner Decks hat das meiste Potential, und was müsste ich dafür tun?">Meistes Potential</button>
+              <button type="button" class="chip" data-q="Wie würdest du welches Deck umbauen? Nenne die Decks, bei denen es sich am meisten lohnt, mit konkreten Tauschen.">Was umbauen?</button>
+              <button type="button" class="chip" data-q="Welches meiner Decks passt am besten zu meiner Runde, und gegen welche Gegner habe ich die schlechtesten Chancen?">Passt zur Runde</button>
+              <button type="button" class="chip" data-q="Vergleiche meine Decks: Stufe, Power, Bilanz, Stärken und Schwächen in einer Tabelle.">Decks vergleichen</button>
+              <button type="button" class="chip" data-q="Welche Karten fehlen mir in mehreren Decks, und welche lohnen sich am meisten zu kaufen oder zu drucken?">Was kaufen?</button>
+            </div>
+            <p id="chat-nodecks" class="muted small" hidden>Du hast noch keine Decks gespeichert – Claude kann trotzdem allgemein helfen, z. B. bei der Commander-Wahl.</p>
+          </div>
+          <div id="chat-log" class="chat-log"></div>
+          <div id="chat-live" class="qa-live" aria-live="polite" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="chat-status" class="muted small"></span>
+            <button type="button" class="btn small" id="chat-cancel">Abbrechen</button>
+          </div>
+          <form id="chat-form" class="qa-form chat-form" autocomplete="off">
+            <textarea name="question" rows="2" required aria-label="Deine Frage an Claude"
+              placeholder="z. B. Was ist mein stärkstes Deck und warum?"></textarea>
+            <button type="submit" id="chat-btn" class="btn primary">Fragen</button>
+          </form>
+          <div class="chat-options">
+            <label class="check"><input type="checkbox" id="chat-deep"> Gründlich nachdenken <span class="muted">(Opus 5.5, extra hoher Denkaufwand – dauert länger)</span></label>
+            <span class="muted small">Enter schickt ab, Umschalt+Enter macht eine neue Zeile.</span>
+          </div>
+        </section>
+        <aside class="panel chat-side" aria-labelledby="chat-list-title">
+          <h2 id="chat-list-title">Gespräche</h2>
+          <ul id="chat-list" class="chat-list"></ul>
+          <p id="chat-list-empty" class="muted small">Noch keine Gespräche.</p>
+        </aside>
+      </div>
+    </section>
+
     <section id="view-glossary" class="view narrow" data-view="glossary" hidden>
       <header class="page-head">
         <div>

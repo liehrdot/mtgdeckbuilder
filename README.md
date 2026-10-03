@@ -53,6 +53,9 @@ Dann z. B.:
 - „Welches Bracket hat dieses Deck? https://archidekt.com/decks/123456“
 - „Wie spiele ich `meren-aristocrats`, und wie schlägt es sich gegen Atraxa?“ – Fragen zum Deck
   beantwortet Claude nur lesend, das Deck bleibt unverändert.
+- „Was ist mein stärkstes Deck und warum?“, „Welches Deck hat das meiste Potential?“, „Wie würdest du
+  welches Deck umbauen?“ – Fragen über alle Decks; Claude startet mit `app_overview` (alle Decks mit
+  Stufe, Power, Deck-Check, Bilanz, fehlenden Karten, dazu Gegner, Tischregeln, Sammlung) und ändert nichts.
 - Deutsche Kartennamen („Schwerter zu Pflugscharen“, „Sol-Ring“) funktionieren mit der lokalen DB.
 
 Fertige Decks landen in `decks/<name>.json` und `decks/<name>.txt`. Die `.txt` kannst du direkt in
@@ -240,7 +243,7 @@ uv run mtg-gui              # → http://127.0.0.1:8765
 
 Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
-- **Seitenleiste:** „+ Neues Deck“, deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
+- **Seitenleiste:** „+ Neues Deck“, **Frag Claude** (Chat mit der ganzen App, siehe unten), deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
   legale), unten Meine Sammlung und drei Gruppen: **Meine Runde** (Gegnerdecks, Tischregeln, Blacklist),
   **Werkstatt** (Sammelbestellungen, Deskmat-Studio) und **Hilfe** (Glossar, Einstellungen). Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
@@ -274,6 +277,17 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     mit **Web-Recherche** (aktuelle Meta-Artikel, EDHREC, Turnier- und Decklisten; Quellen werden angezeigt). Die
     letzten Vorschläge bleiben gespeichert (`decks/.meta-suggestions.json`); „Dieses Deck bauen“ startet den Bau mit
     dem gewählten Commander und denselben Optionen, „Direkt ein Deck bauen“ überspringt die Vorschläge.
+- **Frag Claude** – ein Chat mit der ganzen App: „Was ist mein stärkstes Deck und warum?“, „Welches Deck
+  hat das meiste Potential?“, „Wie würdest du welches Deck umbauen?“, „Welches Deck passt zu meiner
+  Runde?“, „Welche Karten fehlen mir in mehreren Decks?“ – als Freitext oder per Vorschlag. Claude bekommt
+  eine Übersicht über alle Decks (Stufe, Power, legal, Preis/Budget, Tischregel, Deck-Check, Bilanz mit
+  häufigen Problemen und Gegnern, fehlende Sammlungskarten, offene Upgrade-Plan-Stufen), deine Gegnerdecks,
+  Tischregeln und die Sammlung und holt sich Details bei Bedarf selbst. Er **ändert nichts** – Vorschläge
+  setzt du im Deck unter „Anpassen“ um. Decks in Antworten sind Links (plus „… öffnen“-Knöpfe), Kartennamen
+  zeigen beim Hovern das Bild. Gespräche bleiben gespeichert (`decks/.chats/`, Teil der Sicherung), lassen
+  sich umbenennen, kopieren und löschen; Anschlussfragen kennen den Verlauf. „Gründlich nachdenken“ nutzt
+  Opus 5.5 mit extra hohem Denkaufwand. Läuft eine Antwort, kannst du woanders weiterarbeiten – ein Hinweis
+  meldet, wenn sie da ist.
 - **Während Claude arbeitet:** Status in Klartext („Claude prüft EDHREC-Empfehlungen …“), Laufzeit,
   Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich. Ein Auftrag
   endet immer sichtbar – auch wenn sein letzter Schritt scheitert oder die App inzwischen neu gestartet wurde
@@ -471,6 +485,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
 | `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
+| `app_overview` | alles auf einen Blick: alle Decks mit Stufe, Power, Legalität, Preis, Deck-Check, Bilanz, fehlenden Karten, dazu Gegnerdecks, Tischregeln, Sammlung |
 | `opponent_decks` / `update_opponent_deck` | Gegnerdecks mit Merkmalen, Beobachtungen und Bilanz lesen / anlegen, Beobachtung notieren, löschen |
 | `table_rules` / `update_table_rule` | Tischregeln lesen / anlegen, ändern, löschen; `validate_deck` und `save_deck` nehmen `table_rule` |
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten und Begriffe (True Duals, Günstige Tutoren, teurer als 20 € …) hinzufügen oder entfernen |

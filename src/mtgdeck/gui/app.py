@@ -26,8 +26,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import opponents as opponents_mod
+from .. import overview
 from ..jsonstore import ConflictError, StoreError, write_json
-from .. import backup, blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
+from .. import backup, blacklist, brackets, chat, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -167,7 +168,7 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 
 
 # Tools for questions about a deck: research only, nothing that saves or changes anything.
-READ_ONLY_TOOLS = ["search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
+READ_ONLY_TOOLS = ["app_overview", "search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
                    "bracket_rules", "validate_deck", "get_blacklist", "table_rules", "opponent_decks", "list_decks", "load_deck", "deck_games",
                    "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons", "print_orders",
@@ -740,6 +741,62 @@ def ask_prompt(question: str, deck: dict[str, Any], history: list[dict[str, Any]
         for h in earlier:
             answer = h.get("answer", "")
             answer = answer if len(answer) <= 1200 else answer[:1200] + " …"
+            lines += [f"Frage: {h.get('question', '')}", f"Antwort: {answer}", ""]
+    lines += ["", f"Frage: {question.strip()}"]
+    return "\n".join(lines)
+
+
+DECK_REF = re.compile(r"\{\{([a-z0-9][a-z0-9-]{0,80})\}\}")
+
+
+def _deck_refs(text: str) -> dict[str, dict[str, Any]]:
+    """The saved decks an answer links as {{slug}}: slug -> name and commanders (unknown slugs are left out)."""
+    slugs = list(dict.fromkeys(DECK_REF.findall(text)))
+    if not slugs:
+        return {}
+    known = {d["slug"]: d for d in storage.list_decks()}
+    return {s: {"name": known[s]["name"], "commanders": known[s]["commanders"]} for s in slugs if s in known}
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=4000)
+    chat_id: str | None = None
+    deep: bool = False  # „Gründlich“: Opus 5.5 at extra-high effort
+    model: str | None = None
+
+
+CHAT_HISTORY = 6  # earlier exchanges passed along for follow-ups
+
+
+def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data: dict[str, Any] | None = None) -> str:
+    lines = [
+        "Du bist der Assistent der ganzen Commander-Deckbuilder-App. Beantworte die Frage des Nutzers über seine "
+        "Decks, Partien, Gegnerdecks, Tischregeln und Sammlung. Nutze den Skill `commander-deckbuilder`, Abschnitt "
+        "„Chat mit der ganzen App“ (references/app-chat.md).",
+        "",
+        "Regeln:",
+        "- Nur lesen: Nichts wird verändert oder gespeichert. Läuft die Frage auf Änderungen hinaus, schlage sie "
+        "konkret vor (welches Deck, + rein / − raus mit Grund, oder welcher Schritt in der App) – umsetzen kann der "
+        "Nutzer sie im Deck unter „Anpassen“.",
+        "- Du läufst im GUI-Modus: keine Rückfragen. Triff sinnvolle Annahmen und nenne sie kurz.",
+        "- Die Übersicht unten ist der aktuelle Stand. Für Details: `load_deck` (Karten, Beschreibung), `deck_games` "
+        "(Partien), `list_deck_versions`, `opponent_decks`, `table_rules`, `collection_status`/`collection_search`, "
+        "`get_cards`, `find_combos`, EDHREC-Tools. Stütze Aussagen auf Daten, nicht auf dein Gedächtnis.",
+        "- Verlinke gespeicherte Decks immer als {{slug}} (genau der Slug aus der Übersicht, z. B. {{meren-aristocrats}}) – "
+        "die App macht daraus einen Link mit dem Decknamen. Schreibe Kartennamen als [[Kartenname]] (englischer Oracle-Name).",
+        "- Wenige Partien sind wenig Aussagekraft – sag das, statt aus 1–2 Spielen Schlüsse zu ziehen.",
+        "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze, Listen oder eine Tabelle. "
+        "Keine Vorrede über deine Arbeitsschritte.",
+        "",
+        "Übersicht der App:",
+        *overview.prompt_lines(data),
+    ]
+    earlier = (history or [])[-CHAT_HISTORY:]
+    if earlier:
+        lines += ["", "Bisheriges Gespräch (zur Einordnung von Anschlussfragen):"]
+        for h in earlier:
+            answer = h.get("answer", "")
+            answer = answer if len(answer) <= 1500 else answer[:1500] + " …"
             lines += [f"Frage: {h.get('question', '')}", f"Antwort: {answer}", ""]
     lines += ["", f"Frage: {question.strip()}"]
     return "\n".join(lines)
@@ -1802,6 +1859,76 @@ async def api_ask(slug: str, req: AskRequest) -> dict[str, str]:
 
     prompt = ask_prompt(question, deck, storage.questions(slug))
     return _start(prompt, req.model, read_only=True, finish=finish)
+
+
+@app.get("/api/chats")
+async def api_chats() -> list[dict[str, Any]]:
+    return chat.chats()
+
+
+@app.get("/api/chats/{chat_id}")
+async def api_chat_get(chat_id: str) -> dict[str, Any]:
+    try:
+        return chat.get(chat_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class ChatRename(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
+@app.put("/api/chats/{chat_id}")
+async def api_chat_rename(chat_id: str, req: ChatRename) -> dict[str, Any]:
+    try:
+        return chat.rename(chat_id, req.title)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.delete("/api/chats/{chat_id}")
+async def api_chat_delete(chat_id: str) -> dict[str, bool]:
+    try:
+        chat.delete(chat_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.post("/api/chat")
+async def api_chat(req: ChatRequest) -> dict[str, Any]:
+    """A question to the whole app: a read-only Claude run with the app overview; the answer goes into the conversation."""
+    question = req.question.strip()
+    if req.chat_id:
+        try:
+            conv = chat.get(req.chat_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+    else:
+        conv = chat.create(question)
+    chat_id = conv["id"]
+
+    async def finish(job: Job, ok: bool, answer: str, _structured: Any = None) -> None:
+        if ok and answer:
+            entry = chat.add(chat_id, question, answer, cards=await _card_refs(answer), decks=_deck_refs(answer),
+                             deep=req.deep)  # fmt: skip
+            job.emit(type="answer", entry=entry, chat_id=chat_id)
+        elif ok:
+            job.emit(type="error", text="Keine Antwort erhalten.")
+        if not (ok and answer) and not req.chat_id:  # a new conversation without an answer is not kept
+            try:
+                if not chat.get(chat_id).get("messages"):
+                    chat.delete(chat_id)
+            except FileNotFoundError:
+                pass
+        job.emit(type="done", ok=bool(ok and answer), deck=None)
+
+    prompt = chat_prompt(question, conv.get("messages") or [])
+    if req.deep:
+        started = _start(prompt, META_MODEL, read_only=True, finish=finish, effort=META_EFFORT)
+    else:
+        started = _start(prompt, req.model, read_only=True, finish=finish)
+    return {**started, "chat_id": chat_id, "title": conv["title"]}
 
 
 @app.delete("/api/decks/{slug}/questions")

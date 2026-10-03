@@ -124,7 +124,7 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "deck", "collection", "orders", "deskmat", "glossary", "opponents", "tables", "blacklist", "settings"];
+const VIEWS = ["new", "job", "chat", "deck", "collection", "orders", "deskmat", "glossary", "opponents", "tables", "blacklist", "settings"];
 const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
@@ -154,6 +154,7 @@ async function route() {
   if (r.view === "orders") showOrders(r.slug);
   if (r.view === "tables") showTables(r.slug);
   if (r.view === "opponents") showOpponents(r.slug);
+  if (r.view === "chat") showChat(r.slug);
   if (r.view === "job") $("#job-empty").hidden = !!(jobInfo && jobInfo.slot === "#job-slot-main" && !jobInfo.dismissed);
   placeJobPanel();
   setNavOpen(false);
@@ -165,7 +166,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", opponents: "Gegnerdecks", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", chat: "Frag Claude", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", opponents: "Gegnerdecks", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -174,7 +175,7 @@ function markNav(r = parseHash()) {
     if (r.view === "deck" && a.dataset.slug === r.slug) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
-  for (const a of $$(".nav-bottom a")) {
+  for (const a of $$(".nav-bottom a, .nav-top a")) {
     if (a.dataset.nav === r.view) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
@@ -587,6 +588,8 @@ const TOOL_LABELS = {
   load_deck: "lädt das Deck", bracket_rules: "liest die Bracket-Regeln", game_changers: "prüft Game Changer",
   get_blacklist: "liest deine Blacklist", table_rules: "liest deine Tischregeln", opponent_decks: "liest deine Gegnerdecks", update_opponent_deck: "notiert ein Gegnerdeck", update_table_rule: "ändert eine Tischregel", deck_games: "liest deine Partien", import_deck: "importiert ein Deck", export_deck: "exportiert das Deck",
   list_deck_versions: "liest den Verlauf", compare_deck_versions: "vergleicht Versionen",
+  app_overview: "verschafft sich einen Überblick über deine Decks", list_decks: "liest deine Decks",
+  collection_status: "prüft deine Sammlung", collection_search: "durchsucht deine Sammlung", print_orders: "liest deine Sammelbestellungen",
 };
 const toolText = (name) => `Claude ${TOOL_LABELS[name] || `nutzt ${name}`} …`;
 
@@ -2021,9 +2024,10 @@ function cardRef(name, refs) {
 
 // Small Markdown subset for answers: headings, lists, tables, bold/italic/code, [[Card]] refs.
 // Everything is escaped first; only the tags generated here end up in the HTML.
-function md(text, refs = {}) {
-  const names = [];
-  const raw = String(text || "").replace(/\[\[([^\[\]]+)\]\]/g, (_, n) => `\u0001${names.push(n.trim()) - 1}\u0001`);
+function md(text, refs = {}, decks = {}) {
+  const names = [], slugs = [];
+  const raw = String(text || "").replace(/\[\[([^\[\]]+)\]\]/g, (_, n) => `\u0001${names.push(n.trim()) - 1}\u0001`)
+    .replace(/\{\{([a-z0-9][a-z0-9-]*)\}\}/g, (_, sl) => `\u0002${slugs.push(sl) - 1}\u0002`);
   const inline = (s) => s
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -2059,7 +2063,14 @@ function md(text, refs = {}) {
     else { flushList(); para.push(t); }
   }
   flushPara(); flushList(); flushTable();
-  return html.replace(/\u0001(\d+)\u0001/g, (_, i) => cardRef(names[Number(i)], refs));
+  return html.replace(/\u0001(\d+)\u0001/g, (_, i) => cardRef(names[Number(i)], refs))
+    .replace(/\u0002(\d+)\u0002/g, (_, i) => deckRef(slugs[Number(i)], decks));
+}
+
+// {{slug}} in answers: a link to the saved deck (its name), plain text when the deck is gone
+function deckRef(slug, decks = {}) {
+  const d = decks[slug] || deckIndex.find((x) => x.slug === slug);
+  return d ? `<a class="deck-ref" href="#/deck/${enc(slug)}">${esc(d.name)}</a>` : esc(slug);
 }
 
 function qaItem(q) {
@@ -4343,9 +4354,199 @@ loadGlossary().catch(() => {});  // the quick search lists glossary terms too
 // ============================================================================================
 let paletteHits = [];
 let paletteSel = 0;
+// ============================================================================================
+// „Frag Claude“: chat with the whole app (read-only Claude runs, conversations in decks/.chats)
+// ============================================================================================
+let chatIndex = [];
+let currentChat = null;  // { id, title, messages } – null = a new, not yet started conversation
+let chatRun = null;      // { job, chatId, question, source, status, error, answered, finished }
+
+async function refreshChats() {
+  chatIndex = await api("/api/chats").catch(() => chatIndex);
+  renderChatList();
+}
+
+function renderChatList() {
+  const cur = currentChat?.id;
+  $("#chat-list").innerHTML = chatIndex.map((c) => `<li><a href="#/chat/${enc(c.id)}"${c.id === cur ? ' aria-current="page"' : ""}>
+    ${esc(c.title || "Gespräch")}<span class="muted">${esc(fmtDate(c.updated))} · ${c.count} ${c.count === 1 ? "Frage" : "Fragen"}</span></a></li>`).join("");
+  $("#chat-list-empty").hidden = chatIndex.length > 0;
+}
+
+const chatQuestion = (q, id = "") => `<div class="chat-msg user"${id ? ` id="${id}"` : ""}>${esc(q)}</div>`;
+function chatAnswer(m) {
+  const decks = Object.entries(m.decks || {});
+  return `<article class="chat-msg ai" data-id="${esc(m.id)}">
+    <div class="qa-a" tabindex="0" role="region" aria-label="Antwort von Claude">${md(m.answer, m.cards || {}, m.decks || {})}</div>
+    <div class="chat-foot">${decks.map(([slug, d]) => `<a class="btn small ghost" href="#/deck/${enc(slug)}">${esc(d.name)} öffnen</a>`).join("")}
+      <span class="meta">${esc(fmtDate(m.asked))}${m.deep ? " · gründlich" : ""}</span></div></article>`;
+}
+
+function renderChat() {
+  const c = currentChat;
+  $("#chat-title").textContent = c ? c.title : "Neues Gespräch";
+  $("#chat-menu").hidden = !c?.messages?.length;
+  $("#chat-log").innerHTML = (c?.messages || []).map((m) => chatQuestion(m.question) + chatAnswer(m)).join("");
+  renderChatList();
+  updateChatLive();
+}
+
+function updateChatLive() {
+  const run = chatRun;
+  const here = !!(run && currentChat && currentChat.id === run.chatId);
+  $("#chat-pending")?.remove();
+  if (here && !run.answered) $("#chat-log").insertAdjacentHTML("beforeend", chatQuestion(run.question, "chat-pending"));
+  $("#chat-live").hidden = !here;
+  $("#chat-live .spinner").hidden = !!run?.finished;
+  $("#chat-status").textContent = run?.error ? "Fehler: " + run.error : run?.status || "Claude sieht sich deine Decks an …";
+  $("#chat-cancel").textContent = run?.finished ? "Schließen" : "Abbrechen";
+  const busy = !!(run && !run.finished);
+  $("#chat-btn").disabled = busy;
+  $("#chat-btn").title = busy ? "Claude antwortet noch" : "";
+  $("#chat-running").hidden = !busy;
+  $("#chat-start").hidden = !!(currentChat?.messages?.length || here);
+  $("#chat-nodecks").hidden = deckIndex.length > 0;
+}
+
+function onChatEvent(run, ev) {
+  switch (ev.type) {
+    case "tool": run.status = toolText(ev.name); break;
+    case "status": run.status = ev.text; break;
+    case "error": run.error = ev.text; break;
+    case "answer": {
+      run.answered = true;
+      const here = currentChat?.id === ev.chat_id;
+      const seen = here && parseHash().view === "chat";
+      if (here) {  // keep the open conversation current, even while another page is shown
+        currentChat.messages.push(ev.entry);
+        $("#chat-pending")?.remove();
+        $("#chat-log").insertAdjacentHTML("beforeend", chatQuestion(ev.entry.question) + chatAnswer(ev.entry));
+        $("#chat-menu").hidden = false;
+        if (seen) $("#chat-log").lastElementChild.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      if (!seen) toast(`Claude hat geantwortet: „${ev.entry.question.slice(0, 60)}“`, "info", 8000, { label: "Ansehen", run: () => go(`#/chat/${enc(ev.chat_id)}`) });
+      refreshChats();
+      break;
+    }
+    case "done":
+      run.source.close();
+      run.finished = true;
+      if (ev.ok) chatRun = null;
+      else {
+        run.error ||= "Keine Antwort erhalten.";
+        if (currentChat?.id === run.chatId && !currentChat.messages.length) {  // the empty new conversation was dropped
+          currentChat = null;
+          run.chatId = null;
+          history.replaceState(null, "", "#/chat");
+          const box = $("#chat-form textarea");
+          if (!box.value) box.value = run.question;
+          toast(run.error, "error");
+          chatRun = null;
+          renderChat();
+        }
+        refreshChats();
+      }
+      break;
+  }
+  updateChatLive();
+}
+
+async function showChat(id) {
+  if (!id) currentChat = null;
+  else if (currentChat?.id !== id) {
+    try { currentChat = await api(`/api/chats/${enc(id)}`); }
+    catch (err) { fail(err); currentChat = null; history.replaceState(null, "", "#/chat"); }
+  }
+  renderChat();
+  refreshChats();
+  if (matchMedia("(min-width: 901px)").matches && !(chatRun && !chatRun.finished)) $("#chat-form textarea").focus({ preventScroll: true });
+}
+
+$("#chat-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (chatRun && !chatRun.finished) return;
+  const box = e.target.elements.question;
+  const question = box.value.trim();
+  if (question.length < 2) return;
+  try {
+    const r = await api("/api/chat", { method: "POST", body: { question, chat_id: currentChat?.id || null, deep: $("#chat-deep").checked } });
+    if (!currentChat) {
+      currentChat = { id: r.chat_id, title: r.title, messages: [] };
+      history.replaceState(null, "", `#/chat/${enc(r.chat_id)}`);
+      lastView = "chat" + r.chat_id;
+    }
+    const run = { job: r.job, chatId: r.chat_id, question };
+    run.source = jobStream(r.job, (ev) => onChatEvent(run, ev), (lost) => {
+      if (lost && !run.finished) { onChatEvent(run, { type: "error", text: lost }); onChatEvent(run, { type: "done", ok: false }); }
+    });
+    chatRun = run;
+    box.value = "";
+    renderChat();
+    $("#chat-pending")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    refreshChats();
+  } catch (err) { fail(err); }
+});
+$("#chat-form textarea").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#chat-form").requestSubmit(); }
+});
+$("#chat-chips").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip || (chatRun && !chatRun.finished)) return;
+  $("#chat-form textarea").value = chip.dataset.q;
+  $("#chat-form").requestSubmit();
+});
+$("#chat-cancel").addEventListener("click", async () => {
+  if (!chatRun) return;
+  if (!chatRun.finished) await api(`/api/jobs/${chatRun.job}/cancel`, { method: "POST" }).catch(() => {});
+  else { chatRun = null; updateChatLive(); }
+});
+$("#chat-new").addEventListener("click", () => {
+  if (location.hash === "#/chat") { currentChat = null; renderChat(); } else go("#/chat");
+  $("#chat-form textarea").focus();
+});
+$("#chat-log").addEventListener("click", (e) => {
+  const ref = e.target.closest(".card-ref");
+  if (ref) showCardView(ref.dataset.name, { image: ref.dataset.img, image_back: ref.dataset.imgBack, scryfall_uri: ref.dataset.uri });
+});
+$("#chat-rename").addEventListener("click", async () => {
+  $("#chat-menu").open = false;
+  if (!currentChat) return;
+  const title = await ask({ title: "Gespräch umbenennen", value: currentChat.title, ok: "Speichern" });
+  if (!title) return;
+  try {
+    const r = await api(`/api/chats/${enc(currentChat.id)}`, { method: "PUT", body: { title } });
+    currentChat.title = r.title;
+    $("#chat-title").textContent = r.title;
+    refreshChats();
+  } catch (err) { fail(err); }
+});
+$("#chat-copy").addEventListener("click", async () => {
+  $("#chat-menu").open = false;
+  if (!currentChat) return;
+  const text = currentChat.messages.map((m) => `Frage: ${m.question}\n\n${m.answer.replace(/\{\{([a-z0-9-]+)\}\}/g, (_, sl) => (m.decks?.[sl]?.name || sl)).replace(/\[\[([^\]]+)\]\]/g, "$1")}`).join("\n\n---\n\n");
+  try { await navigator.clipboard.writeText(text); toast("Gespräch kopiert."); }
+  catch { toast("Kopieren nicht möglich – der Browser erlaubt keinen Zugriff auf die Zwischenablage.", "error"); }
+});
+$("#chat-delete").addEventListener("click", async () => {
+  $("#chat-menu").open = false;
+  if (!currentChat) return;
+  if (!(await ask({ title: "Gespräch löschen?", text: `„${currentChat.title}“ mit allen Fragen und Antworten wird gelöscht.`, ok: "Löschen", danger: true }))) return;
+  try {
+    await api(`/api/chats/${enc(currentChat.id)}`, { method: "DELETE" });
+    currentChat = null;
+    toast("Gespräch gelöscht.");
+    go("#/chat");
+    refreshChats();
+  } catch (err) { fail(err); }
+});
+refreshChats();
+
 function paletteItems() {
   const items = [
     { label: "Neues Deck", hint: "Seite", run: () => { go("#/new"); setMode("build"); } },
+    { label: "Frag Claude", hint: "Chat mit der ganzen App", run: () => go("#/chat") },
+    { label: "Neues Gespräch mit Claude", hint: "Frag Claude", run: () => { go("#/chat"); $("#chat-new").click(); } },
+    ...chatIndex.map((c) => ({ label: c.title, hint: "Gespräch", run: () => go(`#/chat/${enc(c.id)}`) })),
     { label: "Commander vorschlagen lassen", hint: "Neues Deck", run: () => { go("#/new"); setMode("find"); } },
     { label: "Stärkstes Deck gegen meine Runde bauen", hint: "Neues Deck", run: () => { go("#/new"); setMode("meta"); } },
     { label: "Deck per Link importieren", hint: "Moxfield, Archidekt, …", run: () => { go("#/new"); setMode("import"); setImportMode("link"); $("#import-url").focus(); } },

@@ -482,7 +482,7 @@ ul.issues li { margin-bottom: 3px; }
 .qa-a p { margin: 8px 0; }
 .qa-a ul, .qa-a ol { margin: 6px 0; padding-left: 22px; }
 .qa-a li { margin: 2px 0; }
-.qa-a table { border-collapse: collapse; margin: 8px 0; font-size: var(--fs-sm); }
+.qa-a table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: var(--fs-sm); }
 .qa-a th, .qa-a td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; vertical-align: top; }
 .qa-a th { background: var(--surface-2); }
 .qa-a hr { border: none; border-top: 1px solid var(--border); }
@@ -1050,3 +1050,38 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .print-grid-box[open] > summary::before { content: "▾"; }
 .print-grid-box .h2-like { font-size: var(--fs-md); font-weight: 650; }
 .print-grid-box > p { margin: var(--space-2) 0 var(--space-3); }
+
+/* „Frag Claude“: chat with the whole app */
+.nav-top { display: flex; flex-direction: column; margin: var(--space-2) 0 0; }
+.nav-top a { display: flex; align-items: center; gap: 10px; padding: 8px var(--space-2); border-radius: var(--radius); color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600; }
+.nav-top a:hover { background: var(--surface-2); }
+.nav-top a[aria-current="page"] { background: var(--accent-soft); color: var(--on-accent-soft); }
+.nav-top .spinner { margin-left: auto; width: 14px; height: 14px; }
+#view-chat { max-width: 1180px; }
+.chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--space-4); align-items: start; }
+.chat-main { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.chat-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.chat-head h2 { margin: 0; overflow-wrap: anywhere; }
+.chat-start .chips-row { margin-top: var(--space-2); }
+.chat-log { display: flex; flex-direction: column; gap: var(--space-3); }
+.chat-log:empty { display: none; }
+.chat-msg.user { align-self: flex-end; max-width: 85%; padding: 10px 14px; border-radius: 14px 14px 4px 14px; background: var(--accent-soft); color: var(--on-accent-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-msg.ai { border: 1px solid var(--border); border-radius: 4px 14px 14px 14px; overflow: hidden; }
+.chat-msg.ai .qa-a { max-height: none; }
+.chat-msg.ai .chat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.chat-msg.ai .chat-foot .meta { margin-left: auto; color: var(--muted); font-size: var(--fs-xs); }
+.chat-msg.failed { border-color: var(--bad); }
+.deck-ref { font-weight: 600; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.chat-form textarea { min-height: 52px; }
+.chat-options { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); align-items: center; }
+.chat-side h2 { font-size: var(--fs-md); margin-bottom: var(--space-2); }
+.chat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 70vh; overflow: auto; }
+.chat-list a { display: block; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; font-size: 14px; }
+.chat-list a:hover { background: var(--surface-2); }
+.chat-list a[aria-current="page"] { background: var(--accent-soft); color: var(--on-accent-soft); }
+.chat-list .muted { display: block; font-size: var(--fs-xs); }
+@media (max-width: 900px) {
+  .chat-layout { grid-template-columns: 1fr; }
+  .chat-list { max-height: 220px; }
+  .chat-msg.user { max-width: 100%; }
+}

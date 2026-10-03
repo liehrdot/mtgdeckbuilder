@@ -1,6 +1,6 @@
 ---
 name: commander-deckbuilder
-description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built (also "the strongest deck against my playgroup / the decks I play against"), a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier. Also use it to answer questions about a saved deck (strategy, how to play it, power level, matchups against other commanders, weaknesses, card choices).
+description: Build, refine or re-tune a Magic: The Gathering Commander (EDH) deck for a chosen commander and Commander Bracket (1-5) incl. sub-tiers (lower/upper bracket), house rules (e.g. max. Game Changers) and style, optionally with budget or proxy mode, card blacklist and theme, using the mtg MCP tools (Scryfall, EDHREC, Commander Spellbook). Use whenever the user wants a Commander/EDH deck built (also "the strongest deck against my playgroup / the decks I play against"), a decklist generated, or an existing deck tuned, upgraded, downgraded, made cheaper or moved up/down a bracket or sub-tier. Also use it to answer questions about a saved deck (strategy, how to play it, power level, matchups against other commanders, weaknesses, card choices) or across all saved decks (which deck is strongest, has the most potential, should be rebuilt).
 argument-hint: "<Commander> [bracket 1-5] [budget] [theme]"
 ---
 
@@ -220,6 +220,13 @@ For questions about a saved deck — strategy, how to pilot or mulligan it, win 
 it is too strong for a table, matchups against a commander/deck/archetype, weaknesses, why a card
 is in, rules interactions — follow [references/deck-questions.md](references/deck-questions.md).
 Read-only: never save; suggest swaps as `+ in` / `- out` instead.
+
+## Chat mit der ganzen App
+
+For questions across all decks, games, opponents, table rules and the collection ("Was ist mein
+stärkstes Deck und warum?", "Welches Deck hat das meiste Potential?", "Wie würdest du welches Deck
+umbauen?") follow [references/app-chat.md](references/app-chat.md): start from `app_overview`, load
+details only where needed. Read-only; link decks as `{{slug}}`.
 
 ## Deck-Anleitung (Spickzettel)
 
