@@ -31,6 +31,7 @@ from urllib.parse import quote
 from PIL import Image, ImageEnhance, ImageFilter
 
 from . import imaging, proxy, scryfall, storage
+from .fmt import num as de_num
 from . import settings as settings_mod
 from .http import HttpError, _throttle, client, download
 
@@ -464,13 +465,13 @@ async def render(pid: str, *, fmt: str = "playmat", dpi: int = 300, bleed_mm: fl
         out, used = await upscale_to(region, size, work, cfg, ai=upscale, scan=scan, warnings=warnings, say=say, max_passes=passes)
     limit = {0: 2.5, 1: 6, 2: 24}[used]
     if scale > limit:
-        warnings.append(f"Das Motiv ist klein für {dpi} DPI (Faktor {scale:.1f}) – die Datei hat {dpi} DPI, wirkt aber weich. "
+        warnings.append(f"Das Motiv ist klein für {dpi} DPI (Faktor {de_num(scale, 1)}) – die Datei hat {dpi} DPI, wirkt aber weich. "
                         "Schärfer: MPC-Scan, generiertes Bild oder eigenes Bild in hoher Auflösung.")  # fmt: skip
 
     for old in [*work.glob("deskmat-*.png"), *work.glob("deskmat-*.jpg")]:
         old.unlink()
     name = f"deskmat-{size[0]}x{size[1]}-{dpi}dpi.{filetype}"
-    say(f"Speichere {filetype.upper()} ({size[0] * size[1] / 1e6:.0f} Megapixel) …")
+    say(f"Speichere {filetype.upper()} ({de_num(size[0] * size[1] / 1e6, 0)} Megapixel) …")
     if filetype == "jpg":
         out.save(work / name, quality=95, subsampling=0, dpi=(dpi, dpi))
     else:
@@ -611,7 +612,7 @@ def testprint(pid: str, *, x: float = 0.5, y: float = 0.5, paper: str = "A4") ->
                            (left + piece.width, top + piece.height, 1, 1)):  # fmt: skip
         draw.line([(cx + dx * gap, cy), (cx + dx * (gap + mark), cy)], fill="black", width=max(1, dpi // 150))
         draw.line([(cx, cy + dy * gap), (cx, cy + dy * (gap + mark))], fill="black", width=max(1, dpi // 150))
-    note = (f"Probedruck \"{meta['title']}\" - {dpi} DPI - Ausschnitt {piece.width / dpi * 2.54:.1f} x {piece.height / dpi * 2.54:.1f} cm"
+    note = (f"Probedruck \"{meta['title']}\" - {dpi} DPI - Ausschnitt {de_num(piece.width / dpi * 2.54, 1)} x {de_num(piece.height / dpi * 2.54, 1)} cm"
             " - mit 100 % (Tatsächliche Größe) drucken und aus 50-60 cm ansehen")  # fmt: skip
     draw.text((left + gap * 2, top + piece.height + gap + mark // 3), note, fill="black", font=_note_font(round(dpi * 9 / 72)))
     out = _dir(pid) / f"probedruck-{paper.lower()}.pdf"

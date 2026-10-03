@@ -17,6 +17,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from . import fmt
+
 Tier = Literal["low", "mid", "high"]
 TIER_LABELS = {"low": "unteres", "mid": "mittleres", "high": "oberes"}
 TIER_CENTER = {"low": 0.17, "mid": 0.5, "high": 0.83}
@@ -113,15 +115,15 @@ def score(
     if two_card_combos:
         parts.append((f"{len(two_card_combos)} 2-Karten-Combo(s)", min(0.5 + 0.25 * (len(two_card_combos) - 1), 1.1)))
     if extra_turns:
-        parts.append((f"{len(extra_turns)} Extra Turns", min(0.1 * len(extra_turns), 0.3)))
+        parts.append((f"{len(extra_turns)} Extra-Züge", min(0.1 * len(extra_turns), 0.3)))
     if mass_land_denial:
-        parts.append(("Mass Land Denial", 0.3))
+        parts.append(("Massen-Landzerstörung", 0.3))
     if avg_cmc < 2.5:
-        parts.append((f"sehr niedrige Kurve (Ø {avg_cmc:.2f})", 0.5))
+        parts.append((f"sehr niedrige Kurve (Ø {fmt.num(avg_cmc)})", 0.5))
     elif avg_cmc < 3.0:
-        parts.append((f"niedrige Kurve (Ø {avg_cmc:.2f})", 0.25))
+        parts.append((f"niedrige Kurve (Ø {fmt.num(avg_cmc)})", 0.25))
     elif avg_cmc > 3.8:
-        parts.append((f"hohe Kurve (Ø {avg_cmc:.2f})", -0.3))
+        parts.append((f"hohe Kurve (Ø {fmt.num(avg_cmc)})", -0.3))
     if interaction >= 14:
         parts.append((f"viel Interaktion ({interaction})", 0.25))
     elif interaction < 6:
@@ -169,16 +171,16 @@ def check_profile(
         names = "; ".join(" + ".join(c.get("cards") or ["?"]) for c in two_card_combos)
         violations.append(f"Eigene Vorgabe: keine 2-Karten-Combos – gefunden: {names}")
     if profile.allow_extra_turns is False and extra_turns:
-        violations.append(f"Eigene Vorgabe: keine Extra Turns – gefunden: {', '.join(extra_turns)}")
+        violations.append(f"Eigene Vorgabe: keine Extra-Züge – gefunden: {', '.join(extra_turns)}")
     if profile.allow_mass_land_denial is False and mass_land_denial:
-        violations.append(f"Eigene Vorgabe: kein Mass Land Denial – gefunden: {', '.join(mass_land_denial)}")
+        violations.append(f"Eigene Vorgabe: keine Massen-Landzerstörung – gefunden: {', '.join(mass_land_denial)}")
     for flag, allowed_by_bracket, what in (
         (profile.allow_two_card_combos, bracket_rules["two_card_combos"] != "none", "2-Karten-Combos"),
-        (profile.allow_extra_turns, bracket_rules["extra_turns"] != "none", "Extra Turns"),
-        (profile.allow_mass_land_denial, bracket_rules["mass_land_denial"], "Mass Land Denial"),
+        (profile.allow_extra_turns, bracket_rules["extra_turns"] != "none", "Extra-Züge"),
+        (profile.allow_mass_land_denial, bracket_rules["mass_land_denial"], "Massen-Landzerstörung"),
     ):
         if flag is True and not allowed_by_bracket:
-            warnings.append(f"{what} sind in Bracket {n} nicht erlaubt – die Vorgabe wird ignoriert")
+            warnings.append(f"{what}: in Bracket {n} nicht erlaubt – die Vorgabe wird ignoriert")
 
     if profile.tier:
         target = target_value(n, profile.tier)

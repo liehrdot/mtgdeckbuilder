@@ -27,8 +27,8 @@ def _house_rules(profile: dict[str, Any]) -> list[str]:
         out.append(f"max. {profile['max_game_changers']} Game Changer")
     if profile.get("max_tutors") is not None:
         out.append(f"max. {profile['max_tutors']} Tutoren")
-    for key, label in (("allow_two_card_combos", "2-Karten-Combos"), ("allow_extra_turns", "Extra Turns"),
-                       ("allow_mass_land_denial", "Mass Land Denial")):  # fmt: skip
+    for key, label in (("allow_two_card_combos", "2-Karten-Combos"), ("allow_extra_turns", "Extra-Züge"),
+                       ("allow_mass_land_denial", "Massen-Landzerstörung")):  # fmt: skip
         if profile.get(key) is False:
             out.append(f"keine {label}")
     return out
@@ -73,7 +73,7 @@ def build(deck: dict[str, Any]) -> dict[str, Any]:
     tutors = b.get("tutors") or []
     row("Tutoren", f"{len(tutors)}: {_names(tutors, 4)}" if tutors else "keine", len(tutors) >= 4)
     extra = b.get("extra_turns") or []
-    row("Extra Turns", _names(extra) if extra else "keine", bool(extra))
+    row("Extra-Züge", _names(extra) if extra else "keine", bool(extra))
     mld = b.get("mass_land_denial") or []
     row("Land-Zerstörung", _names(mld) if mld else "keine", bool(mld))
     if deck.get("proxy"):

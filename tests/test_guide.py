@@ -24,7 +24,7 @@ async def test_rule0_rows_and_text():
     assert rows["Stufe"]["value"].startswith("oberes Bracket 3 (Upgraded)")
     assert rows["Spielweise"]["value"] == "Opfern und zurückholen."
     assert rows["Game Changer"]["value"] == "1: Demonic Tutor" and rows["Game Changer"]["flag"]
-    assert rows["Extra Turns"]["value"] == "Time Warp" and rows["Extra Turns"]["flag"]
+    assert rows["Extra-Züge"]["value"] == "Time Warp" and rows["Extra-Züge"]["flag"]
     assert rows["2-Karten-Combos"]["value"] == "keine"
     assert rows["Hausregeln"]["value"] == "keine 2-Karten-Combos"
     assert rows["Tempo"]["value"].endswith("Zug 6+")

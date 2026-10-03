@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from . import blacklist, brackets, spellbook, tablerules
+from . import blacklist, brackets, fmt, spellbook, tablerules
 from .cards import resolve
 from .deck import BASIC_LANDS, DeckEntry, deck_stats, parse_decklist
 from .http import HttpError
@@ -127,7 +127,7 @@ async def validate_deck(
         float(card_data[c].get(f"price_{currency}") or 0) for c in commanders if c in card_data
     )
     if budget and not proxy and price > budget:
-        warnings.append(f"Budget überschritten: {price:.2f} {currency.upper()} > {budget:g} {currency.upper()}")
+        warnings.append(f"Budget überschritten: {fmt.money(price, currency)} statt höchstens {fmt.money(budget, currency, 0 if float(budget).is_integer() else 2)}")
     for role, minimum in ROLE_MINIMUMS.items():
         have = stats["role_counts"].get(role, 0)
         if have < minimum:

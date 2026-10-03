@@ -28,6 +28,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - Rate limits are per host, or per host plus path prefix (Scryfall search, named and collection lookups: 500 ms; everything else: 100 ms).
   - Disk cache keyed by the request, 24 h TTL by default.
   - Always go through `get_json` / `get_text` / `post_json`. Never create another client.
+  - Transport errors (no connection, timeout) are retried like 5xx, then raised as `HttpError(0, url, "keine Verbindung"|"Zeitüberschreitung")`. `HttpError.friendly` is the German one-liner naming the service (`service_name()`); the GUI's global `HttpError` handler answers 502 with it.
+- **`fmt.py`**: German number format for server texts (`num()` → `3,8` / `1.234,50`, `money()` → `32,00 €`). Import the functions (`de_num`, `fmt_money`), not the module: `deskmat.py` and `gui/app.py` use `fmt` as a parameter name for formats.
 - **Data sources:** `scryfall.py`, `edhrec.py`, `spellbook.py`, `importers.py`, `precons.py`.
   - None of them needs an API key.
   - EDHREC is its public JSON (`json.edhrec.com`), which is unofficial, so parse it defensively. A missing EDHREC page returns 403, not 404.
@@ -151,6 +153,12 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 - **`gui/app.py`**: a FastAPI app with vanilla JS in `gui/static/`.
   - **Frontend conventions** (`index.html`, `style.css`, `app.js`; no framework, no build step, vendored libs only):
     - Hash router: `#/new` · `#/job` · `#/deck/<slug>/<tab>` (tabs `karten|anleitung|testen|anpassen|fragen|partien|verlauf|drucken`) · `#/collection` · `#/orders[/<id>]` · `#/deskmat[/<id>]` · `#/glossary[/<term>]` · `#/opponents[/<id>]` · `#/tables[/<id>]` · `#/blacklist` · `#/settings`. Ctrl+K opens the quick search (`paletteItems()`, incl. glossary terms).
+    - Sidebar `.nav-bottom`: Meine Sammlung, then `p.nav-group` headings „Meine Runde“ (Gegnerdecks, Tischregeln, Blacklist), „Werkstatt“ (Sammelbestellungen, Deskmat-Studio), „Hilfe“ (Glossar, Einstellungen).
+    - „Anpassen“ tab: compact table-rule panel (`#table-panel`), then the question „Was willst du ändern?“ (`.tune-options` radios `name="tune"`: refine|upgrades|plan|power). Only the panel whose `data-tune` matches is shown: `showTune(key, scroll, remember)`, choice in `store` `tune`; a deck with an open upgrade plan opens on `plan` (`tuneDeck`). Code that sends the user to a panel calls `showTune("upgrades")` etc. first.
+    - Karten tab: one `#check-panel` „Deck-Check“ with `#validation` and the health areas (`#health-panel` inside it).
+    - Print studio: `#print-steps-panel` (options form `#print-form`, `#print-summary`, steps) comes first; the image grid sits in `details#print-grid-box` (count in `#print-grid-count`, opens itself when images are missing). Download links come from `GET /print/files` (`{xml, pdf}`), no probing.
+    - German everywhere: category values stay English in data, the UI shows `catLabel()` (`CATEGORY_LABELS`); numbers via `fmtNum` / `fmtPrice` / `fmtPower` (de-DE). Rule terms: „Extra-Züge“, „Massen-Landzerstörung“.
+    - `api()` turns failures into German messages (`errorText()`: no connection, pydantic 422 lists, 5xx, 404). Job events go through `jobStream(id, onEvent, onLost)`: a 404 stream (job unknown, app restarted) ends the job with an error instead of spinning.
     - „Neues Deck“ has four modes (`buildForm.dataset.mode` build|find|import|meta; elements carry `mode-*` classes, an element with `mode-build mode-meta` shows in both); import has sub-modes link|text|precon (`#import-box[data-imode]`).
     - The print studio (`#print-studio`) is one block: `mountPrintStudio()` moves it into the deck tab or the order page; print code uses `pctx()` (deck or `currentOrder`) instead of `currentDeck`.
     - After every rebuild (refine/retune job via `startJob({since})`, manual edit, upgrades, plan stage) `offerOrderAfterRebuild(slug, since)` asks via `orderDialog()` whether the new cards go into a collective order.
@@ -160,6 +168,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
     - Use the design tokens in `style.css` (`--space-*`, `--fs-*`, `--radius*`, semantic colours incl. `--input-border` ≥ 3:1) for light and dark. Surfaces are `.panel`; `.card` is reserved for card rows (hover preview uses `.card[data-img]`).
     - Show and hide with the `hidden` attribute. Report with `toast(text, kind, ms, {label, run})` (optional action button, e.g. „Rückgängig“) and ask with `ask()` (a `<dialog>`), never `alert`/`prompt`/`confirm`. Keep one primary button per view and put rare options into `<details class="more">` or the ⋯ menu.
   - Each build or refine request becomes a `Job` that runs `claude_agent_sdk.query()`.
+  - Every job runs through `_register()`: whatever happens (crash in a `finish` callback, cancel), `Job.close()` emits a final `done` (ok false if none was sent) and sets `done`, so streams never hang. Errors go out via `_error_text()` (friendly for `HttpError`, plain for store/lookup/value errors, type + message for bugs). Finished jobs are pruned after `JOB_KEEP_SECONDS`.
   - The job uses `cwd=`repo root and `setting_sources=["project"]` so it gets the skills and this file.
   - It starts the MCP server via `sys.executable -m mtgdeck.mcp_server`, with `permission_mode="dontAsk"`.
   - Events stream to the browser over SSE, with `Last-Event-ID` resume.
@@ -167,7 +176,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - The prompts in `build_prompt` / `refine_prompt` / `finder_prompt` tell the agent it runs non-interactively. `_budget_line` holds the shared budget/proxy wording.
   - Retune jobs (`/api/retune`, `retune_prompt`) re-tune a saved deck to a new bracket/profile. `profile_lines()` renders a profile into prompt lines.
   - Generic background jobs via `_start_runner(runner)`. They emit `progress` / `print` / `console` events besides text.
-  - Print routes: `/api/decks/{slug}/print/{plan,alternatives,choose,prepare,pdf,autofill,files/{xml|pdf}}`. Settings: `/api/settings`.
+  - Print routes: `/api/decks/{slug}/print/{plan,alternatives,choose,prepare,pdf,autofill,files,files/{xml|pdf}}`. Settings: `/api/settings`.
   - Version routes: `/api/decks/{slug}/versions[/{v}[/restore]]`, `/diff?a=&b=` and `/copy`.
   - Deck questions (`/api/decks/{slug}/ask`, `ask_prompt`, panel „Fragen zum Deck“) run `_run_claude(read_only=True, finish=)`: only `READ_ONLY_TOOLS` are allowed, `WRITE_TOOLS` plus Write/Edit/Bash are disallowed. The final answer (`ResultMessage.result`) goes to `storage.add_question()` (`decks/.questions/<slug>.json`), with images for its `[[Card]]` references (`_card_refs`). The last `ASK_HISTORY` Q&As go into the prompt for follow-ups. The skill side is `references/deck-questions.md`.
   - Upgrade jobs (`/api/decks/{slug}/upgrades`, `upgrade_prompt`, `UPGRADE_SCHEMA`) are read-only with structured output; `_enrich_upgrades()` drops invalid swaps and adds current prices/ownership. The GUI applies the chosen ones through `POST /api/decks/{slug}/cards`. `finish` callbacks receive `(job, ok, final_text, structured_output)`.

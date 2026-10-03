@@ -68,6 +68,6 @@ async def test_extra_turns_and_mld_rules():
     r1 = brackets.evaluate(1, cards)
     assert len(r1["violations"]) == 2
     r3 = brackets.evaluate(3, cards)
-    assert any("Mass Land Denial" in v for v in r3["violations"])
+    assert any("Massen-Landzerstörung" in v for v in r3["violations"])
     assert r3["warnings"]
     assert brackets.evaluate(4, cards)["compliant"]

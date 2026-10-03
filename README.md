@@ -241,7 +241,8 @@ uv run mtg-gui              # → http://127.0.0.1:8765
 Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
 - **Seitenleiste:** „+ Neues Deck“, deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
-  legale), unten Meine Sammlung, Sammelbestellungen, Deskmat-Studio, Glossar, Blacklist und Einstellungen. Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
+  legale), unten Meine Sammlung und drei Gruppen: **Meine Runde** (Gegnerdecks, Tischregeln, Blacklist),
+  **Werkstatt** (Sammelbestellungen, Deskmat-Studio) und **Hilfe** (Glossar, Einstellungen). Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
   hinter ☰ weg.
 - **Neues Deck** – vier Einstiege:
@@ -274,11 +275,15 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     letzten Vorschläge bleiben gespeichert (`decks/.meta-suggestions.json`); „Dieses Deck bauen“ startet den Bau mit
     dem gewählten Commander und denselben Optionen, „Direkt ein Deck bauen“ überspringt die Vorschläge.
 - **Während Claude arbeitet:** Status in Klartext („Claude prüft EDHREC-Empfehlungen …“), Laufzeit,
-  Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich.
+  Abbrechen; das technische Protokoll steckt unter „Details“. Ist das Deck fertig, öffnet es sich. Ein Auftrag
+  endet immer sichtbar – auch wenn sein letzter Schritt scheitert oder die App inzwischen neu gestartet wurde
+  („Die Verbindung zum Auftrag ist weg …“); kein Lade-Kreisel dreht ewig. Ist Scryfall, EDHREC & Co. nicht
+  erreichbar, steht da, welcher Dienst und was zu tun ist (statt „Internal Server Error“).
 - **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und acht Tabs –
   die Adresse merkt sich den Tab, der Zurück-Button des Browsers funktioniert:
   - **Karten:** gruppiert nach Kategorie, Typ, Manawert, Farbe oder Besitz, sortiert nach Name, Manawert
-    oder Preis, als Liste (Bild beim Hovern) oder Bildraster; daneben der **Deck-Check**, Prüfung, Statistik,
+    oder Preis, als Liste (Bild beim Hovern) oder Bildraster; daneben der **Deck-Check** (Prüfung und
+    Ampel-Bereiche in einem Kasten), Statistik,
     Sammlungs-Abgleich und „Tokens & Marker“. Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten
     beide Seiten – mit dem **Kartentext auf Deutsch** (gedruckter Text der neuesten deutschen Ausgabe,
     umschaltbar auf den englischen Oracle-Text), Manasymbolen und markierten Schlüsselwörtern samt Erklärung;
@@ -291,14 +296,16 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     „Ähnliche Karten“ (gleiche Rolle, passende Farben) tauschen – gespeichert wird alles zusammen als neue,
     geprüfte Version.
   - **Anleitung:** der **Rule-0-Text** für die Runde (Stufe, Spielweise, Tempo, Game Changer, Combos,
-    Tutoren, Extra Turns, Land-Zerstörung, Proxys, Hausregeln – ohne KI aus der Prüfung; kopieren oder
+    Tutoren, Extra-Züge, Massen-Landzerstörung, Proxys, Hausregeln – ohne KI aus der Prüfung; kopieren oder
     „Am Tisch zeigen“ im Vollbild) und eine **Deck-Anleitung** von Claude: Spielplan, früh/mitte/spät,
     Starthand behalten?, Schlüsselkarten, Siegwege, worauf achten, Tipps. Sie wird im Deck gespeichert
     (mit der Version, für die sie gilt). „Drucken / als PDF“ ergibt einen einseitigen Spickzettel.
   - **Testen:** Starthand ziehen, London-Mulligan (der erste ist in Commander frei), Zug für Zug nachziehen,
     auf dem Play oder Draw; dazu exakte Wahrscheinlichkeiten: Länder in der Starthand, Landdrops bis Zug 5,
     Ramp bis Zug 2, Kartenzug bis Zug 3, Interaktion bis Zug 4.
-  - **Anpassen:** „Mit eigenen Worten ändern“ (Freitext + Schnellwahl), **Upgrade-Vorschläge** (Budget und
+  - **Anpassen:** oben die Tischregel, darunter eine Frage „Was willst du ändern?“ mit vier Antworten – es
+    ist immer nur der gewählte Bereich offen (die Wahl bleibt gespeichert; ein Deck mit offenem Upgrade-Plan
+    öffnet direkt den Plan): „Mit eigenen Worten ändern“ (Freitext + Schnellwahl), **Upgrade-Vorschläge** (Budget und
     Fokus angeben → Claude liefert Tausche mit Preis und Grund, Karten aus der Sammlung zählen als kostenlos;
     ankreuzen und übernehmen, ohne weiteren KI-Lauf), der **Upgrade-Plan in Stufen** (z. B. 20 € · 50 € · 100 €
     insgesamt; jede Stufe mit Thema, Tauschen und Kosten, Stufe für Stufe übernehmen – ideal für
@@ -316,13 +323,16 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     Zu jedem Gegner gibt es ein Feld „Aufgefallen“; bekannte Gegnerdecks wählst du per Klick aus,
     neue Commander werden automatisch als Gegnerdeck gemerkt (abschaltbar).
   - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren.
-  - **Drucken:** Bilder prüfen/tauschen, optional „Tokens mitdrucken“ und „Nur fehlende Karten“, dann
-    1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung übernehmen.
+  - **Drucken:** oben Bildquelle, Kartenstärke, „Tokens mitdrucken“ und „Nur fehlende Karten“, darunter die
+    Schritte 1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung
+    übernehmen. „Bilder prüfen und tauschen“ ist darunter eingeklappt (öffnet sich von selbst, wenn Bilder fehlen).
   - „Liste kopieren“ steht oben rechts; im ⋯-Menü: „Als neues Deck kopieren“, „Neu prüfen“, Export für
     Cockatrice (.cod) und Tabletop Simulator (.json), Decklist als Textdatei, „Löschen“.
 - **Meine Sammlung** (eigene Seite, siehe unten), **Glossar** (Schlüsselwörter, Aktionen und
   Commander-Begriffe in einem Satz, mit Suche), **Blacklist** und **Einstellungen** (Kartendatenbank,
   Proxy-Druck, KI-Hochskalierung) als eigene Seiten.
+- Durchgehend Deutsch: Kategorien heißen in der Oberfläche Kartenzug, Schutz, Siegbedingung, Länder … (gespeichert
+  bleiben die englischen Werte), Zahlen und Preise im deutschen Format (32,50 €, Ø Manawert 3,1).
 - **Schnellsuche Strg+K** (⌘K): Decks, Seiten, Deck-Tabs, Glossar-Begriffe und Aktionen wie „Sammlung
   importieren“, „Deck per Link importieren“ oder „Partie festhalten“.
 - Hell/Dunkel folgt dem Betriebssystem; bedienbar mit Tastatur (Pfeiltasten in den Tabs, Esc schließt

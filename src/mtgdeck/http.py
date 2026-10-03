@@ -39,12 +39,50 @@ CACHE_DIR = Path(os.environ.get("MTG_CACHE_DIR", Path.home() / ".cache" / "mtgde
 DEFAULT_TTL = int(os.environ.get("MTG_CACHE_TTL", 24 * 3600))  # Scryfall recommends caching >= 24h
 
 
+# Names of the services for messages to the user.
+SERVICES = {
+    "scryfall": "Scryfall", "edhrec": "EDHREC", "commanderspellbook": "Commander Spellbook",
+    "archidekt": "Archidekt", "moxfield": "Moxfield", "mtggoldfish": "MTGGoldfish", "tappedout": "TappedOut",
+    "deckstats": "Deckstats", "mtgjson": "MTGJSON", "mpcautofill": "MPC Autofill", "pollinations": "der Bildgenerator",
+}  # fmt: skip
+
+
+def service_name(url: str) -> str:
+    host = urlparse(url).hostname or url
+    return next((name for key, name in SERVICES.items() if key in host), host or "Der Dienst")
+
+
 class HttpError(RuntimeError):
+    """A failed request. ``status`` 0 = the service could not be reached at all (no connection, timeout)."""
+
     def __init__(self, status: int, url: str, detail: str = ""):
         super().__init__(f"HTTP {status} for {url}: {detail}".strip(": "))
         self.status = status
         self.url = url
         self.detail = detail
+
+    @property
+    def friendly(self) -> str:
+        """A German one-liner for the user (no URL dump)."""
+        svc = service_name(self.url)
+        svc = svc[0].upper() + svc[1:]
+        if self.status == 0:
+            return f"{svc} ist gerade nicht erreichbar ({self.detail}). Prüf die Internetverbindung und versuch es gleich noch einmal."
+        if self.status == 429:
+            return f"{svc} bremst gerade (zu viele Anfragen) – bitte kurz warten und noch einmal versuchen."
+        if self.status >= 500:
+            return f"{svc} hat gerade Probleme (Fehler {self.status}) – bitte später noch einmal versuchen."
+        if self.status == 404:
+            return f"{svc} kennt das nicht (Fehler 404)."
+        return f"{svc} hat die Anfrage abgelehnt (Fehler {self.status})."
+
+
+def _transport_text(exc: httpx.HTTPError) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "Zeitüberschreitung"
+    if isinstance(exc, httpx.ConnectError):
+        return "keine Verbindung"
+    return type(exc).__name__
 
 
 _client: httpx.AsyncClient | None = None
@@ -126,7 +164,13 @@ async def request_json(
     bucket = _bucket(url)
     for attempt in range(retries + 1):
         await _throttle(bucket)
-        resp = await client().request(method, url, params=params, json=json_body)
+        try:
+            resp = await client().request(method, url, params=params, json=json_body)
+        except httpx.TransportError as exc:  # no connection, timeout, dropped connection
+            if attempt < retries:
+                await asyncio.sleep(1 + attempt)
+                continue
+            raise HttpError(0, url, _transport_text(exc)) from exc
         if resp.status_code == 429 and attempt < retries:
             await asyncio.sleep(float(resp.headers.get("Retry-After", 2 + 2 * attempt)))
             continue
@@ -168,11 +212,15 @@ async def download(url: str, dest: Path) -> Path:
     await _throttle(_bucket(url))
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    async with client().stream("GET", url, headers={"Accept": "*/*"}) as resp:
-        if resp.status_code >= 400:
-            raise HttpError(resp.status_code, url, "download failed")
-        with tmp.open("wb") as fh:
-            async for chunk in resp.aiter_bytes(1 << 16):
-                fh.write(chunk)
+    try:
+        async with client().stream("GET", url, headers={"Accept": "*/*"}) as resp:
+            if resp.status_code >= 400:
+                raise HttpError(resp.status_code, url, "download failed")
+            with tmp.open("wb") as fh:
+                async for chunk in resp.aiter_bytes(1 << 16):
+                    fh.write(chunk)
+    except httpx.TransportError as exc:
+        tmp.unlink(missing_ok=True)
+        raise HttpError(0, url, _transport_text(exc)) from exc
     tmp.replace(dest)
     return dest

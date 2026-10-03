@@ -61,12 +61,15 @@
 
     <nav class="nav-bottom" aria-label="Weitere Bereiche">
       <a href="#/collection" data-nav="collection"><svg class="icon"><use href="#i-box"/></svg>Meine Sammlung <span id="coll-count" class="count"></span></a>
-      <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
-      <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
-      <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
+      <p class="nav-group" id="nav-g-round">Meine Runde</p>
       <a href="#/opponents" data-nav="opponents"><svg class="icon"><use href="#i-swords"/></svg>Gegnerdecks <span id="opp-count" class="count"></span></a>
       <a href="#/tables" data-nav="tables"><svg class="icon"><use href="#i-table"/></svg>Tischregeln <span id="tr-count" class="count"></span></a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
+      <p class="nav-group">Werkstatt</p>
+      <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
+      <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
+      <p class="nav-group">Hilfe</p>
+      <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
       <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
     </nav>
   </aside>
@@ -419,12 +422,15 @@
             </div>
           </section>
           <aside class="deck-side">
-            <section class="panel" id="health-panel" hidden>
+            <section class="panel" id="check-panel">
               <h2>Deck-Check</h2>
-              <p id="health-summary" class="muted small"></p>
-              <ul id="health-list" class="health"></ul>
+              <div id="validation"></div>
+              <div id="health-panel" class="health-box" hidden>
+                <h3>Bereiche</h3>
+                <p id="health-summary" class="muted small"></p>
+                <ul id="health-list" class="health"></ul>
+              </div>
             </section>
-            <section class="panel"><h2>Prüfung</h2><div id="validation"></div></section>
             <section class="panel" id="own-panel" hidden><h2>Sammlung</h2><div id="own-summary"></div></section>
             <section class="panel" id="token-panel" hidden>
               <h2>Tokens &amp; Marker <span id="token-count" class="count"></span></h2>
@@ -500,19 +506,30 @@
       <!-- tune -->
       <div role="tabpanel" id="panel-anpassen" aria-labelledby="tab-anpassen" class="tabpanel" hidden>
         <div id="tune-job-slot" class="job-slot"></div>
-        <section class="panel" id="table-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Tischregel</h2>
-              <p class="muted small">Für welche Runde ist das Deck? Verstöße gegen ihre Regeln zeigt die Prüfung als Fehler.</p>
-            </div>
+        <section class="panel tune-table" id="table-panel">
+          <div class="tune-table-row">
+            <label for="deck-table" class="field-label">Tischregel</label>
+            <select id="deck-table"><option value="">Keine Tischregel</option></select>
+            <span class="muted small">Für welche Runde ist das Deck? Verstöße zeigt die Prüfung als Fehler.</span>
           </div>
-          <label class="field table-field"><span class="sr-only">Tischregel des Decks</span>
-            <select id="deck-table" aria-label="Tischregel des Decks"><option value="">Keine Tischregel</option></select>
-          </label>
           <div id="deck-table-status" aria-live="polite"></div>
         </section>
-        <section class="panel">
+
+        <div class="tune-choice">
+          <h2 id="tune-q">Was willst du ändern?</h2>
+          <div class="tune-options" role="radiogroup" aria-labelledby="tune-q">
+            <label><input type="radio" name="tune" value="refine"><span><b>Mit eigenen Worten</b>
+              <small>Du sagst, was anders sein soll – Claude baut um und speichert eine neue Version.</small></span></label>
+            <label><input type="radio" name="tune" value="upgrades"><span><b>Upgrade-Vorschläge</b>
+              <small>Einzelne Tausche für dein Budget – du wählst aus, was ins Deck kommt.</small></span></label>
+            <label><input type="radio" name="tune" value="plan"><span><b>Upgrade-Plan in Stufen</b>
+              <small>Mehrere Schritte mit wachsendem Budget, ideal für Starterdecks.</small><em id="tune-plan-badge" hidden>Plan vorhanden</em></span></label>
+            <label><input type="radio" name="tune" value="power"><span><b>Stärke ändern</b>
+              <small>Bracket oder Feinstufe wechseln – Claude baut passend um.</small></span></label>
+          </div>
+        </div>
+
+        <section class="panel" id="refine-panel" data-tune="refine">
           <h2>Mit eigenen Worten ändern</h2>
           <p class="muted">Claude tauscht gezielt Karten aus, prüft das Deck und speichert eine neue Version – rückgängig machen geht im Verlauf.</p>
           <form id="refine-form" class="inline-form">
@@ -527,7 +544,7 @@
           </div>
         </section>
 
-        <section class="panel" id="upgrade-panel">
+        <section class="panel" id="upgrade-panel" data-tune="upgrades" hidden>
           <h2>Upgrade-Vorschläge</h2>
           <p class="muted">Claude sucht die wirkungsvollsten Tausche für dein Budget. Du wählst aus, was übernommen wird –
             ohne weiteren KI-Lauf.</p>
@@ -553,7 +570,7 @@
           </div>
         </section>
 
-        <section class="panel" id="plan-panel">
+        <section class="panel" id="plan-panel" data-tune="plan" hidden>
           <div class="panel-head">
             <div>
               <h2>Upgrade-Plan in Stufen</h2>
@@ -581,7 +598,7 @@
           </div>
         </section>
 
-        <section class="panel" id="power-panel">
+        <section class="panel" id="power-panel" data-tune="power" hidden>
           <div class="panel-head">
             <h2>Stärke ändern</h2>
             <div class="btn-group">
@@ -718,14 +735,9 @@
       <div role="tabpanel" id="panel-drucken" aria-labelledby="tab-drucken" class="tabpanel" hidden>
        <div id="print-studio">
         <div id="print-job-slot" class="job-slot"></div>
-        <section class="panel" id="print-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Bilder prüfen</h2>
-              <p class="muted small">Klick auf eine Karte, um ein anderes Bild zu wählen.</p>
-            </div>
-          </div>
-          <form id="print-form" class="toolbar" autocomplete="off">
+        <section class="panel" id="print-steps-panel">
+          <h2>Drucken</h2>
+          <form id="print-form" class="toolbar print-options" autocomplete="off">
             <label class="field">Bilder
               <select name="source">
                 <option value="auto">Automatisch (eigene Wahl › MPC Autofill › Scryfall)</option>
@@ -746,11 +758,6 @@
             <button type="submit" class="btn">Vorschau aktualisieren</button>
           </form>
           <p id="print-summary" class="muted small"></p>
-          <div id="print-grid" class="print-grid"></div>
-        </section>
-
-        <section class="panel">
-          <h2>Drucken</h2>
           <ol class="print-steps">
             <li>
               <div>
@@ -797,6 +804,14 @@
               </div>
             </li>
           </ol>
+        </section>
+
+        <section class="panel" id="print-panel">
+          <details class="print-grid-box" id="print-grid-box">
+            <summary><span class="h2-like">Bilder prüfen und tauschen</span> <span id="print-grid-count" class="muted small"></span></summary>
+            <p class="muted small">Klick auf eine Karte, um ein anderes Bild zu wählen.</p>
+            <div id="print-grid" class="print-grid"></div>
+          </details>
         </section>
        </div>
       </div>
@@ -1668,8 +1683,8 @@
   </div>
   <div class="checks">
     <label class="check"><input type="checkbox" name="no_combos"> keine 2-Karten-Combos</label>
-    <label class="check"><input type="checkbox" name="no_extra_turns"> keine Extra Turns</label>
-    <label class="check"><input type="checkbox" name="no_mld"> kein Mass Land Denial</label>
+    <label class="check"><input type="checkbox" name="no_extra_turns"> keine Extra-Züge</label>
+    <label class="check"><input type="checkbox" name="no_mld"> keine Massen-Landzerstörung</label>
   </div>
   <label class="field">Stil / Vibe
     <input name="style" list="style-options" placeholder="z. B. witzig, politisch, thematisch">

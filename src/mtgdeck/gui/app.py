@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
@@ -30,9 +31,12 @@ from .. import backup, blacklist, brackets, carddb, collection, deckedit, deckim
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
+from ..fmt import money as fmt_money
 from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
 from . import terminal
+
+log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 PROJECT_ROOT = storage.PROJECT_ROOT
@@ -72,6 +76,21 @@ async def _store_error(_request: Request, exc: StoreError) -> JSONResponse:
     return JSONResponse({"detail": str(exc)}, status_code=409 if isinstance(exc, ConflictError) else 503)
 
 
+@app.exception_handler(HttpError)
+async def _http_error(_request: Request, exc: HttpError) -> JSONResponse:
+    """Scryfall, EDHREC … unreachable or failing: say which service and what to do, not a bare 500."""
+    return JSONResponse({"detail": exc.friendly}, status_code=502)
+
+
+def _error_text(exc: BaseException) -> str:
+    """A message for the user: friendly for known failures, the exception type for real bugs."""
+    if isinstance(exc, HttpError):
+        return exc.friendly
+    if isinstance(exc, (StoreError, LookupError, ValueError)) and not isinstance(exc, (KeyError, IndexError)):
+        return str(exc)
+    return f"{type(exc).__name__}: {exc}"
+
+
 # --- jobs: one Claude Code run each -------------------------------------------------------------
 
 
@@ -85,6 +104,7 @@ class Job:
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     proc: Any = None  # terminal.Terminal of the MPC Autofill job
     loop: asyncio.AbstractEventLoop | None = None
+    ended: float | None = None
 
     def emit(self, **event: Any) -> None:
         self.events.append(event)
@@ -94,29 +114,46 @@ class Job:
         assert self.loop is not None
         self.loop.call_soon_threadsafe(lambda: self.emit(**event))
 
+    def close(self) -> None:
+        """End the job. One that never said ``done`` (e.g. a crash in its last step) says it now, so the browser
+        never waits forever."""
+        if not any(e.get("type") == "done" for e in self.events):
+            self.emit(type="done", ok=False)
+        self.done = True
+        self.ended = time.time()
+        self.changed.set()
+
 
 JOBS: dict[str, Job] = {}
+JOB_KEEP_SECONDS = 3600  # finished jobs stay replayable this long (page reload, reconnect)
+
+
+def _register(job: Job, work: Awaitable[None]) -> dict[str, str]:
+    """Run ``work`` for ``job`` in the background; whatever happens, the job ends with a ``done`` event."""
+    now = time.time()
+    for old in [j for j in JOBS.values() if j.done and now - (j.ended or now) > JOB_KEEP_SECONDS]:
+        JOBS.pop(old.id, None)
+    JOBS[job.id] = job
+
+    async def supervised() -> None:
+        try:
+            await work
+        except asyncio.CancelledError:
+            job.emit(type="error", text="Abgebrochen.")
+        except Exception as exc:
+            log.exception("Job %s failed", job.id)
+            job.emit(type="error", text=_error_text(exc))
+        finally:
+            job.close()
+
+    job.task = asyncio.create_task(supervised())
+    return {"job": job.id}
 
 
 def _start_runner(runner: Any) -> dict[str, str]:
     """Run ``runner(job)`` as a background job whose events stream to the browser."""
     job = Job(id=uuid.uuid4().hex[:12], loop=asyncio.get_running_loop())
-    JOBS[job.id] = job
-
-    async def wrapped() -> None:
-        try:
-            await runner(job)
-        except asyncio.CancelledError:
-            job.emit(type="error", text="Abgebrochen.")
-            job.emit(type="done", ok=False)
-        except Exception as exc:
-            job.emit(type="error", text=f"{type(exc).__name__}: {exc}")
-            job.emit(type="done", ok=False)
-        finally:
-            job.done = True
-
-    job.task = asyncio.create_task(wrapped())
-    return {"job": job.id}
+    return _register(job, runner(job))
 
 
 def _tool_summary(name: str, args: dict[str, Any]) -> str:
@@ -168,7 +205,6 @@ async def _run_claude(
     except ImportError:
         job.emit(type="error", text="claude-agent-sdk fehlt: `uv sync --extra gui` ausführen.")
         job.emit(type="done", ok=False)
-        job.done = True
         return
 
     base_tools = ["Skill", "ToolSearch", "Read", "Glob", "Grep"] + (["WebSearch", "WebFetch"] if web else [])
@@ -207,16 +243,15 @@ async def _run_claude(
                 ok = not msg.is_error
                 structured = msg.structured_output
                 final_text = (msg.result or "").strip() or last_text
-                cost = f" · Kosten ${msg.total_cost_usd:.2f}" if getattr(msg, "total_cost_usd", None) else ""
+                cost = f" · Kosten {fmt_money(msg.total_cost_usd, 'usd')}" if getattr(msg, "total_cost_usd", None) else ""
                 job.emit(type="result", text=f"{'Fertig' if ok else 'Abgebrochen'} nach {msg.num_turns} Schritten{cost}")
     except asyncio.CancelledError:
         job.emit(type="error", text="Abgebrochen.")
     except Exception as exc:  # surface everything in the UI
-        job.emit(type="error", text=f"{type(exc).__name__}: {exc}")
+        job.emit(type="error", text=_error_text(exc))
 
     if finish is not None:
         await finish(job, ok, final_text, structured)
-        job.done = True
         return
 
     if output_format is not None:  # commander finder: structured suggestions instead of a deck
@@ -226,7 +261,6 @@ async def _run_claude(
         elif ok:
             job.emit(type="error", text="Keine verwertbaren Vorschläge erhalten.")
         job.emit(type="done", ok=bool(suggestions), deck=None)
-        job.done = True
         return
 
     decks = storage.list_decks()
@@ -244,7 +278,6 @@ async def _run_claude(
         except Exception as exc:
             job.emit(type="error", text=f"Tischregel konnte nicht gesetzt werden: {exc}")
     job.emit(type="done", ok=ok and deck is not None, deck=deck["slug"] if deck else None)
-    job.done = True
 
 
 async def _set_table_rule(slug: str, rule_id: str | None, note: str = "") -> dict[str, Any]:
@@ -282,9 +315,7 @@ def _iso(ts: float) -> str:
 
 def _start(prompt: str, model: str | None, output_format: dict[str, Any] | None = None, **kw: Any) -> dict[str, str]:
     job = Job(id=uuid.uuid4().hex[:12])
-    JOBS[job.id] = job
-    job.task = asyncio.create_task(_run_claude(job, prompt, model, output_format, **kw))
-    return {"job": job.id}
+    return _register(job, _run_claude(job, prompt, model, output_format, **kw))
 
 
 class BuildRequest(BaseModel):
@@ -325,8 +356,8 @@ def profile_lines(bracket: int, profile: PowerProfile | None) -> list[str]:
         rules.append("keine Tutoren" if profile.max_tutors == 0 else f"max. {profile.max_tutors} Tutoren")
     for flag, text in (
         (profile.allow_two_card_combos, "2-Karten-Combos"),
-        (profile.allow_extra_turns, "Extra Turns"),
-        (profile.allow_mass_land_denial, "Mass Land Denial"),
+        (profile.allow_extra_turns, "Extra-Züge"),
+        (profile.allow_mass_land_denial, "Massen-Landzerstörung"),
     ):
         if flag is False:
             rules.append(f"keine {text}")
@@ -740,7 +771,7 @@ async def api_card(name: str) -> dict[str, Any]:
     try:
         cards, _, missing = await resolve([name])
     except Exception as exc:
-        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, f"Kartendaten nicht erreichbar: {_error_text(exc)}") from exc
     if missing or not cards:
         raise HTTPException(404, f"Karte nicht gefunden: {name}")
     return next(iter(cards.values()))
@@ -751,7 +782,7 @@ async def api_card_text(name: str, lang: str = "de") -> dict[str, Any]:
     try:
         data = await card_text(name, lang)
     except Exception as exc:
-        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, f"Kartendaten nicht erreichbar: {_error_text(exc)}") from exc
     if not data:
         raise HTTPException(404, f"Karte nicht gefunden: {name}")
     return data
@@ -1293,11 +1324,11 @@ async def api_import_preview(req: ImportPreviewRequest) -> dict[str, Any]:
             data = importers.import_text(req.text or "", req.name)
     except HttpError as exc:  # before RuntimeError: HttpError is one
         status = 404 if exc.status == 404 else 502
-        raise HTTPException(status, "Deck nicht gefunden – ist es öffentlich?" if status == 404 else f"Seite nicht erreichbar: {exc}") from exc
+        raise HTTPException(status, "Deck nicht gefunden – ist es öffentlich?" if status == 404 else exc.friendly) from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(502, f"Seite nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, f"Seite nicht erreichbar: {_error_text(exc)}") from exc
     if not data["cards"]:
         raise HTTPException(400, "Keine Karten gefunden.")
     return await deckimport.preview(data)
@@ -1406,7 +1437,7 @@ async def api_deskmat_card(req: DeskmatCardRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except HttpError as exc:
-        raise HTTPException(502, f"Bild nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, exc.friendly) from exc
 
 
 @app.post("/api/deskmat/upload")
@@ -1642,11 +1673,11 @@ async def api_order_add(oid: str, req: OrderAdd) -> dict[str, Any]:
             data = await importers.import_url(req.url)
         except HttpError as exc:  # before RuntimeError: HttpError is one
             raise HTTPException(404 if exc.status == 404 else 502, "Deck nicht gefunden – ist es öffentlich?"
-                                if exc.status == 404 else f"Seite nicht erreichbar: {exc}") from exc  # fmt: skip
+                                if exc.status == 404 else exc.friendly) from exc  # fmt: skip
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(502, f"Seite nicht erreichbar: {exc}") from exc
+            raise HTTPException(502, f"Seite nicht erreichbar: {_error_text(exc)}") from exc
         label = f"{data.get('name') or 'Deck'} ({data.get('site')})"
         items += [{"kind": "card", "name": n, "qty": 1, "source": label} for n in data["commanders"]]
         for line in data["cards"]:
@@ -1695,7 +1726,7 @@ async def api_token_search(q: str) -> list[dict[str, Any]]:
     try:
         res = await scryfall.search(f'(t:token or t:emblem) name:"{q.strip()}"', order="released", unique="art", max_results=60)
     except HttpError as exc:
-        raise HTTPException(502, f"Scryfall nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, exc.friendly) from exc
     out = []
     for c in res["cards"]:
         cid = c.get("id")
@@ -1710,7 +1741,7 @@ async def api_precons(q: str = "", limit: int = 60) -> list[dict[str, Any]]:
     try:
         return await precons.search(q, limit=min(limit, 200))
     except Exception as exc:  # offline or MTGJSON down
-        raise HTTPException(502, f"MTGJSON nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, f"MTGJSON nicht erreichbar: {_error_text(exc)}") from exc
 
 
 @app.get("/api/precons/{file_name}")
@@ -1720,9 +1751,9 @@ async def api_precon(file_name: str) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except HttpError as exc:
-        raise HTTPException(404 if exc.status == 404 else 502, f"MTGJSON: {exc}") from exc
+        raise HTTPException(404 if exc.status == 404 else 502, exc.friendly) from exc
     except Exception as exc:
-        raise HTTPException(502, f"MTGJSON nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, f"MTGJSON nicht erreichbar: {_error_text(exc)}") from exc
     try:  # commander images for the preview
         data, _, _ = await resolve(p["commanders"])
         p["commander_images"] = {n: c.get("image") for n, c in data.items()}
@@ -1744,7 +1775,7 @@ async def api_precon_import(req: PreconImport) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(502, f"MTGJSON nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, f"MTGJSON nicht erreichbar: {_error_text(exc)}") from exc
 
 
 @app.get("/api/decks/{slug}/questions")
@@ -2051,7 +2082,7 @@ async def api_similar(slug: str, card: str, limit: int = 12) -> list[dict[str, A
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except HttpError as exc:
-        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, exc.friendly) from exc
 
 
 @app.get("/api/decks/{slug}/role-candidates")
@@ -2066,7 +2097,7 @@ async def api_role_candidates(slug: str, role: str, limit: int = 18) -> list[dic
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except HttpError as exc:
-        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, exc.friendly) from exc
 
 
 @app.get("/api/decks/{slug}/export/{fmt}")
@@ -2084,7 +2115,7 @@ async def api_export(slug: str, fmt: str) -> Response:
         try:
             card_data, _, _ = await resolve(names)
         except Exception as exc:
-            raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+            raise HTTPException(502, f"Kartendaten nicht erreichbar: {_error_text(exc)}") from exc
         if fmt == "cockatrice":
             body, media, ext = exports.to_cockatrice(deck, card_data), "application/xml", "cod"
         else:
@@ -2103,7 +2134,7 @@ async def api_tokens(slug: str) -> list[dict[str, Any]]:
     try:
         return await deck_tokens(deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])])
     except HttpError as exc:
-        raise HTTPException(503, f"Kartendaten nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, exc.friendly) from exc
 
 
 @app.get("/api/decks/{slug}/ownership")
@@ -2202,7 +2233,7 @@ async def api_prints(name: str, page: int = 1) -> dict[str, Any]:
     try:
         return await scryfall.prints(name, page=max(1, page))
     except HttpError as exc:
-        raise HTTPException(502, f"Scryfall nicht erreichbar: {exc}") from exc
+        raise HTTPException(502, exc.friendly) from exc
 
 
 @app.delete("/api/decks/{slug}")
@@ -2397,7 +2428,7 @@ async def api_print_alternatives(slug: str, card: str, side: str = "front", toke
     try:
         return await proxy.alternatives(_print_deck(slug), card, "back" if side == "back" else "front", token=token, page=max(1, page))
     except HttpError as exc:
-        raise HTTPException(502, str(exc)) from exc
+        raise HTTPException(502, exc.friendly) from exc
 
 
 class ChooseRequest(BaseModel):
@@ -2442,6 +2473,12 @@ async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
         job.emit(type="done", ok=not result["missing"])
 
     return _start_runner(runner)
+
+
+@app.get("/api/decks/{slug}/print/files")
+async def api_print_files(slug: str) -> dict[str, bool]:
+    s = storage.slug(slug)
+    return {kind: (proxy.order_dir(s) / f"{s}.{kind}").exists() for kind in ("xml", "pdf")}
 
 
 @app.api_route("/api/decks/{slug}/print/files/{kind}", methods=["GET", "HEAD"])

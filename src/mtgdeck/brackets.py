@@ -22,7 +22,7 @@ BRACKETS: list[dict[str, Any]] = [
         "mass_land_denial": False,
         "extra_turns": "none",
         "two_card_combos": "none",
-        "summary": "Thema und Spaß vor Stärke. Keine Game Changer, keine Extra Turns, keine 2-Karten-Combos, kein Mass Land Denial.",
+        "summary": "Thema und Spaß vor Stärke. Keine Game Changer, keine Extra-Züge, keine 2-Karten-Combos, keine Massen-Landzerstörung.",
     },
     {
         "number": 2,
@@ -32,7 +32,7 @@ BRACKETS: list[dict[str, Any]] = [
         "mass_land_denial": False,
         "extra_turns": "few",
         "two_card_combos": "none",
-        "summary": "Niveau eines Precons. Keine Game Changer, keine 2-Karten-Combos, kein Mass Land Denial, Extra Turns nur wenige und nicht gechained.",
+        "summary": "Niveau eines Precons. Keine Game Changer, keine 2-Karten-Combos, keine Massen-Landzerstörung, Extra-Züge nur wenige und nicht hintereinander.",
     },
     {
         "number": 3,
@@ -42,7 +42,7 @@ BRACKETS: list[dict[str, Any]] = [
         "mass_land_denial": False,
         "extra_turns": "few",
         "two_card_combos": "late",
-        "summary": "Gestärkte Decks. Bis zu 3 Game Changer, kein Mass Land Denial, keine frühen 2-Karten-Combos, Extra Turns nicht chainen.",
+        "summary": "Gestärkte Decks. Bis zu 3 Game Changer, keine Massen-Landzerstörung, keine frühen 2-Karten-Combos, Extra-Züge nicht hintereinander.",
     },
     {
         "number": 4,
@@ -125,14 +125,14 @@ def evaluate(
     if max_gc is not None and len(game_changers) > max_gc:
         violations.append(f"{len(game_changers)} Game Changer (erlaubt: {max_gc}): {', '.join(game_changers)}")
     if not rules["mass_land_denial"] and mld:
-        violations.append(f"Mass Land Denial ist in Bracket {target} nicht erlaubt: {', '.join(sorted(mld))}")
+        violations.append(f"Massen-Landzerstörung ist in Bracket {target} nicht erlaubt: {', '.join(sorted(mld))}")
     if rules["extra_turns"] == "none" and extra_turns:
-        violations.append(f"Extra Turns sind in Bracket {target} nicht erlaubt: {', '.join(sorted(extra_turns))}")
+        violations.append(f"Extra-Züge sind in Bracket {target} nicht erlaubt: {', '.join(sorted(extra_turns))}")
     elif rules["extra_turns"] == "few" and extra_turns:
         if len(extra_turns) > 3:
-            violations.append(f"Zu viele Extra-Turn-Karten ({len(extra_turns)}) für Bracket {target}")
+            violations.append(f"Zu viele Extra-Zug-Karten ({len(extra_turns)}) für Bracket {target}")
         else:
-            warnings.append(f"Extra Turns erlaubt, aber nicht chainen/recyceln: {', '.join(sorted(extra_turns))}")
+            warnings.append(f"Extra-Züge erlaubt, aber nicht hintereinander oder wiederholt: {', '.join(sorted(extra_turns))}")
     if combos:
         combo_names = "; ".join(" + ".join(c.get("cards") or ["?"]) for c in combos)
         if rules["two_card_combos"] == "none":

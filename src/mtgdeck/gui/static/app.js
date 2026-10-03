@@ -9,14 +9,44 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const enc = encodeURIComponent;
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch {
+    throw new Error("Keine Verbindung zur App – läuft mtg-gui noch? Bitte neu starten und die Seite neu laden.");
+  }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || res.statusText);
+  if (!res.ok) throw new Error(errorText(res, data));
   return data;
+}
+
+// a readable German message for a failed request
+function errorText(res, data) {
+  const d = data?.detail;
+  if (typeof d === "string" && d) return d;
+  if (Array.isArray(d) && d.length) {  // pydantic: [{loc, msg}]
+    return "Ungültige Eingabe: " + d.map((e) => `${(e.loc || []).filter((x) => x !== "body").join(".")} ${e.msg || ""}`.trim()).join("; ");
+  }
+  if (res.status >= 500) return `Interner Fehler (${res.status}) – Details stehen im Fenster, in dem mtg-gui läuft.`;
+  if (res.status === 404) return "Nicht gefunden – vielleicht wurde es inzwischen gelöscht.";
+  return `Anfrage fehlgeschlagen (${res.status})`;
+}
+
+// follow a job's events; onLost(text) when the job is gone (app restarted) – null while reconnecting
+function jobStream(jobId, onEvent, onLost) {
+  const es = new EventSource(`/api/jobs/${jobId}/events`);
+  es.onmessage = (e) => onEvent(JSON.parse(e.data));
+  es.onopen = () => onLost(false);
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) {
+      onLost("Die Verbindung zum Auftrag ist weg – vermutlich wurde die App neu gestartet. Bitte den Auftrag noch einmal starten.");
+    } else onLost(null);  // the browser reconnects; the server resumes via Last-Event-ID
+  };
+  return es;
 }
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -25,10 +55,15 @@ const store = {  // per-browser conveniences only (view mode); failures are harm
   set(k, v) { try { localStorage.setItem("mtgdeck." + k, v); } catch { /* ignore */ } },
 };
 
-const fmtNum = (v, suffix = "", digits = null) =>
-  v === null || v === undefined ? "–" : `${digits === null ? v : Number(v).toFixed(digits)}${suffix}`;
+// German number format everywhere: 32,00 € · 3,8 · 1.234
+const fmtNum = (v, suffix = "", digits = null) => {
+  if (v === null || v === undefined || v === "" || Number.isNaN(Number(v))) return v === null || v === undefined || v === "" ? "–" : `${v}${suffix}`;
+  const opts = digits === null ? { maximumFractionDigits: 2 } : { minimumFractionDigits: digits, maximumFractionDigits: digits };
+  return `${Number(v).toLocaleString("de-DE", opts)}${suffix}`;
+};
 const fmtPower = (v) => fmtNum(v, "", 1);
-const fmtPrice = (v, cur = "") => fmtNum(v, cur ? " " + cur : "", 2);
+const CURRENCY_SIGNS = { eur: "€", usd: "$", "€": "€", "$": "$" };
+const fmtPrice = (v, cur = "") => fmtNum(v, cur ? " " + (CURRENCY_SIGNS[String(cur).toLowerCase()] || cur) : "", 2);
 const fmtDate = (iso) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -574,9 +609,11 @@ function startJob(jobId, title, { kind = "build", slot = "#job-slot-main", route
   clearInterval(elapsedTimer);
   elapsedTimer = setInterval(tickElapsed, 1000);
   if (eventSource) eventSource.close();
-  eventSource = new EventSource(`/api/jobs/${jobId}/events`);
-  eventSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
-  eventSource.onerror = () => { /* the browser reconnects; the server resumes via Last-Event-ID */ };
+  eventSource = jobStream(jobId, handleEvent, (lost) => {
+    if (currentJob !== jobId) return;
+    if (lost) { handleEvent({ type: "error", text: lost }); handleEvent({ type: "done", ok: false }); }
+    else if (lost === null) setJobStatus("Verbindung unterbrochen – verbinde neu …");
+  });
 }
 
 // the job panel lives in the slot of the view that started it (build page, deck tab, finder)
@@ -739,7 +776,7 @@ async function openDeck(slug) {
   $("#retune-form").elements.request.value = "";
   renderPower(d);
   $("#upgrade-budget-field").hidden = !!d.proxy;
-  $("#upgrade-cur").textContent = `(${(d.currency || "eur").toUpperCase()})`;
+  $("#upgrade-cur").textContent = `(${CURRENCY_SIGNS[d.currency || "eur"]})`;
   if (upgrades?.slug !== d.slug) $("#upgrade-result").hidden = true;
   renderHistory(d);
   renderQuestions(d);
@@ -768,7 +805,7 @@ function renderDeckHead(d) {
   if (v.legal === true) pills.push(`<span class="pill ok">${icon("check")}legal</span>`);
   if (v.legal === false) pills.push(`<span class="pill bad">${icon("alert")}nicht legal</span>`);
   if (d.proxy) pills.push('<span class="pill">Proxy-Deck</span>');
-  else if (v.price_total != null) pills.push(`<span class="pill">${esc(fmtPrice(v.price_total, cur))}${d.budget ? ` / ${esc(d.budget)} ${cur}` : ""}</span>`);
+  else if (v.price_total != null) pills.push(`<span class="pill">${esc(fmtPrice(v.price_total, cur))}${d.budget ? ` / ${esc(fmtPrice(d.budget, cur))}` : ""}</span>`);
   if (d.power_profile?.style) pills.push(`<span class="pill">Stil: ${esc(d.power_profile.style)}</span>`);
   if (d.table_rule_info) {
     const t = v.table_rule || {};
@@ -847,15 +884,15 @@ function renderValidation(v) {
       <dl class="kv">
         ${kv("Game Changer", br.game_changers || [])}
         ${kv("2-Karten-Combos", (br.two_card_combos || []).map((c) => c.cards.join(" + ")))}
-        ${kv("Extra Turns", br.extra_turns || [])}
-        ${kv("Mass Land Denial", br.mass_land_denial || [])}
+        ${kv("Extra-Züge", br.extra_turns || [])}
+        ${kv("Massen-Landzerstörung", br.mass_land_denial || [])}
         ${kv("Tutoren", br.tutors || [])}
       </dl>
     </details>`;
 }
 
 const ROLE_LABELS = { ramp: "Ramp", card_draw: "Kartenzug", removal: "Removal", board_wipe: "Board Wipes",
-  tutor: "Tutoren", extra_turn: "Extra Turns", counterspell: "Counter", protection: "Schutz" };
+  tutor: "Tutoren", extra_turn: "Extra-Züge", counterspell: "Counter", protection: "Schutz" };
 
 function renderStats(s, v = {}) {
   const box = $("#stats");
@@ -893,6 +930,10 @@ $("#card-group").addEventListener("change", (e) => { cardGroup = e.target.value;
 $("#card-sort").addEventListener("change", (e) => { cardSort = e.target.value; store.set("cardsort", cardSort); renderCards(currentDeck); });
 
 const CATEGORY_ORDER = ["Commander", "Ramp", "Draw", "Removal", "Board Wipe", "Protection", "Synergy", "Win Condition", "Utility", "Land"];
+// stored category values stay English (skill contract, references/deck-template.md); the GUI shows German names
+const CATEGORY_LABELS = { Draw: "Kartenzug", "Board Wipe": "Board Wipes", Protection: "Schutz", Synergy: "Synergie",
+  "Win Condition": "Siegbedingung", Utility: "Sonstiges", Land: "Länder", Tutor: "Tutoren", Counterspell: "Counterspells" };
+const catLabel = (c) => CATEGORY_LABELS[c] || c;
 const TYPE_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Artifact", "Enchantment", "Instant", "Sorcery", "Land", "Sonstiges"];
 const TYPE_LABELS = { Creature: "Kreaturen", Planeswalker: "Planeswalker", Battle: "Schlachten", Artifact: "Artefakte",
   Enchantment: "Verzauberungen", Instant: "Spontanzauber", Sorcery: "Hexereien", Land: "Länder", Sonstiges: "Sonstiges" };
@@ -916,7 +957,7 @@ function groupOf(c, cd) {
       return ci.length === 0 ? "Farblos" : ci.length > 1 ? "Mehrfarbig" : COLOR_GROUPS[ci[0]];
     }
     case "owned": return ownershipLabel(c.name);
-    default: return c.category || TYPE_LABELS[typeOf(cd)] || "Sonstiges";
+    default: return c.category ? catLabel(c.category) : TYPE_LABELS[typeOf(cd)] || "Sonstiges";
   }
 }
 
@@ -924,7 +965,7 @@ function groupRank(g) {
   const order = cardGroup === "type" ? TYPE_ORDER.map((t) => TYPE_LABELS[t] || t)
     : cardGroup === "color" ? ["Commander", "Weiß", "Blau", "Schwarz", "Rot", "Grün", "Mehrfarbig", "Farblos", "Länder"]
     : cardGroup === "owned" ? ["Commander", ...OWNED_ORDER]
-    : CATEGORY_ORDER;
+    : CATEGORY_ORDER.map(catLabel);
   const i = order.indexOf(g);
   if (cardGroup === "cmc" && g.startsWith("Manawert")) return 1 + (g.endsWith("7+") ? 7 : Number(g.split(" ")[1]));
   if (cardGroup === "cmc") return g === "Commander" ? 0 : 99;
@@ -968,7 +1009,7 @@ function renderCards(d) {
   $("#card-total").classList.toggle("bad", editing && total !== 100);
   $("#cards").classList.toggle("grid", grid);
   $("#cards").classList.toggle("editing", editing);
-  const catOptions = (sel) => ["", ...CATEGORY_ORDER.slice(1)].map((c) => `<option value="${esc(c)}" ${c === sel ? "selected" : ""}>${esc(c || "Kategorie …")}</option>`).join("");
+  const catOptions = (sel) => ["", ...CATEGORY_ORDER.slice(1)].map((c) => `<option value="${esc(c)}" ${c === sel ? "selected" : ""}>${esc(c ? catLabel(c) : "Kategorie …")}</option>`).join("");
   $("#cards").innerHTML = Object.entries(groups).sort(([a], [b]) => groupRank(a) - groupRank(b) || a.localeCompare(b)).map(([g, items]) => {
     const html = items.sort(cmp).map((c) => {
       const cd = c.cd;
@@ -981,7 +1022,7 @@ function renderCards(d) {
           ${c.qty > 1 ? `<span class="qty-badge">${c.qty}×</span>` : ""}${own ? `<span class="own-badge">${own}</span>` : ""}</div>`;
       }
       const name = `${esc(c.name)}${cd.image_back ? '<span class="dfc" title="doppelseitig">⇄</span>' : ""}${cd.game_changer ? '<span class="gc" title="Game Changer">GC</span>' : ""}`;
-      const price = `<span class="price">${priceOf(cd, d) ? esc(cd[d.currency === "usd" ? "price_usd" : "price_eur"]) : ""}</span>`;
+      const price = `<span class="price">${priceOf(cd, d) ? esc(fmtNum(priceOf(cd, d), "", 2)) : ""}</span>`;
       if (!editing || c.commander) {
         return `<div class="card" role="button" tabindex="0" ${data} aria-label="${esc(label)} – große Ansicht">
           <span>${c.qty > 1 ? `<span class="qty">${c.qty}× </span>` : ""}${name}${own}</span>${price}</div>`;
@@ -1221,7 +1262,7 @@ function renderOdds(d) {
   $("#odds").innerHTML = `
     <div class="odds-grid">
       <figure class="dist">
-        <figcaption><b>Länder in der Starthand</b> · Ø ${(7 * L / N).toFixed(1)} · 2–5 Länder: <b>${pct(keep)}</b></figcaption>
+        <figcaption><b>Länder in der Starthand</b> · Ø ${fmtNum(7 * L / N, "", 1)} · 2–5 Länder: <b>${pct(keep)}</b></figcaption>
         <div class="dbars" role="img" aria-label="Länder in der Starthand: ${dist.map((p, k) => `${k}: ${pct(p)}`).join(", ")}">${bars}</div>
       </figure>
       <table class="odds-table">
@@ -1273,12 +1314,26 @@ function renderHealth(d) {
           ${it.fix.focus ? `<button type="button" class="btn small ghost" data-focus="${esc(it.fix.focus)}">${icon("spark")}Upgrades mit KI</button>` : ""}
         </div>` : ""}</div></details></li>`).join("");
 }
+// "Anpassen": one tool at a time (own words · upgrade suggestions · staged plan · change strength)
+const TUNES = ["refine", "upgrades", "plan", "power"];
+function showTune(key, scroll = false, remember = true) {
+  if (!TUNES.includes(key)) key = "refine";
+  for (const p of $$("#panel-anpassen [data-tune]")) p.hidden = p.dataset.tune !== key;
+  const radio = $(`#panel-anpassen input[name=tune][value="${key}"]`);
+  if (radio) radio.checked = true;
+  if (remember) store.set("tune", key);
+  if (scroll) $(`#panel-anpassen [data-tune="${key}"]`).scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("#panel-anpassen .tune-options").addEventListener("change", (e) => { if (e.target.name === "tune") showTune(e.target.value); });
+showTune(store.get("tune") || "refine");
+
 $("#health-list").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.role) return openRoleCandidates(b.dataset.role, b.dataset.label);
   if (b.dataset.focus) {
     selectTab("anpassen");
+    showTune("upgrades");
     const f = $("#upgrade-form");
     f.elements.focus.value = b.dataset.focus;
     f.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1660,13 +1715,20 @@ function planStageApplied(stage, deck) {
   const names = new Set(deck.cards.map((c) => c.name));
   return stage.upgrades.every((u) => names.has(u.add) && !names.has(u.remove));
 }
+let tuneDeck = null;  // deck the „Anpassen“ choice was last set up for
 function renderUpgradePlan(d) {
   const plan = d.upgrade_plan;
   const cur = (d.currency || "eur").toUpperCase();
-  $$(".plan-cur").forEach((el) => { el.textContent = cur; });
+  $$(".plan-cur").forEach((el) => { el.textContent = CURRENCY_SIGNS[d.currency || "eur"]; });
   $("#plan-budgets").hidden = !!d.proxy;
   $("#plan-btn span").textContent = plan ? "Neuen Plan erstellen" : "Plan erstellen";
+  $("#tune-plan-badge").hidden = !plan;
   $("#plan-result").hidden = !plan;
+  if (tuneDeck !== d.slug) {  // a deck with an open upgrade plan opens „Anpassen“ on it
+    tuneDeck = d.slug;
+    const open = plan?.stages?.some((st) => !planStageApplied(st, d));
+    showTune(open ? "plan" : store.get("tune") || "refine", false, false);
+  }
   if (!plan) return;
   $("#plan-meta").textContent = `Erstellt ${fmtDate(plan.created)} für v${plan.version}`;
   $("#plan-summary").textContent = plan.summary || "";
@@ -1938,6 +2000,7 @@ $("#game-list").addEventListener("click", async (e) => {
 $("#game-learn").addEventListener("click", () => {
   if (!gameData?.learn_focus) return;
   selectTab("anpassen");
+  showTune("upgrades");
   const f = $("#upgrade-form");
   f.elements.focus.value = gameData.learn_focus;
   f.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2064,8 +2127,10 @@ $("#qa-form").addEventListener("submit", async (e) => {
   try {
     const slug = currentDeck.slug;
     const { job } = await api(`/api/decks/${enc(slug)}/ask`, { method: "POST", body: { question } });
-    const run = { job, slug, question, source: new EventSource(`/api/jobs/${job}/events`) };
-    run.source.onmessage = (ev) => onQaEvent(run, JSON.parse(ev.data));
+    const run = { job, slug, question };
+    run.source = jobStream(job, (ev) => onQaEvent(run, ev), (lost) => {
+      if (lost && !run.finished) { onQaEvent(run, { type: "error", text: lost }); onQaEvent(run, { type: "done", ok: false }); }
+    });
     qaRun = run;
     e.target.reset();
     updateQaLive();
@@ -2266,6 +2331,9 @@ function renderPlanSummary() {
     + (p.server ? "" : ' · <span class="warn">kein MPC-Autofill-Server eingestellt (nur Scryfall)</span>')
     + (p.missing.length ? ` · <span class="bad">ohne Bild: ${esc(p.missing.join(", "))}</span>` : "")
     + (p.warnings.length ? `<br><span class="warn">${esc(p.warnings.join(" "))}</span>` : "");
+  const tiles = imgs.length + p.missing.length;
+  $("#print-grid-count").textContent = `· ${tiles} Bilder` + (p.missing.length ? ` · ${p.missing.length} ohne Bild` : "");
+  if (p.missing.length) $("#print-grid-box").open = true;  // something needs attention: show the images
 }
 
 function cardTile(c, i, side) {
@@ -2464,10 +2532,10 @@ async function onPrepared(result) {
 
 async function updateDownloadLinks() {
   const base = `/api/decks/${enc(pctx().slug)}/print/files`;
+  const have = await api(base).catch(() => ({}));  // which files exist – no 404 noise in the console
   for (const [id, kind] of [["#xml-link", "xml"], ["#pdf-link", "pdf"]]) {
-    const ok = (await fetch(`${base}/${kind}`, { method: "HEAD" }).catch(() => null))?.ok;
     $(id).href = `${base}/${kind}`;
-    $(id).hidden = !ok;
+    $(id).hidden = !have[kind];
   }
 }
 
@@ -3173,6 +3241,7 @@ $("#opp-upgrade").addEventListener("click", async () => {
   go(`#/deck/${enc(slug)}/anpassen`);
   await new Promise((r) => setTimeout(r, 50));
   if (currentDeck?.slug !== slug && !(await openDeck(slug))) return;
+  showTune("upgrades");
   $("#upgrade-opp").value = id;
   const f = $("#upgrade-form");
   f.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -3263,6 +3332,7 @@ $("#deck-table").addEventListener("change", async (e) => {
 $("#deck-table-status").addEventListener("click", (e) => {
   if (!e.target.closest("#deck-table-fix")) return;
   const t = currentDeck.validation?.table_rule;
+  showTune("refine");
   const form = $("#refine-form");
   form.elements.request.value = `Halte die Tischregel „${t.name}“ ein: ${(t.violations || []).map((v) => v.split(": ").slice(1).join(": ")).join("; ")}`;
   form.requestSubmit();
@@ -3942,7 +4012,7 @@ function renderDeskmat() {
     const ext = res.file.split(".").pop().toUpperCase();
     $("#dm-result-info").textContent = `${res.size[0]} × ${res.size[1]} px · ${res.dpi} DPI · ${res.format_label}`
       + (res.bleed_mm ? ` + ${res.bleed_mm} mm Beschnitt (${res.print_mm[0] / 10} × ${res.print_mm[1] / 10} cm)` : "")
-      + ` · ${(res.bytes / 1048576).toFixed(1)} MB ${ext} · `
+      + ` · ${fmtNum(res.bytes / 1048576, "", 1)} MB ${ext} · `
       + (res.ai_passes ? `${res.ai_passes}× mit Real-ESRGAN hochskaliert` : res.factor > 1.15 ? "ohne KI vergrößert" : "ohne Vergrößerung");
     $("#dm-result-warn").innerHTML = res.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
     if (p.compare?.point && dm.point.join() === "0.5,0.5") dm.point = [...p.compare.point];
@@ -3991,8 +4061,8 @@ function layoutDeskmat() {
   $("#dm-passes").hidden = !dm.opts.upscaler;
   const soft = factor > [2.5, 6, 24][passes];
   const how = factor <= 1.15 ? "" : passes ? ` (KI ×4${passes === 2 ? " zweimal" : ""}${factor > (passes === 2 ? 16 : 4) ? ", Rest per Lanczos" : ""})` : " (ohne KI)";
-  $("#dm-info").innerHTML = `Druckdatei <b>${tw} × ${th} px</b> (${mp.toFixed(0)} MP) · <b>${dmDpi()} DPI</b> auf ${pw / 10} × ${ph / 10} cm`
-    + (bleed ? ` inkl. ${bleed} mm Beschnitt` : "") + ` · Ausschnitt ${region[0]} × ${region[1]} px → Faktor ${factor.toFixed(1)}${how}`
+  $("#dm-info").innerHTML = `Druckdatei <b>${tw} × ${th} px</b> (${fmtNum(mp, "", 0)} MP) · <b>${dmDpi()} DPI</b> auf ${fmtNum(pw / 10)} × ${fmtNum(ph / 10)} cm`
+    + (bleed ? ` inkl. ${bleed} mm Beschnitt` : "") + ` · Ausschnitt ${region[0]} × ${region[1]} px → Faktor ${fmtNum(factor, "", 1)}${how}`
     + (tooBig ? ` · <span class="bad">zu groß (max. ${dm.opts.max_megapixels} MP) – 300 DPI oder kleineres Format</span>`
       : soft ? ' · <span class="warn">wird weich – größeres Motiv oder weniger Zoom</span>' : "")
     + (mp > 60 && $("#dm-filetype").value === "png" ? ' · <span class="muted">Tipp: JPEG spart hier viel Platz</span>' : "");

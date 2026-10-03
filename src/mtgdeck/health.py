@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import fmt
+
 GREEN, YELLOW, RED = "green", "yellow", "red"
 _RANK = {GREEN: 0, YELLOW: 1, RED: 2}
 
@@ -57,7 +59,7 @@ def check(deck: dict[str, Any]) -> dict[str, Any]:
     items.append(_item(
         "lands", "Länder", status, lands, f"{target - 1}–{target + 1}", text,
         "Ohne genug Länder bleibst du mit teuren Karten auf der Hand sitzen; mit zu vielen ziehst du später nur noch Länder. "
-        f"Der Richtwert hängt vom durchschnittlichen Manawert ({avg:.2f}) und deiner Ramp ab.",
+        f"Der Richtwert hängt vom durchschnittlichen Manawert ({fmt.num(avg)}) und deiner Ramp ab.",
         {"focus": f"Manabasis: auf etwa {target} Länder kommen"} if status != GREEN else None,
     ))  # fmt: skip
 
