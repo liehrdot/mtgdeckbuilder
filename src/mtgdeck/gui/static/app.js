@@ -2330,8 +2330,106 @@ function originTag(img) {
 
 function renderPlan() {
   renderPlanSummary();
+  renderTokenList();
   $("#print-grid").innerHTML = printPlan.cards.map((c, i) => cardTile(c, i, "front")).join("");
 }
+
+// tokens: artwork + copies per token (stored per deck; collective orders keep theirs in the order items)
+function tokenRow(c, i) {
+  const img = c.front?.image;
+  const from = (c.from || []).slice(0, 3).join(", ") + ((c.from || []).length > 3 ? " …" : "");
+  const editable = !pctx()?.order;
+  return `<li data-i="${i}" class="${c.qty === 0 ? "off" : ""}">
+    <button type="button" class="tok-art" data-pick="${i}" title="Artwork für ${esc(c.name)} wählen" aria-label="Artwork für ${esc(c.name)} wählen">
+      ${img ? `<img src="${esc(img.thumb)}" alt="" loading="lazy">` : '<span class="noimg">kein Bild</span>'}</button>
+    <div class="tok-info"><b>${esc(c.name)}</b>
+      <span class="muted small">${esc(tokenKind(c.type_line))}${from ? ` · von ${esc(from)}` : ""}</span></div>
+    <div class="tok-controls">${originTag(img)}
+    ${editable ? `<div class="stepper" role="group" aria-label="Anzahl ${esc(c.name)}">
+        <button type="button" class="btn small" data-step="-1" aria-label="Eins weniger"${c.qty <= 0 ? " disabled" : ""}>−</button>
+        <input type="number" min="0" max="99" value="${c.qty}" inputmode="numeric" aria-label="Anzahl ${esc(c.name)}">
+        <button type="button" class="btn small" data-step="1" aria-label="Eins mehr"${c.qty >= 99 ? " disabled" : ""}>+</button></div>
+      <button type="button" class="link-btn tok-reset" data-reset${c.qty_custom ? "" : " hidden"}>↺ Standard (${c.default_qty})</button>`
+    : `<span class="muted small">${c.qty}× laut Bestellung</span>`}</div>
+  </li>`;
+}
+// "Token Creature — Human" stays, emblems too; markers like The Monarch (type "Card") are called Marker
+const tokenKind = (tl) => (/^(Token|Emblem)/.test(tl || "Token") ? tl || "Token" : "Marker");
+function renderTokenList() {
+  const toks = printPlan.cards.map((c, i) => [c, i]).filter(([c]) => c.token);
+  $("#print-tokens").hidden = !toks.length;
+  $("#print-token-list").innerHTML = toks.map(([c, i]) => tokenRow(c, i)).join("");
+  updateTokenCount();
+}
+function updateTokenCount() {
+  const toks = printPlan.cards.filter((c) => c.token);
+  const n = toks.reduce((sum, c) => sum + c.qty, 0);
+  $("#print-tokens-count").textContent = `· ${toks.length} verschiedene, ${n} ${n === 1 ? "Karte" : "Karten"}`;
+}
+const tokenSaveTimers = {};
+function setTokenQty(li, qty, delay = 450) {
+  const i = Number(li.dataset.i);
+  const v = Math.max(0, Math.min(99, Math.round(Number(qty))));
+  if (!Number.isFinite(v)) return;
+  const input = li.querySelector("input");
+  if (Number(input.value) !== v) input.value = v;
+  printPlan.cards[i].qty = v;  // show it right away, save a moment later
+  li.classList.toggle("off", v === 0);
+  li.querySelector('[data-step="-1"]').disabled = v <= 0;
+  li.querySelector('[data-step="1"]').disabled = v >= 99;
+  updateTokenCount();
+  clearTimeout(tokenSaveTimers[i]);
+  tokenSaveTimers[i] = setTimeout(() => saveTokenQty(i, v), delay);
+}
+async function saveTokenQty(i, qty) {
+  const slug = pctx().slug, face = printPlan.cards[i].front.face;
+  try {
+    await api(`/api/decks/${enc(slug)}/print/token-qty`, { method: "POST", body: { counts: { [face]: qty } } });
+    const plan = await api(`/api/decks/${enc(slug)}/print/plan?${planQuery()}`);
+    if (pctx()?.slug !== slug) return;
+    printPlan = plan;
+    renderPlanSummary();
+    updateTokenCount();
+    const j = plan.cards.findIndex((c) => c.token && c.front.face === face);
+    const li = $(`#print-token-list li[data-i="${i}"]`);
+    if (j < 0 || !li) { renderPlan(); return; }
+    const c = plan.cards[j];
+    const input = li.querySelector("input");
+    if (document.activeElement !== input) input.value = c.qty;  // never overwrite what is being typed
+    li.classList.toggle("off", c.qty === 0);
+    const reset = li.querySelector("[data-reset]");
+    reset.hidden = !c.qty_custom;
+    reset.textContent = `↺ Standard (${c.default_qty})`;
+    const tile = $(`#print-grid .pcard[data-i="${j}"]`);
+    if (tile) tile.outerHTML = cardTile(c, j, "front");
+    if (Object.keys(prepared.faces || {}).length && !$("#prepared-info .stale")) {
+      $("#prepared-info").insertAdjacentHTML("beforeend", ' <span class="warn stale">· Token-Anzahl geändert – „Vorbereiten“ erneut ausführen.</span>');
+    }
+  } catch (err) { fail(err); }
+}
+$("#print-token-list").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-i]");
+  if (!li) return;
+  if (e.target.closest("[data-pick]")) { openPicker(Number(li.dataset.i), "front"); return; }
+  const step = e.target.closest("[data-step]");
+  if (step) { setTokenQty(li, Number(li.querySelector("input").value) + Number(step.dataset.step)); return; }
+  if (e.target.closest("[data-reset]")) {
+    clearTimeout(tokenSaveTimers[li.dataset.i]);
+    const c = printPlan.cards[Number(li.dataset.i)];
+    li.querySelector("input").value = c.default_qty;
+    saveTokenQty(Number(li.dataset.i), null);
+  }
+});
+$("#print-token-list").addEventListener("input", (e) => {
+  const li = e.target.closest("li[data-i]");
+  if (li && e.target.matches("input") && e.target.value !== "") setTokenQty(li, e.target.value, 700);
+});
+$("#print-token-list").addEventListener("change", (e) => {
+  const li = e.target.closest("li[data-i]");
+  if (li && e.target.matches("input")) setTokenQty(li, e.target.value === "" ? 0 : e.target.value, 0);
+});
+$("#print-form").elements.tokens.addEventListener("change", () => loadPlan());
+$("#print-form").elements.token_copies.addEventListener("change", () => { if ($("#print-form").elements.tokens.checked) loadPlan(); });
 
 function renderPlanSummary() {
   const p = printPlan;
@@ -2350,9 +2448,9 @@ function renderPlanSummary() {
 function cardTile(c, i, side) {
   const f = c[side];
   const img = f?.image;
-  return `<button type="button" class="pcard" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
+  return `<button type="button" class="pcard${c.token && c.qty === 0 ? " off" : ""}" data-i="${i}" data-side="${side}" title="${esc(c.name)} – Bild wählen">
     ${img ? `<img src="${esc(img.thumb)}" alt="${esc(f.face)}" loading="lazy">` : `<div class="noimg">${esc(c.name)}<br>kein Bild</div>`}
-    <div class="tags">${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.token ? '<span class="tag tok">Token</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
+    <div class="tags">${c.token && c.qty === 0 ? '<span class="tag off">nicht drucken</span>' : ""}${c.qty > 1 ? `<span class="tag">${c.qty}×</span>` : ""}${c.commander ? '<span class="tag">Commander</span>' : ""}${c.token ? '<span class="tag tok">Token</span>' : ""}${c.back ? '<span class="tag dfc" title="Doppelseitige Karte – ↻ dreht sie um">DFC</span>' : ""}${originTag(img)}${f && prepared.faces?.[f.face]?.upscaled ? '<span class="tag ai">KI</span>' : ""}</div>
     ${c.back ? `<span class="flip" data-flip="${i}" title="${side === "front" ? "Rückseite zeigen" : "Vorderseite zeigen"}" aria-label="Karte umdrehen">↻</span>` : ""}
     ${f && prepared.faces?.[f.face] ? `<span class="zoom" data-compare="${esc(f.face)}" title="Vorher/Nachher vergleichen">🔍 ${prepared.faces[f.face].dpi ? esc(prepared.faces[f.face].dpi) + " DPI" : ""}</span>` : ""}
     <div class="cap">${esc(f?.face || c.name)}${c.back ? `<span class="muted"> · ${side === "front" ? "Vorderseite" : "Rückseite"}</span>` : ""}</div>
@@ -2442,6 +2540,7 @@ async function pick(option) {
   const tile = $(`#print-grid .pcard[data-i="${i}"]`);
   if (j < 0 || !tile) { renderPlan(); return; }
   tile.outerHTML = cardTile(plan.cards[j], j, side);
+  if (card.token) renderTokenList();
   $(`#print-grid .pcard[data-i="${j}"]`)?.focus({ preventScroll: true });
 }
 $("#picker-grid").addEventListener("click", (e) => {

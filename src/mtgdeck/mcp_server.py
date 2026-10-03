@@ -651,6 +651,8 @@ async def create_proxy_order(
     foil: bool | None = None,
     version: Annotated[int | None, Field(description="Print an old version of the deck")] = None,
     upscale: Annotated[bool | None, Field(description="Opt-in: AI-upscale Scryfall scans to 600 DPI with Real-ESRGAN (only if the user asks; default = setting, off)")] = None,
+    tokens: Annotated[int, Field(description="Print the deck's tokens: default copies per token (0 = no tokens). Emblems/markers default to 1.", ge=0, le=20)] = 0,
+    token_counts: Annotated[dict[str, int] | None, Field(description="Copies per token by name, e.g. {'Human': 10, 'Treasure': 5, 'Zombie': 0} (0 = leave out). Remembered for this deck; tokens not listed keep their quantity.")] = None,
 ) -> dict[str, Any]:
     """Prepare proxy printing: download + process all card images (bleed, double-faced backs,
     cardback) and write the MPC Autofill order to proxies/<slug>/. Afterwards: export_proxy_pdf
@@ -658,7 +660,10 @@ async def create_proxy_order(
     try:
         deck = storage.load_version(slug, version)
         deck["slug"] = storage.slug(slug)
-        return await proxy.prepare(deck, source=source, stock=stock, foil=foil, upscale=upscale)
+        if token_counts:
+            proxy.set_token_qty(deck["slug"], {k: v for k, v in token_counts.items()})
+        return await proxy.prepare(deck, source=source, stock=stock, foil=foil, upscale=upscale,
+                                   tokens=tokens or (2 if token_counts else 0))
     except (FileNotFoundError, ValueError) as exc:
         return {"error": str(exc)}
 

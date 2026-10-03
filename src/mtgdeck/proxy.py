@@ -212,6 +212,42 @@ def choose(slug: str, face: str, option: dict[str, Any] | None) -> dict[str, dic
     return sel
 
 
+TOKEN_QTY_MAX = 99
+
+
+def _token_qty_path(slug: str) -> Path:
+    return order_dir(slug) / "tokens.json"
+
+
+def load_token_qty(slug: str) -> dict[str, int]:
+    """How many copies of each token the user wants for this deck (token face -> copies, 0 = leave out)."""
+    from .jsonstore import read_json
+
+    try:
+        data = read_json(_token_qty_path(slug), {})
+    except Exception:
+        return {}
+    return {str(k): int(v) for k, v in data.items() if isinstance(v, int)} if isinstance(data, dict) else {}
+
+
+def set_token_qty(slug: str, counts: dict[str, int | None]) -> dict[str, int]:
+    """Set copies per token face (``None`` = back to the default); returns all stored quantities."""
+    from .jsonstore import update_json
+
+    with update_json(_token_qty_path(slug), {}) as data:
+        for face, qty in counts.items():
+            if qty is None:
+                data.pop(face, None)
+            else:
+                data[face] = max(0, min(TOKEN_QTY_MAX, int(qty)))
+    return dict(data)
+
+
+def default_token_qty(type_line: str, copies: int) -> int:
+    """Tokens get ``copies``; emblems and markers (The Monarch, The Initiative, City's Blessing …) one."""
+    return copies if (type_line or "Token").startswith("Token") else 1
+
+
 def _slot_names(deck: dict[str, Any], only_missing: bool = False) -> list[tuple[str, bool]]:
     """One entry per printed card; ``only_missing`` skips copies the collection already covers."""
     missing = collection.missing_counts(deck) if only_missing else None
@@ -227,7 +263,8 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
 
     source: 'auto' (own choices > MPC Autofill > Scryfall), 'mpcfill' (requires a server) or 'scryfall'.
     only_missing: leave out cards the collection already has (real or proxy).
-    tokens: copies of every token/emblem/marker the deck creates (0 = none).
+    tokens: default copies per token the deck creates (0 = no tokens); emblems/markers default to one copy,
+    and the user's own quantities per token (``tokens.json``, 0 = leave out) win.
     A collective order (``printorders.as_deck``) brings its own ``print_tokens`` with quantities.
     """
     cfg = settings_mod.load()
@@ -294,7 +331,7 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
             if not t["image"]:  # typed name only: newest Scryfall token of that name as fallback image
                 t["image"] = await _token_image(t["name"])
         cards += await _plan_tokens(deck["slug"], toks, mpc, warnings)
-    missing = sorted(set(not_found) | {c["name"] for c in cards if not c["front"]["image"]})
+    missing = sorted(set(not_found) | {c["name"] for c in cards if not c["front"]["image"] and c["qty"] > 0})
     quantity = sum(c["qty"] for c in cards)
     return {
         "slug": slug,
@@ -311,7 +348,8 @@ async def plan(deck: dict[str, Any], *, source: str = "auto", only_missing: bool
 async def _token_entries(deck: dict[str, Any], copies: int, mpc: MpcFill | None, warnings: list[str]) -> list[dict[str, Any]]:
     """Plan entries for the tokens/emblems/markers of a deck (MPC Autofill token scans, else Scryfall)."""
     names = deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])]
-    return await _plan_tokens(deck["slug"], [{**t, "qty": copies} for t in await deck_tokens(names)], mpc, warnings)
+    toks = [{**t, "qty": default_token_qty(t.get("type_line", ""), copies)} for t in await deck_tokens(names)]
+    return await _plan_tokens(deck["slug"], toks, mpc, warnings, custom_qty=load_token_qty(deck["slug"]))
 
 
 async def _token_image(name: str) -> str | None:
@@ -322,9 +360,11 @@ async def _token_image(name: str) -> str | None:
     return scryfall.compact(res["cards"][0]).get("image") if res["cards"] else None
 
 
-async def _plan_tokens(slug: str, toks: list[dict[str, Any]], mpc: MpcFill | None, warnings: list[str]) -> list[dict[str, Any]]:
+async def _plan_tokens(slug: str, toks: list[dict[str, Any]], mpc: MpcFill | None, warnings: list[str],
+                       custom_qty: dict[str, int] | None = None) -> list[dict[str, Any]]:  # fmt: skip
     """Plan entries for tokens ``[{name, type_line, image, from, qty}]``: equal names get a number suffix
-    (two different Treasure tokens), images from MPC Autofill (card type TOKEN), else Scryfall."""
+    (two different Treasure tokens), images from MPC Autofill (card type TOKEN), else Scryfall.
+    ``custom_qty`` (face -> copies) overrides ``qty``; entries keep ``default_qty`` and ``qty_custom``."""
     faces: dict[str, dict[str, Any]] = {}
     for t in toks:
         face = t["name"]
@@ -347,7 +387,10 @@ async def _plan_tokens(slug: str, toks: list[dict[str, Any]], mpc: MpcFill | Non
     for face, opt in load_selection(slug).items():
         if face in faces:
             chosen[face] = {**opt, "custom": True}
-    return [{"name": face, "qty": int(t.get("qty") or 1), "commander": False, "token": True, "type_line": t.get("type_line") or "Token",
+    custom_qty = custom_qty or {}
+    base = {face: int(t["qty"]) if t.get("qty") is not None else 1 for face, t in faces.items()}
+    return [{"name": face, "qty": custom_qty.get(face, base[face]), "default_qty": base[face], "qty_custom": face in custom_qty,
+             "commander": False, "token": True, "type_line": t.get("type_line") or "Token",
              "from": t.get("from") or [], "front": {"face": face, "image": chosen.get(face),
                                                     "mpc_hits": len(hits.get(t["name"], []))}, "back": None}
             for face, t in faces.items()]  # fmt: skip
@@ -590,7 +633,8 @@ async def prepare(
         raise ValueError("Plastik-Karten (P10) gibt es nicht in Foil.")
 
     p = await plan(deck, source=source, only_missing=only_missing, tokens=tokens)
-    jobs = {img["id"]: img for c in p["cards"] for side in ("front", "back") if c[side] and (img := c[side]["image"])}
+    printable = [c for c in p["cards"] if c["qty"] > 0]  # tokens set to 0 copies stay out
+    jobs = {img["id"]: img for c in printable for side in ("front", "back") if c[side] and (img := c[side]["image"])}
     total, done = len(jobs), 0
     local: dict[str, Path] = {}
     errors: list[str] = []
@@ -654,7 +698,7 @@ async def prepare(
     manifest: list[dict[str, str | None]] = []
     slot = 0
     missing = list(p["missing"])
-    for c in p["cards"]:
+    for c in printable:
         front_img = c["front"]["image"]
         front = publish(c["front"]["face"], front_img) if front_img else None
         back_img = c["back"]["image"] if c["back"] else None

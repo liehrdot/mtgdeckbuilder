@@ -2568,6 +2568,20 @@ async def api_print_choose(slug: str, req: ChooseRequest) -> dict[str, Any]:
     return proxy.choose(storage.slug(slug), req.face, req.option)
 
 
+class TokenQtyRequest(BaseModel):
+    counts: dict[str, int | None] = Field(description="token face -> copies (0 = leave out, null = default)")
+
+
+@app.post("/api/decks/{slug}/print/token-qty")
+async def api_print_token_qty(slug: str, req: TokenQtyRequest) -> dict[str, int]:
+    """Copies per token for this deck's print (collective orders keep their quantities in the order items)."""
+    if slug.startswith(printorders.SLUG_PREFIX):
+        raise HTTPException(400, "In einer Sammelbestellung änderst du die Token-Anzahl in der Positionsliste.")
+    if any(v is not None and not 0 <= v <= proxy.TOKEN_QTY_MAX for v in req.counts.values()):
+        raise HTTPException(400, f"Anzahl pro Token: 0 bis {proxy.TOKEN_QTY_MAX}.")
+    return proxy.set_token_qty(storage.slug(slug), req.counts)
+
+
 @app.post("/api/decks/{slug}/print/prepare")
 async def api_print_prepare(slug: str, req: PrintRequest) -> dict[str, str]:
     deck = _print_deck(slug, req.version)

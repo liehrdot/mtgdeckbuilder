@@ -751,9 +751,9 @@
             </label>
             <label class="field">Kartenstärke <select name="stock"></select></label>
             <label class="check"><input type="checkbox" name="foil"> Foil</label>
-            <span class="check token-opt" title="Tokens, Embleme und Marker (z. B. Monarch) des Decks mitdrucken">
+            <span class="check token-opt" title="Tokens, Embleme und Marker (z. B. Monarch) des Decks mitdrucken – die Anzahl stellst du pro Token ein">
               <label class="check"><input type="checkbox" name="tokens"> Tokens mitdrucken</label>
-              <label class="check">je <input type="number" name="token_copies" min="1" max="20" value="2" aria-label="Exemplare pro Token"></label>
+              <label class="check" title="Für Tokens ohne eigene Anzahl; Embleme und Marker bekommen 1">Standard je <input type="number" name="token_copies" min="1" max="20" value="2" aria-label="Standard-Exemplare pro Token"></label>
             </span>
             <label class="check needs-collection" hidden title="Karten, die du (echt oder als Proxy) schon hast, werden nicht gedruckt">
               <input type="checkbox" name="only_missing"> Nur fehlende Karten</label>
@@ -762,6 +762,13 @@
             <button type="submit" class="btn">Vorschau aktualisieren</button>
           </form>
           <p id="print-summary" class="muted small"></p>
+          <div id="print-tokens" class="print-tokens" hidden>
+            <div class="print-tokens-head">
+              <h3>Tokens, Embleme &amp; Marker <span id="print-tokens-count" class="muted small"></span></h3>
+              <p class="muted small">Anzahl pro Token – 0 = nicht drucken. Ein Klick aufs Bild wählt ein anderes Artwork.</p>
+            </div>
+            <ul id="print-token-list" class="token-qty-list"></ul>
+          </div>
           <ol class="print-steps">
             <li>
               <div>

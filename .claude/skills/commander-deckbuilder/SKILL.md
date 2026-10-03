@@ -167,6 +167,10 @@ When the user wants to print/proxy a deck (always offer it for proxy decks after
    scans with generated bleed), double-faced backs and a cardback into `proxies/<slug>/`.
    AI upscaling of Scryfall scans (`upscale: true`, Real-ESRGAN → 600 DPI) is opt-in: only pass it
    when the user asks for it or has enabled it in the settings.
+   Tokens are opt-in too: `tokens: N` adds the deck's tokens with N copies each (emblems/markers 1);
+   `token_counts` sets copies per token by name (`{"Human": 10, "Treasure": 5, "Zombie": 0}`, 0 = leave
+   out) and is remembered for the deck. Suggest sensible counts from the deck (token makers, how many
+   tokens they create at once) when the user asks for tokens without numbers.
 2. Home printing: `export_proxy_pdf` (A4/Letter, 3 x 3 per page with cut marks).
 3. MakePlayingCards: `launch_proxy_tool` starts the MPC Autofill desktop tool (browser login and
    upload happen on the user's machine) – only when asked. If the tool is missing, explain:

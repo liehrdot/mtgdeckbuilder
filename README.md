@@ -340,6 +340,11 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
   - **Drucken:** oben Bildquelle, Kartenstärke, „Tokens mitdrucken“ und „Nur fehlende Karten“, darunter die
     Schritte 1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung
     übernehmen. „Bilder prüfen und tauschen“ ist darunter eingeklappt (öffnet sich von selbst, wenn Bilder fehlen).
+    Mit „Tokens mitdrucken“ erscheint eine Liste aller Tokens, Embleme und Marker des Decks – jeweils mit
+    Artwork (Klick wählt ein anderes) und eigener Anzahl (−/+ oder eintippen, 0 = nicht drucken), z. B.
+    10 Humans, 5 Treasures, 1 Monarch. „Standard je N“ gilt für Tokens ohne eigene Anzahl; Embleme und Marker
+    bekommen standardmäßig 1. Die Anzahlen merkt sich das Deck (`proxies/<deck>/tokens.json`, Teil der
+    Sicherung); „↺ Standard“ setzt eine zurück. In Sammelbestellungen stehen die Anzahlen in den Positionen.
   - „Liste kopieren“ steht oben rechts; im ⋯-Menü: „Als neues Deck kopieren“, „Neu prüfen“, Export für
     Cockatrice (.cod) und Tabletop Simulator (.json), Decklist als Textdatei, „Löschen“.
 - **Meine Sammlung** (eigene Seite, siehe unten), **Glossar** (Schlüsselwörter, Aktionen und
@@ -491,7 +496,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `get_blacklist` / `update_blacklist` | Blacklist lesen / Karten und Begriffe (True Duals, Günstige Tutoren, teurer als 20 € …) hinzufügen oder entfernen |
 | `list_deck_versions` / `compare_deck_versions` | Versionsverlauf, Diff zwischen Versionen |
 | `restore_deck_version` / `copy_deck` | alte Version wiederherstellen, Deck (oder alte Version) kopieren |
-| `create_proxy_order` / `export_proxy_pdf` | Proxy-Druckdateien (MPC-Autofill-XML + Bilder), PDF zum Selbstdrucken |
+| `create_proxy_order` / `export_proxy_pdf` | Proxy-Druckdateien (MPC-Autofill-XML + Bilder, optional mit Tokens: `tokens` = Standard-Anzahl, `token_counts` = Anzahl pro Token wie `{"Human": 10}`), PDF zum Selbstdrucken |
 | `launch_proxy_tool` / `proxy_settings` | MPC-Autofill-Programm starten, Proxy-Einstellungen |
 | `card_db_status` / `update_card_database` | lokale Kartendatenbank |
 

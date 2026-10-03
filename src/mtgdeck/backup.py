@@ -4,7 +4,8 @@ A backup holds everything that cannot be re-downloaded:
 
 - ``decks/`` – decks with versions, games, questions, opponent decks, meta suggestions and the trash;
 - ``collection.json``, ``blacklist.txt``, ``tablerules.json``, ``mtgdeck.settings.json``;
-- ``proxies/.orders/`` (collective print orders) and ``proxies/<deck>/selection.json`` (chosen card images);
+- ``proxies/.orders/`` (collective print orders), ``proxies/<deck>/selection.json`` (chosen card images) and
+  ``proxies/<deck>/tokens.json`` (copies per token);
 - ``deskmats/<id>/`` metadata and source image (no candidates or rendered print files – they are re-made).
 
 Backups live in ``backups/`` (``MTG_BACKUP_DIR``, gitignored): ``auto-*`` once a day when the GUI starts
@@ -28,6 +29,7 @@ from . import storage
 
 BACKUP_DIR = Path(os.environ.get("MTG_BACKUP_DIR", storage.PROJECT_ROOT / "backups"))
 KEEP_AUTO = 10
+PROXY_FILES = ("selection.json", "tokens.json")  # per deck: chosen images, token quantities
 FORMAT = 1
 KINDS = {"auto": "automatisch", "manuell": "von dir angelegt", "vor-wiederherstellung": "vor einer Wiederherstellung",
          "hochgeladen": "hochgeladen"}  # fmt: skip
@@ -58,8 +60,9 @@ def _members() -> list[tuple[str, Path]]:
     orders = proxy.PROXIES_DIR / ".orders"
     for p in sorted(orders.glob("*.json")) if orders.exists() else []:
         out.append((f"proxies/.orders/{p.name}", p))
-    for p in sorted(proxy.PROXIES_DIR.glob("*/selection.json")) if proxy.PROXIES_DIR.exists() else []:
-        out.append((f"proxies/{p.parent.name}/selection.json", p))
+    for name in PROXY_FILES:
+        for p in sorted(proxy.PROXIES_DIR.glob(f"*/{name}")) if proxy.PROXIES_DIR.exists() else []:
+            out.append((f"proxies/{p.parent.name}/{name}", p))
     for d in sorted(deskmat.DESKMAT_DIR.iterdir()) if deskmat.DESKMAT_DIR.exists() else []:
         for p in [d / "meta.json", *d.glob("source.*")]:
             if p.is_file():
@@ -213,10 +216,11 @@ def restore(name: str) -> dict[str, Any]:
             shutil.rmtree(orders, ignore_errors=True)
             if (root / "proxies" / ".orders").exists():
                 shutil.copytree(root / "proxies" / ".orders", orders)
-        for sel in (root / "proxies").glob("*/selection.json") if (root / "proxies").exists() else []:
-            dest = proxy.PROXIES_DIR / sel.parent.name / "selection.json"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sel, dest)
+        for name in PROXY_FILES:
+            for sel in (root / "proxies").glob(f"*/{name}") if (root / "proxies").exists() else []:
+                dest = proxy.PROXIES_DIR / sel.parent.name / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(sel, dest)
         for d in (root / "deskmats").iterdir() if (root / "deskmats").exists() else []:
             dest = deskmat.DESKMAT_DIR / d.name
             dest.mkdir(parents=True, exist_ok=True)
