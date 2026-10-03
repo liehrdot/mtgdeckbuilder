@@ -99,8 +99,9 @@ def _cache_get(key: str, ttl: int) -> Any | None:
 
 def _cache_put(key: str, value: Any) -> None:
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _cache_path(key).write_text(json.dumps(value), "utf-8")
+        from .jsonstore import atomic_write_text
+
+        atomic_write_text(_cache_path(key), json.dumps(value))
     except OSError:
         pass  # caching is best effort
 

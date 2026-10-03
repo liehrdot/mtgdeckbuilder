@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .cards import resolve
+from .jsonstore import atomic_write_text, locked
 from .storage import PROJECT_ROOT
 
 BLACKLIST_FILE = Path(os.environ.get("MTG_BLACKLIST_FILE", PROJECT_ROOT / "blacklist.txt"))
@@ -233,9 +234,8 @@ def catalog() -> list[dict[str, Any]]:
 
 
 def _write(names: list[str], rule_list: list[str]) -> None:
-    BLACKLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
     body = "\n".join([*sorted(set(names), key=str.lower), *dict.fromkeys(rule_list)])
-    BLACKLIST_FILE.write_text(_HEADER + body + ("\n" if body else ""), "utf-8")
+    atomic_write_text(BLACKLIST_FILE, _HEADER + body + ("\n" if body else ""))
 
 
 async def parse_entries(entries: list[str]) -> tuple[list[str], list[str], list[str]]:
@@ -282,8 +282,13 @@ def describe_rules(lines: list[str]) -> list[dict[str, Any]]:
 
 async def update(add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
     """Add/remove cards and rules (see ``parse_entries``)."""
+    added_rules, added, not_found = await parse_entries(add or [])  # slow lookups before the lock
+    with locked(BLACKLIST_FILE):
+        return _update_locked(added_rules, added, not_found, remove)
+
+
+def _update_locked(added_rules: list[str], added: list[str], not_found: list[str], remove: list[str] | None) -> dict[str, Any]:
     current = {n.lower(): n for n in load()}
-    added_rules, added, not_found = await parse_entries(add or [])
     current_rules = merge_rules(rule_lines(), added_rules)
     for name in added:
         current[name.lower()] = name

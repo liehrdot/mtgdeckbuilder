@@ -206,9 +206,9 @@ def choose(slug: str, face: str, option: dict[str, Any] | None) -> dict[str, dic
         sel[face] = {k: option.get(k) for k in ("origin", "id", "thumb", "full", "label", "dpi", "name")}
     else:
         sel.pop(face, None)
-    path = _selection_path(slug)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sel, indent=2, ensure_ascii=False), "utf-8")
+    from .jsonstore import write_json
+
+    write_json(_selection_path(slug), sel)
     return sel
 
 

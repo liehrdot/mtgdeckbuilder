@@ -4,13 +4,13 @@ your games")."""
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from . import storage
+from .jsonstore import locked, read_json, write_json
 
 GAMES_DIRNAME = ".games"
 RESULTS = {"win": "Sieg", "loss": "Niederlage", "draw": "Unentschieden"}
@@ -37,13 +37,7 @@ def _file(deck_slug: str) -> Path:
 
 def games(deck_slug: str) -> list[dict[str, Any]]:
     """Games of a deck, oldest first."""
-    path = _file(deck_slug)
-    if not path.exists():
-        return []
-    try:
-        items = json.loads(path.read_text(encoding="utf-8"))
-    except ValueError:
-        return []
+    items = read_json(_file(deck_slug), [])
     return items if isinstance(items, list) else []
 
 
@@ -52,8 +46,7 @@ def _write(deck_slug: str, items: list[dict[str, Any]]) -> None:
     if not items:
         path.unlink(missing_ok=True)
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json(path, items)
 
 
 def add(deck_slug: str, *, result: str, opponents: list[str] | None = None, turn: int | None = None,
@@ -71,11 +64,17 @@ def add(deck_slug: str, *, result: str, opponents: list[str] | None = None, turn
     }  # fmt: skip
     if opponent_ids and any(opponent_ids):
         entry["opponent_ids"] = list(opponent_ids)[: len(entry["opponents"])]
-    _write(deck_slug, games(deck_slug) + [entry])
+    with locked(_file(deck_slug)):
+        _write(deck_slug, games(deck_slug) + [entry])
     return entry
 
 
 def delete(deck_slug: str, game_id: str) -> int:
+    with locked(_file(deck_slug)):
+        return _delete(deck_slug, game_id)
+
+
+def _delete(deck_slug: str, game_id: str) -> int:
     items = games(deck_slug)
     keep = [g for g in items if g.get("id") != game_id]
     _write(deck_slug, keep)

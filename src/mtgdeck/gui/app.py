@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import opponents as opponents_mod
-from .. import blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
+from ..jsonstore import ConflictError, StoreError, write_json
+from .. import backup, blacklist, brackets, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -38,6 +39,37 @@ PROJECT_ROOT = storage.PROJECT_ROOT
 
 app = FastAPI(title="MTG Commander Deckbuilder")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _local_only() -> bool:
+    """Only when bound to this computer: a GUI opened to the network (MTG_GUI_HOST=0.0.0.0) accepts any host."""
+    return os.environ.get("MTG_GUI_HOST", "127.0.0.1") in ("127.0.0.1", "localhost", "::1")
+
+
+@app.middleware("http")
+async def _guard(request: Request, call_next: Any) -> Any:
+    """Protection against web pages that talk to the local GUI (DNS rebinding, cross-site POSTs): the Host must
+    be this computer, and changing requests must not come from another site's page."""
+    if _local_only():
+        from urllib.parse import urlsplit
+
+        host = urlsplit("//" + request.headers.get("host", "")).hostname or ""
+        if host not in _LOCAL_HOSTS:
+            return JSONResponse({"detail": "Unbekannter Host"}, status_code=400)
+        origin = request.headers.get("origin")
+        if origin and request.method not in _SAFE_METHODS and (urlsplit(origin).hostname or "") not in _LOCAL_HOSTS:
+            return JSONResponse({"detail": "Anfrage von einer fremden Seite abgelehnt"}, status_code=403)
+    return await call_next(request)
+
+
+@app.exception_handler(StoreError)
+async def _store_error(_request: Request, exc: StoreError) -> JSONResponse:
+    """Damaged/locked data files and edit conflicts: a clear message instead of a bare 500."""
+    return JSONResponse({"detail": str(exc)}, status_code=409 if isinstance(exc, ConflictError) else 503)
 
 
 # --- jobs: one Claude Code run each -------------------------------------------------------------
@@ -143,7 +175,8 @@ async def _run_claude(
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_ROOT),
         setting_sources=["project"],  # loads .claude/skills and CLAUDE.md
-        mcp_servers={"mtg": {"type": "stdio", "command": sys.executable, "args": ["-m", "mtgdeck.mcp_server"]}},
+        mcp_servers={"mtg": {"type": "stdio", "command": sys.executable, "args": ["-m", "mtgdeck.mcp_server"],
+                             "env": {**os.environ, "MTG_JOB_ID": job.id}}},  # decks saved by this job carry last_job
         strict_mcp_config=True,
         allowed_tools=base_tools + ([f"mcp__mtg__{t}" for t in READ_ONLY_TOOLS] if read_only else ["mcp__mtg"]),
         disallowed_tools=(["Write", "Edit", "Bash"] + [f"mcp__mtg__{t}" for t in WRITE_TOOLS]) if read_only else [],
@@ -196,7 +229,10 @@ async def _run_claude(
         job.done = True
         return
 
-    deck = next((d for d in storage.list_decks() if (d.get("updated") or "") >= _iso(job.started)), None)
+    decks = storage.list_decks()
+    deck = next((d for d in decks if d.get("last_job") == job.id), None)  # saved by this job's MCP server
+    if deck is None and not any(d.get("last_job") for d in decks if (d.get("updated") or "") >= _iso(job.started)):
+        deck = next((d for d in decks if (d.get("updated") or "") >= _iso(job.started)), None)  # older MCP server
     for key, value in (extras or {}).items() if deck else []:  # e.g. which opponents a meta build targeted
         try:
             storage.set_extra(deck["slug"], key, value)
@@ -213,7 +249,18 @@ async def _run_claude(
 
 async def _set_table_rule(slug: str, rule_id: str | None, note: str = "") -> dict[str, Any]:
     """Give a saved deck a table rule (or none), re-validate and save it as a new version."""
+    for attempt in range(3):
+        try:
+            return await _set_table_rule_once(slug, rule_id, note)
+        except ConflictError:
+            if attempt == 2:
+                raise
+    raise AssertionError("unreachable")
+
+
+async def _set_table_rule_once(slug: str, rule_id: str | None, note: str) -> dict[str, Any]:
     deck = storage.load(slug)
+    start_version = deck.get("version")
     rs = tablerules.get(rule_id) if rule_id else None
     if rule_id and rs is None:
         raise FileNotFoundError(f"Unbekannte Tischregel: {rule_id}")
@@ -221,7 +268,7 @@ async def _set_table_rule(slug: str, rule_id: str | None, note: str = "") -> dic
     deck["table_rule"] = rs["id"] if rs else None
     await deckedit.revalidate(deck)
     deck["change_note"] = note or (f"Tischregel: {rs['name']}" if rs else "Tischregel entfernt" + (f" ({old['name']})" if old else ""))
-    storage.save(deck)
+    storage.save(deck, expect_version=start_version)
     return deck
 
 
@@ -814,8 +861,7 @@ async def api_build_meta_suggest(req: MetaSuggestRequest) -> dict[str, str]:
             result = {"created": storage._now(), "model": META_MODEL, "effort": META_EFFORT, "research": req.research,
                       "analysis": (structured or {}).get("analysis", ""), "sources": (structured or {}).get("sources") or [],
                       "suggestions": items, "request": req.model_dump(exclude={"model"})}  # fmt: skip
-            _meta_file().parent.mkdir(parents=True, exist_ok=True)
-            _meta_file().write_text(json.dumps(result, ensure_ascii=False, indent=2), "utf-8")
+            write_json(_meta_file(), result)
             job.emit(type="meta_suggestions", result=result)
         elif ok:
             job.emit(type="error", text="Keine verwertbaren Vorschläge erhalten.")
@@ -1851,15 +1897,14 @@ async def api_tablerule_update(rule_id: str, req: TableRuleIn) -> dict[str, Any]
 @app.delete("/api/tablerules/{rule_id}")
 async def api_tablerule_delete(rule_id: str) -> dict[str, Any]:
     rs = tablerules.get(rule_id)
-    try:
-        tablerules.delete(rule_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    cleared = []
+    if rs is None:
+        raise HTTPException(404, f"Unbekannte Tischregel: {rule_id}")
+    cleared = []  # decks first: if this stops halfway, the rule still exists and no deck points to nothing
     for d in storage.list_decks():
         if d.get("table_rule") == rule_id:
-            await _set_table_rule(d["slug"], None, f"Tischregel „{rs['name'] if rs else rule_id}“ gelöscht")
+            await _set_table_rule(d["slug"], None, f"Tischregel „{rs['name']}“ gelöscht")
             cleared.append(d["slug"])
+    tablerules.delete(rule_id)
     return {"deleted": rule_id, "decks": cleared}
 
 
@@ -1965,7 +2010,7 @@ async def api_validate(slug: str) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     result = await deckedit.revalidate(deck)
-    storage.save(deck)
+    storage.save(deck, expect_version=deck.get("version"))  # never overwrite a newer save with this copy
     return result
 
 
@@ -2161,9 +2206,69 @@ async def api_prints(name: str, page: int = 1) -> dict[str, Any]:
 
 
 @app.delete("/api/decks/{slug}")
-async def api_delete(slug: str) -> dict[str, bool]:
-    storage.delete(slug)
-    return {"ok": True}
+async def api_delete(slug: str) -> dict[str, Any]:
+    """Moves the deck (with versions, questions and games) to the trash."""
+    return {"ok": True, "trash_id": _not_found(storage.delete, slug)}
+
+
+# --- backups ------------------------------------------------------------------------------------
+
+
+@app.get("/api/backups")
+async def api_backups() -> dict[str, Any]:
+    return {"backups": backup.backups(), "dir": str(backup.BACKUP_DIR), "keep_auto": backup.KEEP_AUTO}
+
+
+@app.post("/api/backups")
+async def api_backup_create() -> dict[str, Any]:
+    return backup.create("manuell")
+
+
+@app.get("/api/backups/{name}")
+async def api_backup_download(name: str) -> FileResponse:
+    path = _not_found(backup.path_of, name)
+    return FileResponse(path, media_type="application/zip", filename=f"mtgdeck-{name}")
+
+
+@app.post("/api/backups/upload")
+async def api_backup_upload(request: Request) -> dict[str, Any]:
+    data = await request.body()
+    if len(data) > 2_000_000_000:
+        raise HTTPException(413, "Datei zu groß")
+    try:
+        return backup.upload(data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/backups/{name}/restore")
+async def api_backup_restore(name: str) -> dict[str, Any]:
+    if any(not j.done for j in JOBS.values()):
+        raise HTTPException(409, "Es läuft gerade ein Auftrag – warte, bis er fertig ist, und stell dann wieder her.")
+    try:
+        return _not_found(backup.restore, name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/trash")
+async def api_trash() -> list[dict[str, Any]]:
+    return storage.trash()
+
+
+@app.post("/api/trash/{trash_id}/restore")
+async def api_trash_restore(trash_id: str) -> dict[str, Any]:
+    return _not_found(storage.restore_deleted, trash_id)
+
+
+@app.delete("/api/trash/{trash_id}")
+async def api_trash_purge(trash_id: str) -> dict[str, int]:
+    return {"deleted": _not_found(storage.purge_deleted, trash_id)}
+
+
+@app.delete("/api/trash")
+async def api_trash_purge_all() -> dict[str, int]:
+    return {"deleted": storage.purge_deleted()}
 
 
 def _not_found(fn, *args):
@@ -2514,6 +2619,12 @@ def main() -> None:
     host = os.environ.get("MTG_GUI_HOST", "127.0.0.1")
     port = int(os.environ.get("MTG_GUI_PORT", 8765))
     print(f"Commander Deckbuilder GUI: http://{host}:{port}")
+    try:
+        made = backup.auto_backup()
+        if made:
+            print(f"Automatische Sicherung: {backup.BACKUP_DIR / made['name']}")
+    except Exception as exc:  # a failed backup must not stop the GUI
+        print(f"Automatische Sicherung fehlgeschlagen: {exc}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

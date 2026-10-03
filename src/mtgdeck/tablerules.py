@@ -15,7 +15,6 @@ Power-profile house rules of a deck stay as they are; both are checked, so the s
 
 from __future__ import annotations
 
-import json
 import os
 import time
 import uuid
@@ -23,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import blacklist
+from .jsonstore import locked, read_json, write_json
 from .storage import PROJECT_ROOT
 
 TABLERULES_FILE = Path(os.environ.get("MTG_TABLERULES_FILE", PROJECT_ROOT / "tablerules.json"))
@@ -35,16 +35,12 @@ def _now() -> str:
 
 
 def _read() -> list[dict[str, Any]]:
-    try:
-        data = json.loads(TABLERULES_FILE.read_text("utf-8"))
-    except (FileNotFoundError, ValueError):
-        return []
+    data = read_json(TABLERULES_FILE, {})
     return [s for s in data.get("sets", []) if isinstance(s, dict) and s.get("id")] if isinstance(data, dict) else []
 
 
 def _write(sets: list[dict[str, Any]]) -> None:
-    TABLERULES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TABLERULES_FILE.write_text(json.dumps({"sets": sets}, ensure_ascii=False, indent=2), "utf-8")
+    write_json(TABLERULES_FILE, {"sets": sets})
 
 
 def get(rule_id: str | None) -> dict[str, Any] | None:
@@ -120,13 +116,24 @@ async def create(name: str, **changes: Any) -> dict[str, Any]:
     rs = {"id": uuid.uuid4().hex[:8], "name": name, "description": "", "rules": [], "cards": [],
           "max_bracket": None, "max_game_changers": None, "max_tutors": None, "deck_budget": None,
           "currency": "eur", "no_proxies": False, "created": _now()}  # fmt: skip
-    _write([*_read(), rs])
+    with locked(TABLERULES_FILE):
+        _write([*_read(), rs])
     return await update(rs["id"], **changes) if changes else {**describe(get(rs["id"]) or rs), "not_found": []}
 
 
 async def update(rule_id: str, *, add: list[str] | None = None, remove: list[str] | None = None, **changes: Any) -> dict[str, Any]:
     """Change a rule set: ``name``, ``description``, limits (None clears), ``add`` (cards or terms like
     "True Duals", "teurer als 20 €", "@freie Absprache"), ``remove`` (card names or rule lines)."""
+    if get(rule_id) is None:
+        raise FileNotFoundError(f"Unbekannte Tischregel: {rule_id}")
+    new_rules, new_cards, not_found = await blacklist.parse_entries(add or [])  # slow lookups before the lock
+    with locked(TABLERULES_FILE):
+        rs = _update_locked(rule_id, new_rules, new_cards, remove, changes)
+    return {**describe(rs), "not_found": not_found, "added_rules": blacklist.describe_rules(new_rules), "added": new_cards}
+
+
+def _update_locked(rule_id: str, new_rules: list[str], new_cards: list[str], remove: list[str] | None,
+                   changes: dict[str, Any]) -> dict[str, Any]:  # fmt: skip
     sets = _read()
     rs = next((s for s in sets if s["id"] == rule_id), None)
     if rs is None:
@@ -136,7 +143,6 @@ async def update(rule_id: str, *, add: list[str] | None = None, remove: list[str
     if "description" in changes:
         rs["description"] = str(changes["description"] or "").strip()[:500]
     rs.update(_clean_limits(changes))
-    new_rules, new_cards, not_found = await blacklist.parse_entries(add or [])
     rs["rules"] = blacklist.merge_rules(rs.get("rules", []), new_rules)
     cards = {c.lower(): c for c in rs.get("cards", [])}
     for c in new_cards:
@@ -150,14 +156,15 @@ async def update(rule_id: str, *, add: list[str] | None = None, remove: list[str
     rs["cards"] = sorted(cards.values(), key=str.lower)
     rs["updated"] = _now()
     _write(sets)
-    return {**describe(rs), "not_found": not_found, "added_rules": blacklist.describe_rules(new_rules), "added": new_cards}
+    return rs
 
 
 def delete(rule_id: str) -> None:
-    sets = _read()
-    if not any(s["id"] == rule_id for s in sets):
-        raise FileNotFoundError(f"Unbekannte Tischregel: {rule_id}")
-    _write([s for s in sets if s["id"] != rule_id])
+    with locked(TABLERULES_FILE):
+        sets = _read()
+        if not any(s["id"] == rule_id for s in sets):
+            raise FileNotFoundError(f"Unbekannte Tischregel: {rule_id}")
+        _write([s for s in sets if s["id"] != rule_id])
 
 
 def resolve_id(value: str | None) -> dict[str, Any] | None:
@@ -293,9 +300,11 @@ async def revalidate_decks(rule_id: str) -> list[str]:
             continue
         try:
             await deckedit.revalidate(deck)
+            storage.save(deck, expect_version=deck.get("version"))
+        except storage.ConflictError:  # saved meanwhile (e.g. by a Claude job) – that save validated already
+            continue
         except Exception:  # network trouble: keep the old validation
             continue
-        storage.save(deck)
         done.append(deck["slug"])
     return done
 

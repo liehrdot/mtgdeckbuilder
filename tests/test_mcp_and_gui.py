@@ -58,8 +58,11 @@ async def test_gui_routes():
     assert "18 Forest" in d["export_text"]
     assert client.post("/api/decks/gui-deck/validate").json()["legal"] is True
     assert client.get("/").status_code == 200
-    assert client.delete("/api/decks/gui-deck").json() == {"ok": True}
+    trash_id = client.delete("/api/decks/gui-deck").json()["trash_id"]
     assert client.get("/api/decks/gui-deck").status_code == 404
+    assert client.get("/api/trash").json()[0]["name"] == "Gui Deck"
+    assert client.post(f"/api/trash/{trash_id}/restore").json()["slug"] == "gui-deck"
+    assert client.get("/api/decks/gui-deck").status_code == 200
 
 
 def test_build_prompt():

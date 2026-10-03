@@ -1324,9 +1324,37 @@
       <header class="page-head">
         <div>
           <h1>Einstellungen</h1>
-          <p class="lead">Kartendatenbank und Proxy-Druck.</p>
+          <p class="lead">Datensicherung, Papierkorb, Kartendatenbank und Proxy-Druck.</p>
         </div>
       </header>
+
+      <section class="panel" id="backup-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Daten &amp; Sicherung</h2>
+            <p class="muted small">Eine Sicherung enthält alles, was du angelegt hast: Decks mit Versionen, Partien und Fragen,
+              Sammlung, Gegnerdecks, Tischregeln, Blacklist, Sammelbestellungen, Bildauswahl, Deskmat-Motive und Einstellungen.</p>
+          </div>
+        </div>
+        <p id="backup-auto" class="small"></p>
+        <div class="btn-row">
+          <button type="button" class="btn" id="backup-create"><svg class="icon"><use href="#i-check"/></svg>Jetzt sichern</button>
+          <label class="btn file-btn">Sicherung einspielen …<input type="file" id="backup-file" accept=".zip,application/zip" hidden></label>
+        </div>
+        <ul id="backup-list" class="backup-list"></ul>
+      </section>
+
+      <section class="panel" id="trash-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Papierkorb</h2>
+            <p class="muted small">Gelöschte Decks samt Versionen, Fragen und Partien. Bis du sie endgültig löschst, holst du sie hier zurück.</p>
+          </div>
+          <button type="button" class="btn ghost small" id="trash-empty" hidden>Papierkorb leeren …</button>
+        </div>
+        <ul id="trash-list" class="backup-list"></ul>
+        <p id="trash-none" class="empty-inline">Der Papierkorb ist leer.</p>
+      </section>
 
       <section class="panel">
         <h2>Kartendatenbank</h2>

@@ -119,9 +119,9 @@ def load(pid: str) -> dict[str, Any]:
 
 def _save(meta: dict[str, Any]) -> dict[str, Any]:
     meta["updated"] = _now()
-    d = _dir(meta["id"])
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+    from .jsonstore import write_json
+
+    write_json(_dir(meta["id"]) / "meta.json", meta)
     return meta
 
 

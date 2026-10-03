@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import proxy
+from .jsonstore import locked, read_json, write_json
 
 SLUG_PREFIX = "sammel-"
 _ID_RE = re.compile(r"^[a-f0-9]{8}$")
@@ -48,17 +49,15 @@ def _path(order_id: str) -> Path:
 
 
 def load(order_id: str) -> dict[str, Any]:
-    path = _path(order_id)
-    if not path.exists():
+    order = read_json(_path(order_id))
+    if order is None:
         raise FileNotFoundError(f"Unbekannte Sammelbestellung: {order_id}")
-    return json.loads(path.read_text("utf-8"))
+    return order
 
 
 def _save(order: dict[str, Any]) -> dict[str, Any]:
     order["updated"] = _now()
-    path = _path(order["id"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(order, ensure_ascii=False, indent=2), "utf-8")
+    write_json(_path(order["id"]), order)
     return summary(order)
 
 
@@ -69,9 +68,10 @@ def create(name: str = "") -> dict[str, Any]:
 
 
 def rename(order_id: str, name: str) -> dict[str, Any]:
-    order = load(order_id)
-    order["name"] = name.strip()[:120] or order["name"]
-    return _save(order)
+    with locked(_path(order_id)):
+        order = load(order_id)
+        order["name"] = name.strip()[:120] or order["name"]
+        return _save(order)
 
 
 def delete(order_id: str) -> None:
@@ -117,14 +117,21 @@ async def add(order_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     Raises ``ValueError`` for unknown card names."""
     from .cards import resolve
 
-    order = load(order_id)
+    load(order_id)  # unknown order -> FileNotFoundError before the lookups
     cards = [i for i in items if i.get("kind", "card") == "card" and str(i.get("name", "")).strip()]
     renames: dict[str, str] = {}
+    known: set[str] = set()
     if cards:
         found, renames, missing = await resolve([c["name"] for c in cards])
         if missing:
             raise ValueError(f"Nicht gefunden: {', '.join(missing[:10])}")
         known = set(found)
+    with locked(_path(order_id)):  # re-read after the lookups, so nothing added meanwhile is lost
+        return _add_locked(order_id, items, renames, known)
+
+
+def _add_locked(order_id: str, items: list[dict[str, Any]], renames: dict[str, str], known: set[str]) -> dict[str, Any]:
+    order = load(order_id)
     added = 0
     for raw in items:
         kind = raw.get("kind", "card")
@@ -154,6 +161,11 @@ async def add(order_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def update_item(order_id: str, item_id: str, qty: int) -> dict[str, Any]:
+    with locked(_path(order_id)):
+        return _update_item(order_id, item_id, qty)
+
+
+def _update_item(order_id: str, item_id: str, qty: int) -> dict[str, Any]:
     order = load(order_id)
     item = next((i for i in order["items"] if i["id"] == item_id), None)
     if item is None:
@@ -167,12 +179,13 @@ def update_item(order_id: str, item_id: str, qty: int) -> dict[str, Any]:
 
 def remove(order_id: str, *, item_id: str | None = None, source: str | None = None) -> dict[str, Any]:
     """Remove one position (``item_id``) or every position of one ``source`` (e.g. a deck)."""
-    order = load(order_id)
-    before = len(order["items"])
-    order["items"] = [i for i in order["items"] if not ((item_id and i["id"] == item_id) or (source and i.get("source") == source))]
-    if len(order["items"]) == before:
-        raise FileNotFoundError("Position nicht gefunden")
-    return _save(order)
+    with locked(_path(order_id)):
+        order = load(order_id)
+        before = len(order["items"])
+        order["items"] = [i for i in order["items"] if not ((item_id and i["id"] == item_id) or (source and i.get("source") == source))]
+        if len(order["items"]) == before:
+            raise FileNotFoundError("Position nicht gefunden")
+        return _save(order)
 
 
 def deck_items(deck: dict[str, Any], *, names: list[str] | None = None, only_missing: bool = False) -> list[dict[str, Any]]:

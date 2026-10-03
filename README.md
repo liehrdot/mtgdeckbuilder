@@ -211,6 +211,27 @@ werden überall mit beiden Seiten behandelt:
   Gespeichert in `tablerules.json` (gitignored); per Claude: „leg die Tischregel Freitagsrunde an:
   höchstens Bracket 3, keine Combos“ (Tools `table_rules`, `update_table_rule`).
 
+## Datensicherung & Papierkorb
+
+- **Sicherung:** Unter *Einstellungen → Daten & Sicherung* sicherst du mit einem Klick alles, was du angelegt hast –
+  Decks mit Versionen, Partien und Fragen, Sammlung, Gegnerdecks, Tischregeln, Blacklist, Sammelbestellungen,
+  Bildauswahl fürs Drucken, Deskmat-Motive und Einstellungen – als eine ZIP-Datei zum Herunterladen. Beim Start der
+  GUI entsteht einmal am Tag automatisch eine Sicherung (die letzten 10 bleiben), gespeichert in `backups/`
+  (`MTG_BACKUP_DIR`, gitignored). „Sicherung einspielen“ lädt eine ZIP hoch und stellt sie wieder her; vorher wird
+  der aktuelle Stand automatisch gesichert, du kannst also zurück. Ein Lauf von Claude muss dafür beendet sein.
+- **Papierkorb:** Gelöschte Decks landen samt Versionen, Fragen und Partien im Papierkorb (`decks/.trash/`).
+  Direkt nach dem Löschen gibt es „Rückgängig“, später *Einstellungen → Papierkorb* (zurückholen oder endgültig löschen).
+- **Sicheres Speichern:** Alle Dateien werden atomar geschrieben (erst eine temporäre Datei, dann ausgetauscht) und
+  beim Ändern gesperrt – auch wenn die GUI und ein laufender Claude-Auftrag gleichzeitig speichern. Ist eine Datei
+  doch einmal beschädigt, wird sie nie als „leer“ behandelt und überschrieben: Die App legt eine Kopie
+  `<name>.beschaedigt-…` daneben und meldet den Fehler; ein beschädigtes Deck erscheint als „(beschädigt)“ in der Liste.
+- **Gleicher Name:** Ein neues Deck überschreibt nie ein anderes Deck mit gleichem Namen (es bekommt z. B.
+  `meren-2`). Nur ein erneutes Speichern desselben Bauvorgangs (gleicher Auftrag, bzw. gleicher Commander innerhalb
+  von 30 Minuten) aktualisiert das eigene Deck. Umbauten behalten Anleitung, Upgrade-Plan, „Gebaut gegen …“ und die
+  Precon-Herkunft.
+- **Schutz der lokalen Oberfläche:** Die GUI nimmt nur Anfragen an, die an diesen Rechner gerichtet sind, und lehnt
+  ändernde Anfragen von fremden Webseiten ab. Mit `MTG_GUI_HOST=0.0.0.0` (im Netzwerk freigegeben) entfällt die Host-Prüfung.
+
 ## Web-GUI
 
 ```bash
@@ -463,6 +484,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
 | `MTG_TABLERULES_FILE` | `./tablerules.json` | Tischregeln |
+| `MTG_BACKUP_DIR` | `./backups` | Sicherungen (ZIP) |
 | `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
 | `MTG_DESKMAT_DIR` | `./deskmats` | Deskmat-Projekte und fertige Dateien |

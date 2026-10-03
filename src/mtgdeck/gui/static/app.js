@@ -37,10 +37,18 @@ const fmtDate = (iso) => {
 const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 // non-blocking notifications (success, hints, errors)
-function toast(text, kind = "info", ms = 4500) {
+function toast(text, kind = "info", ms = 4500, action = null) {
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
   el.innerHTML = `${icon(kind === "error" ? "alert" : "check")}<span>${esc(text)}</span>`;
+  if (action) {  // e.g. { label: "Rückgängig", run: () => … }
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "toast-action";
+    b.textContent = action.label;
+    b.addEventListener("click", () => { el.remove(); action.run(); });
+    el.appendChild(b);
+  }
   $("#toasts").appendChild(el);
   setTimeout(() => el.remove(), kind === "error" ? ms + 3000 : ms);
 }
@@ -104,7 +112,7 @@ async function route() {
   }
   for (const v of $$(".view")) v.hidden = v.dataset.view !== r.view;
   if (r.view === "deck") selectTab(r.tab || "karten", false);
-  if (r.view === "settings") refreshDbStatus();
+  if (r.view === "settings") { refreshDbStatus(); refreshBackups(); refreshTrash(); }
   if (r.view === "collection") loadCollection();
   if (r.view === "glossary") showGlossary(r.slug);
   if (r.view === "deskmat") showDeskmat(r.slug);
@@ -1535,13 +1543,16 @@ $("#validate-btn").addEventListener("click", async () => {
 
 $("#delete-btn").addEventListener("click", async () => {
   if (!currentDeck) return;
-  const ok = await ask({ title: `„${currentDeck.name}“ löschen?`, text: "Das Deck, alle Versionen und Fragen werden gelöscht.", ok: "Löschen", danger: true });
+  const ok = await ask({ title: `„${currentDeck.name}“ löschen?`, ok: "In den Papierkorb", danger: true,
+    text: "Das Deck kommt mit allen Versionen, Fragen und Partien in den Papierkorb (Einstellungen → Papierkorb). Bis du ihn leerst, kannst du es zurückholen." });
   if (!ok) return;
-  await api(`/api/decks/${enc(currentDeck.slug)}`, { method: "DELETE" }).catch(fail);
-  toast(`„${currentDeck.name}“ gelöscht.`);
+  const name = currentDeck.name;
+  let r;
+  try { r = await api(`/api/decks/${enc(currentDeck.slug)}`, { method: "DELETE" }); } catch (err) { fail(err); return; }
   currentDeck = null;
   await refreshDeckList();
   go("#/new");
+  toast(`„${name}“ liegt im Papierkorb.`, "info", 8000, { label: "Rückgängig", run: () => restoreFromTrash(r.trash_id) });
 });
 
 // ============================================================================================
@@ -3400,6 +3411,99 @@ $("#tr-check").addEventListener("click", async () => {
         </div></li>`).join("") : '<li class="muted small">Noch keine Decks gespeichert.</li>';
   } catch (err) { fail(err); $("#tr-decks").innerHTML = ""; }
   btn.disabled = false;
+});
+
+// ============================================================================================
+// settings: backups (export / import / automatic) and the deck trash
+// ============================================================================================
+const fmtSize = (b) => (b >= 1e6 ? `${(b / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
+
+async function refreshBackups() {
+  let data;
+  try { data = await api("/api/backups"); } catch (err) { fail(err); return; }
+  const autos = data.backups.filter((b) => b.kind === "auto");
+  $("#backup-auto").textContent = `Automatisch: einmal am Tag beim Start der App, die letzten ${data.keep_auto} bleiben erhalten`
+    + (autos.length ? ` (zuletzt ${fmtDate(autos[0].created)}).` : " (noch keine).") + ` Ordner: ${data.dir}`;
+  $("#backup-list").innerHTML = data.backups.map((b) => `<li>
+      <div class="grow"><strong>${esc(fmtDate(b.created) || b.name)}</strong> <span class="muted small">· ${esc(b.kind_label)}
+        · ${b.decks ?? "?"} Decks · ${esc(fmtSize(b.size))}</span></div>
+      <div class="actions">
+        <a class="btn small" href="/api/backups/${enc(b.name)}" download>Herunterladen</a>
+        <button type="button" class="btn small" data-restore="${esc(b.name)}">Wiederherstellen …</button>
+      </div></li>`).join("") || '<li class="muted small">Noch keine Sicherung.</li>';
+}
+
+$("#backup-create").addEventListener("click", async () => {
+  try {
+    const b = await api("/api/backups", { method: "POST" });
+    await refreshBackups();
+    toast(`Gesichert: ${b.decks} Decks, ${b.files} Dateien.`);
+  } catch (err) { fail(err); }
+});
+$("#backup-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const res = await fetch("/api/backups/upload", { method: "POST", body: file, headers: { "Content-Type": "application/zip" } });
+    const b = await res.json();
+    if (!res.ok) throw new Error(b.detail || res.statusText);
+    await refreshBackups();
+    await restoreBackup(b.name, b);
+  } catch (err) { fail(err); }
+});
+$("#backup-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-restore]");
+  if (btn) restoreBackup(btn.dataset.restore);
+});
+async function restoreBackup(name, info = null) {
+  const ok = await ask({ title: "Sicherung wiederherstellen?", ok: "Wiederherstellen", danger: true,
+    text: `${info?.created ? `Stand vom ${fmtDate(info.created)}${info.decks != null ? `, ${info.decks} Decks` : ""}. ` : ""}`
+      + "Deine aktuellen Daten werden durch die Sicherung ersetzt. Vorher wird der jetzige Stand automatisch gesichert – du kannst also zurück." });
+  if (!ok) return;
+  try {
+    const r = await api(`/api/backups/${enc(name)}/restore`, { method: "POST" });
+    currentDeck = null;
+    await Promise.all([refreshDeckList(), refreshTableRules(), refreshOpponents(), refreshBlacklist(), refreshCollectionSummary()]);
+    await refreshBackups();
+    await refreshTrash();
+    toast(`Wiederhergestellt: ${r.decks} Decks. Der vorherige Stand liegt als Sicherung bereit.`);
+  } catch (err) { fail(err); }
+}
+
+async function refreshTrash() {
+  let items;
+  try { items = await api("/api/trash"); } catch (err) { fail(err); return; }
+  $("#trash-none").hidden = items.length > 0;
+  $("#trash-empty").hidden = !items.length;
+  $("#trash-list").innerHTML = items.map((t) => `<li>
+      <div class="grow"><strong>${esc(t.name)}</strong> <span class="muted small">· ${esc((t.commanders || []).join(" + "))}
+        · gelöscht ${esc(fmtDate(t.deleted))}</span></div>
+      <div class="actions">
+        <button type="button" class="btn small" data-trash-restore="${esc(t.id)}">Zurückholen</button>
+        <button type="button" class="btn ghost small" data-trash-purge="${esc(t.id)}" aria-label="${esc(t.name)} endgültig löschen">Endgültig löschen …</button>
+      </div></li>`).join("");
+}
+async function restoreFromTrash(id) {
+  try {
+    const r = await api(`/api/trash/${enc(id)}/restore`, { method: "POST" });
+    await refreshDeckList();
+    if (parseHash().view === "settings") refreshTrash();
+    toast(`„${r.name}“ ist wieder da.`);
+    go(`#/deck/${enc(r.slug)}`);
+  } catch (err) { fail(err); }
+}
+$("#trash-list").addEventListener("click", async (e) => {
+  const back = e.target.closest("button[data-trash-restore]");
+  if (back) { restoreFromTrash(back.dataset.trashRestore); return; }
+  const purge = e.target.closest("button[data-trash-purge]");
+  if (!purge) return;
+  if (!(await ask({ title: "Endgültig löschen?", text: "Das Deck mit Versionen, Fragen und Partien ist danach weg (außer in einer Sicherung).", ok: "Endgültig löschen", danger: true }))) return;
+  try { await api(`/api/trash/${enc(purge.dataset.trashPurge)}`, { method: "DELETE" }); refreshTrash(); } catch (err) { fail(err); }
+});
+$("#trash-empty").addEventListener("click", async () => {
+  if (!(await ask({ title: "Papierkorb leeren?", text: "Alle Decks im Papierkorb werden endgültig gelöscht (außer in einer Sicherung).", ok: "Leeren", danger: true }))) return;
+  try { await api("/api/trash", { method: "DELETE" }); refreshTrash(); } catch (err) { fail(err); }
 });
 
 // ============================================================================================

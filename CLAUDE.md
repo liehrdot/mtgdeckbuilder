@@ -109,7 +109,12 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - `brackets.evaluate(profile=)` adds `power`, `profile` and `target_text` to the bracket result.
   - Stored as `deck["power_profile"]`.
 - **Budget / proxy:** `validate_deck(budget=, proxy=)` warns on budget overruns unless `proxy=True`. `price_total` includes the commanders. Decks store `proxy`, and a proxy deck has `budget: None`.
+- **`jsonstore.py`**: every user-data write goes through it. `atomic_write_text` / `write_json` (unique temp file + `os.replace`), `locked(path)` (re-entrant per thread, cross-process via a `.<name>.lock` file with fcntl/msvcrt), `read_json(path, default)` (missing → default; damaged → copy `<name>.beschaedigt-<hash>` + `StoreError`, never "empty"), `update_json`. Rule: never hold a lock across an `await` – do slow lookups first, then re-read and change under the lock (see `opponents.link_game`, `tablerules.update`, `printorders.add`, `blacklist.update`, `collection.add`). The GUI maps `StoreError` to 503 and `ConflictError` to 409.
+- **`backup.py`**: zip backups of all user data (`decks/` incl. dot dirs, collection, blacklist, table rules, settings, `proxies/.orders`, `proxies/*/selection.json`, deskmat meta + source) in `backups/` (`MTG_BACKUP_DIR`): `create(kind)` (auto/manuell/vor-wiederherstellung/hochgeladen), `auto_backup()` once a day from `gui.main()` (keeps `KEEP_AUTO`), `upload()` validates `backup.json` and member paths, `restore(name)` makes a safety backup first and replaces the data. Routes `/api/backups[/{name}[/restore]]`, `/api/backups/upload` (raw body), refused while a job runs.
 - **`storage.py`**: saves decks to `decks/<slug>.json` plus a `.txt` export (Moxfield format). The `decks/` contents are gitignored.
+  - `save(deck, expect_version=)` runs under the deck's lock, raises `ConflictError` when someone saved a newer version (callers re-load and re-apply: `deckedit.edit_deck`, `_set_table_rule`, `revalidate_decks`, `/validate`), carries over non-content keys the new dict lacks (guide, upgrade_plan, built_against, precon …; `_PER_SAVE_KEYS` excepted) and stamps `last_job` from env `MTG_JOB_ID` (set by `_run_claude` for its MCP server; the GUI finds the job's deck by it, falling back to the `updated` heuristic).
+  - `delete()` moves deck, txt, versions, questions and games to `decks/.trash/<ts>-<slug>/` (`trash()`, `restore_deleted()` – new slug if taken –, `purge_deleted()`; routes `/api/trash`). `list_decks()` lists damaged deck files as `damaged`.
+  - MCP `save_deck` without `slug` uses `unique_slug()` unless `_same_build()` (same job, or same commanders within `SAME_BUILD_MINUTES`); it returns `slug`.
   - Questions about a deck: `questions()` / `add_question()` / `delete_questions()` in `decks/.questions/<slug>.json`. `delete()` removes them and the game log too.
   - `set_extra(slug, key, value)` stores non-content data (guide, upgrade plan) in the current file without a new version.
   - **Versioning:** a new version is created when content changes (`_CONTENT_KEYS`) or a `change_note` is given. Re-validation alone does not create one.
@@ -153,7 +158,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
     - Card list edits are collected in `edit` (add/qty/remove/cat) and saved in one request; test-hand odds are computed client-side (`renderOdds`, hypergeometric). Views are `<section class="view" data-view=…>`; tab switches use `history.replaceState`.
     - One job panel (`#job`) is moved into the slot of the view that started it (`startJob(id, title, {kind, slot, route, slug})`); the sidebar shows `#job-indicator` while it runs. `TOOL_LABELS` turns tool calls into plain-language status.
     - Use the design tokens in `style.css` (`--space-*`, `--fs-*`, `--radius*`, semantic colours incl. `--input-border` ≥ 3:1) for light and dark. Surfaces are `.panel`; `.card` is reserved for card rows (hover preview uses `.card[data-img]`).
-    - Show and hide with the `hidden` attribute. Report with `toast()` and ask with `ask()` (a `<dialog>`), never `alert`/`prompt`/`confirm`. Keep one primary button per view and put rare options into `<details class="more">` or the ⋯ menu.
+    - Show and hide with the `hidden` attribute. Report with `toast(text, kind, ms, {label, run})` (optional action button, e.g. „Rückgängig“) and ask with `ask()` (a `<dialog>`), never `alert`/`prompt`/`confirm`. Keep one primary button per view and put rare options into `<details class="more">` or the ⋯ menu.
   - Each build or refine request becomes a `Job` that runs `claude_agent_sdk.query()`.
   - The job uses `cwd=`repo root and `setting_sources=["project"]` so it gets the skills and this file.
   - It starts the MCP server via `sys.executable -m mtgdeck.mcp_server`, with `permission_mode="dontAsk"`.
@@ -182,7 +187,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 - The mock also fakes MTGJSON (`GraveTroupe_C99`), Archidekt deck 4242, Moxfield (v3 blocked, v2 answers; `blocked` ids fail), MTGGoldfish 777, TappedOut, Deckstats, the EDHREC average deck for Meren and German printings (`GERMAN`, `lang:de` searches).
 - `tests/conftest.py` sets up an autouse fixture that:
   - replaces `http._client` with an `httpx.MockTransport` that fakes Scryfall, EDHREC and Spellbook;
-  - redirects the cache, DB, decks, blacklist, table rules, collection and proxies to `tmp_path`;
+  - redirects the cache, DB, decks, blacklist, table rules, backups, collection and proxies to `tmp_path`;
   - disables throttling.
 - Any card name starting with `Filler` is synthesized on demand. `deck_lines()` builds a legal 99-card main deck for Meren (BG).
 - `CARDS` includes two opponent commanders (Atraxa, Praetors' Voice; Krenko, Mob Boss).
@@ -196,6 +201,6 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_TABLERULES_FILE`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_DESKMAT_DIR`
+- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_TABLERULES_FILE`, `MTG_BACKUP_DIR`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_DESKMAT_DIR`
 - `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`, `MTG_UPSCALER_PATH`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`

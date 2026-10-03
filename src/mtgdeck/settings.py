@@ -58,11 +58,8 @@ def load() -> dict[str, Any]:
 
 
 def update(changes: dict[str, Any]) -> dict[str, Any]:
-    try:
-        stored = json.loads(SETTINGS_FILE.read_text("utf-8"))
-    except (FileNotFoundError, ValueError):
-        stored = {}
-    stored.update({k: v for k, v in changes.items() if k in DEFAULTS and v is not None})
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(stored, indent=2, ensure_ascii=False), "utf-8")
+    from .jsonstore import update_json
+
+    with update_json(SETTINGS_FILE, {}) as stored:
+        stored.update({k: v for k, v in changes.items() if k in DEFAULTS and v is not None})
     return load()

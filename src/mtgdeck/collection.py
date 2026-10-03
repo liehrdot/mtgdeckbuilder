@@ -25,6 +25,7 @@ from typing import Any
 
 from . import scryfall, storage
 from .cards import resolve
+from .jsonstore import locked, read_json, write_json
 
 COLLECTION_FILE = Path(os.environ.get("MTG_COLLECTION_FILE", storage.PROJECT_ROOT / "collection.json"))
 
@@ -46,18 +47,12 @@ def _now() -> str:
 
 
 def load() -> list[dict[str, Any]]:
-    try:
-        data = json.loads(COLLECTION_FILE.read_text("utf-8"))
-    except (FileNotFoundError, ValueError):
-        return []
+    data = read_json(COLLECTION_FILE, [])
     return data if isinstance(data, list) else []
 
 
 def _write(entries: list[dict[str, Any]]) -> None:
-    COLLECTION_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = COLLECTION_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(entries, ensure_ascii=False, indent=1), "utf-8")
-    tmp.replace(COLLECTION_FILE)
+    write_json(COLLECTION_FILE, entries, indent=1)
 
 
 def _key(e: dict[str, Any]) -> tuple[Any, ...]:
@@ -237,9 +232,10 @@ async def _resolve_items(items: list[dict[str, Any]], *, proxy_default: bool = F
 async def add(items: list[dict[str, Any]], *, proxy_default: bool = False, replace: bool = False) -> dict[str, Any]:
     """Add raw items (``name``/``qty``/``proxy``/``foil``/``lang``/``set``/``collector_number``/``scryfall_id``)."""
     new, not_found = await _resolve_items(items, proxy_default=proxy_default)
-    before = [] if replace else load()
-    merged = _merge(before + new)
-    _write(merged)
+    with locked(COLLECTION_FILE):  # read after the (slow) lookups, so nothing saved meanwhile is lost
+        before = [] if replace else load()
+        merged = _merge(before + new)
+        _write(merged)
     return {"added": sum(e["qty"] for e in new), "entries": len(merged), "not_found": not_found}
 
 
@@ -274,6 +270,12 @@ async def import_text(text: str, *, proxy: bool = False, replace: bool = False) 
 def update(entry_id: str, *, qty: int | None = None, proxy: bool | None = None, foil: bool | None = None,
            lang: str | None = None, note: str | None = None, printing: dict[str, Any] | None = None) -> dict[str, Any] | None:  # fmt: skip
     """Change one entry; ``qty <= 0`` deletes it. Returns the (possibly merged) entry or None."""
+    with locked(COLLECTION_FILE):
+        return _update(entry_id, qty=qty, proxy=proxy, foil=foil, lang=lang, note=note, printing=printing)
+
+
+def _update(entry_id: str, *, qty: int | None, proxy: bool | None, foil: bool | None, lang: str | None,
+            note: str | None, printing: dict[str, Any] | None) -> dict[str, Any] | None:  # fmt: skip
     entries = load()
     entry = next((e for e in entries if e["id"] == entry_id), None)
     if entry is None:
@@ -297,9 +299,10 @@ def update(entry_id: str, *, qty: int | None = None, proxy: bool | None = None, 
 
 def delete(entry_id: str | None = None) -> int:
     """Delete one entry, or everything when ``entry_id`` is None. Returns the number removed."""
-    entries = load()
-    keep = [e for e in entries if entry_id is not None and e["id"] != entry_id]
-    _write(keep)
+    with locked(COLLECTION_FILE):
+        entries = load()
+        keep = [e for e in entries if entry_id is not None and e["id"] != entry_id]
+        _write(keep)
     return len(entries) - len(keep)
 
 

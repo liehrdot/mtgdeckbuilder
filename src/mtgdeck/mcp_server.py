@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -241,6 +242,28 @@ class CardEntry(BaseModel):
     category: str = Field("", description="Deck role for grouping, e.g. Ramp, Draw, Removal, Board Wipe, Synergy, Win Condition, Land")
 
 
+SAME_BUILD_MINUTES = 30
+
+
+def _same_build(existing_slug: str, commanders: list[str]) -> bool:
+    """Is the existing deck an earlier save of this very build (validate → fix → save again without slug)?
+    In a GUI job: saved by the same job. Otherwise: same commanders and saved within SAME_BUILD_MINUTES."""
+    from datetime import datetime, timezone
+
+    try:
+        old = storage.load(existing_slug)
+    except (FileNotFoundError, storage.StoreError):
+        return False
+    job = os.environ.get("MTG_JOB_ID")
+    if job:
+        return old.get("last_job") == job
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(old.get("updated") or "")
+    except ValueError:
+        return False
+    return sorted(old.get("commanders") or []) == sorted(commanders) and age.total_seconds() < SAME_BUILD_MINUTES * 60
+
+
 @mcp.tool()
 async def save_deck(
     name: Annotated[str, Field(description="Deck name")],
@@ -295,6 +318,11 @@ async def save_deck(
     }
     if slug:
         deck["slug"] = storage.slug(slug)
+    else:  # a new deck never overwrites another deck with the same name …
+        deck["slug"] = storage.unique_slug(name)
+        own = storage.slug(name)
+        if deck["slug"] != own and _same_build(own, result["commanders"]):  # … only its own earlier save
+            deck["slug"] = own
     paths = storage.save(deck)
     result["stats"].pop("roles", None)
     return {
@@ -309,7 +337,9 @@ async def save_deck(
         "table_rule": result.get("table_rule"),
         "card_count": result["stats"]["card_count"] + len(result["commanders"]),
         "unresolved_cards": [n for n in categories if n not in card_data],
-        "hint": "Fix errors/violations and call save_deck again with the same slug." if not result["legal"] or not result["bracket"]["compliant"] else "",
+        "slug": paths["slug"],
+        "hint": (f"Fix errors/violations and call save_deck again with slug='{paths['slug']}'." if not result["legal"]
+                 or not result["bracket"]["compliant"] else f"Saved as slug='{paths['slug']}' – pass it for further changes."),
     }
 
 

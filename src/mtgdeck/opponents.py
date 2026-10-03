@@ -13,7 +13,6 @@ commander come from EDHREC, since the user does not know the exact list.
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from collections import Counter
@@ -21,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import games, storage
+from .jsonstore import locked, read_json, write_json
 
 FILE_NAME = ".opponents.json"
 MAX_NOTES = 200
@@ -50,17 +50,13 @@ def _file() -> Path:
 
 
 def _read() -> list[dict[str, Any]]:
-    try:
-        data = json.loads(_file().read_text("utf-8"))
-    except (FileNotFoundError, ValueError):
-        return []
+    data = read_json(_file(), {})
     items = data.get("opponents") if isinstance(data, dict) else None
     return [o for o in items or [] if isinstance(o, dict) and o.get("id")]
 
 
 def _write(items: list[dict[str, Any]]) -> None:
-    _file().parent.mkdir(parents=True, exist_ok=True)
-    _file().write_text(json.dumps({"opponents": items}, ensure_ascii=False, indent=2), "utf-8")
+    write_json(_file(), {"opponents": items})
 
 
 def _now() -> str:
@@ -117,7 +113,8 @@ async def create(commanders: list[str], *, note: str = "", **changes: Any) -> di
     o = await _new(names, changes)
     if note.strip():
         o["notes"].append(_note(note))
-    _write([*_read(), o])
+    with locked(_file()):
+        _write([*_read(), o])
     return o
 
 
@@ -136,14 +133,22 @@ def _note(text: str, game_id: str | None = None, deck_slug: str | None = None) -
 
 async def update(opp_id: str, *, commanders: list[str] | None = None, add_note: str = "", remove_note: str | None = None,
                  **changes: Any) -> dict[str, Any]:  # fmt: skip
+    looked_up = None
+    if commanders:  # slow lookup first, then read-modify-write under the lock
+        looked_up = await _card_info([c for c in commanders if c.strip()][:2])
+        if looked_up[2]:
+            raise ValueError(f"Commander nicht gefunden: {', '.join(looked_up[2])}")
+    with locked(_file()):
+        return _update(opp_id, looked_up, add_note, remove_note, changes)
+
+
+def _update(opp_id: str, looked_up: Any, add_note: str, remove_note: str | None, changes: dict[str, Any]) -> dict[str, Any]:
     items = _read()
     o = next((x for x in items if x["id"] == opp_id), None)
     if o is None:
         raise FileNotFoundError(f"Unbekanntes Gegnerdeck: {opp_id}")
-    if commanders:
-        resolved, card, missing = await _card_info([c for c in commanders if c.strip()][:2])
-        if missing:
-            raise ValueError(f"Commander nicht gefunden: {', '.join(missing)}")
+    if looked_up:
+        resolved, card, _ = looked_up
         o.update(commanders=resolved, color_identity=card.get("color_identity") or o.get("color_identity") or [],
                  image=card.get("image") or o.get("image"))  # fmt: skip
     o.update(_clean(changes))
@@ -158,31 +163,50 @@ async def update(opp_id: str, *, commanders: list[str] | None = None, add_note: 
 
 
 def delete(opp_id: str) -> None:
-    items = _read()
-    if not any(o["id"] == opp_id for o in items):
-        raise FileNotFoundError(f"Unbekanntes Gegnerdeck: {opp_id}")
-    _write([o for o in items if o["id"] != opp_id])
+    with locked(_file()):
+        items = _read()
+        if not any(o["id"] == opp_id for o in items):
+            raise FileNotFoundError(f"Unbekanntes Gegnerdeck: {opp_id}")
+        _write([o for o in items if o["id"] != opp_id])
 
 
 async def link_game(deck_slug: str, game_id: str, slots: list[dict[str, Any]], *, remember: bool = True) -> list[str | None]:
     """Link the opponents of a logged game: ``slots`` = [{"commander", "id"?, "note"?}] in game order.
     Known decks are matched by id or (single) commander match; unknown commanders become new opponent
     decks when ``remember``; a note is stored as an observation. Returns the ids per slot."""
-    ids: list[str | None] = []
-    items = _read()
-    changed = False
-    for slot in slots:
+    def match(items: list[dict[str, Any]], slot: dict[str, Any]) -> dict[str, Any] | None:
         name = (slot.get("commander") or "").strip()
         o = next((x for x in items if x["id"] == slot.get("id")), None) if slot.get("id") else None
         if o is None and name:
             matches = [x for x in items if name.lower() in {n.lower() for n in x.get("commanders") or []}]
             o = max(matches, key=lambda x: x.get("updated") or "") if matches else None
-        if o is None and name and remember:
-            try:
-                o = await _new([name])
-                items.append(o)
-            except ValueError:
-                o = None
+        return o
+
+    # 1. look up new commanders (network) without holding the lock
+    fresh: dict[int, dict[str, Any]] = {}
+    if remember:
+        known = _read()
+        for i, slot in enumerate(slots):
+            name = (slot.get("commander") or "").strip()
+            if name and match(known, slot) is None:
+                try:
+                    fresh[i] = await _new([name])
+                except ValueError:
+                    pass
+    # 2. re-read and change under the lock, so nothing saved meanwhile is lost
+    with locked(_file()):
+        return _link_locked(deck_slug, game_id, slots, fresh, match)
+
+
+def _link_locked(deck_slug: str, game_id: str, slots: list[dict[str, Any]], fresh: dict[int, dict[str, Any]], match: Any) -> list[str | None]:
+    ids: list[str | None] = []
+    items = _read()
+    changed = False
+    for i, slot in enumerate(slots):
+        o = match(items, slot)
+        if o is None and i in fresh:
+            o = fresh[i]
+            items.append(o)
         if o is not None:
             if (slot.get("note") or "").strip():
                 o["notes"] = ((o.get("notes") or []) + [_note(slot["note"], game_id, deck_slug)])[-MAX_NOTES:]

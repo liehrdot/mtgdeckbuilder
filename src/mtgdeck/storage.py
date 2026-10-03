@@ -1,18 +1,25 @@
 """Saved decks live as JSON (+ a plain text export) in the decks/ directory, with a full
 snapshot per version in decks/.versions/<slug>/ (history, diffs, restore, copy) and the questions
-asked about a deck in decks/.questions/<slug>.json."""
+asked about a deck in decks/.questions/<slug>.json. Deleted decks go to decks/.trash/ and can be
+restored.
+
+All writes are atomic and locked (``jsonstore``): the GUI and the MCP server of a running Claude job
+save the same decks."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .deck import DeckEntry, to_text
+from .jsonstore import ConflictError, StoreError, atomic_write_text, locked, read_json, update_json, write_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DECKS_DIR = Path(os.environ.get("MTG_DECKS_DIR", PROJECT_ROOT / "decks"))
@@ -28,6 +35,10 @@ VERSIONS_DIRNAME = ".versions"  # decks/.versions/<slug>/v0001.json – full sna
 # Fields whose change creates a new version (re-validation alone does not).
 _CONTENT_KEYS = ("name", "commanders", "cards", "bracket", "power_profile", "proxy", "budget", "currency",
                  "description", "strategy", "notes", "table_rule")  # fmt: skip
+# Written on every save; everything else that is not content (guide, upgrade_plan, built_against, precon,
+# copied_from, last_job …) is carried over when a caller saves a deck dict built from scratch.
+_PER_SAVE_KEYS = {"slug", "history", "version", "created", "updated", "validation", "change_note"}
+TRASH_DIRNAME = ".trash"
 
 
 def _now() -> str:
@@ -77,38 +88,53 @@ def _snapshot(deck: dict[str, Any]) -> None:
     d = _versions_dir(deck["slug"])
     d.mkdir(parents=True, exist_ok=True)
     snap = {k: v for k, v in deck.items() if k != "history"}
-    (d / f"v{deck['version']:04d}.json").write_text(json.dumps(snap, indent=2, ensure_ascii=False), "utf-8")
+    write_json(d / f"v{deck['version']:04d}.json", snap)
+
+
+def _path(deck_slug: str) -> Path:
+    return DECKS_DIR / f"{slug(deck_slug)}.json"
 
 
 def _write_current(deck: dict[str, Any]) -> dict[str, str]:
     json_path = DECKS_DIR / f"{deck['slug']}.json"
-    json_path.write_text(json.dumps(deck, indent=2, ensure_ascii=False), "utf-8")
+    write_json(json_path, deck)
     entries = [DeckEntry(c["name"], int(c.get("qty", 1))) for c in deck.get("cards", [])]
     txt_path = DECKS_DIR / f"{deck['slug']}.txt"
-    txt_path.write_text(to_text(deck.get("commanders", []), entries), "utf-8")
+    atomic_write_text(txt_path, to_text(deck.get("commanders", []), entries))
     return {"json": str(json_path), "text": str(txt_path), "slug": deck["slug"], "version": deck.get("version")}
 
 
-def save(deck: dict[str, Any]) -> dict[str, Any]:
+def save(deck: dict[str, Any], *, expect_version: int | None = None) -> dict[str, Any]:
     """Write the deck as its current version.
 
     Every content change (cards, bracket, profile, texts ...) or an explicit ``change_note``
     creates a new version: a full snapshot in decks/.versions/<slug>/ plus a history entry with
     the card diff, level (e.g. 'oberes Bracket 3'), price and power score. Pure re-validation
-    only updates the current file.
+    only updates the current file. Non-content fields of the saved deck (guide, upgrade plan …)
+    are kept when ``deck`` lacks them.
+
+    ``expect_version``: the version the caller started from; ``ConflictError`` if someone saved a
+    newer one meanwhile (re-load and apply the change again).
     """
     DECKS_DIR.mkdir(parents=True, exist_ok=True)
     deck_slug = deck.get("slug") or slug(deck["name"])
     deck["slug"] = deck_slug
+    with locked(_path(deck_slug)):
+        return _save_locked(deck, deck_slug, expect_version)
+
+
+def _save_locked(deck: dict[str, Any], deck_slug: str, expect_version: int | None) -> dict[str, Any]:
     now = _now()
     note = deck.pop("change_note", "") or ""
-    json_path = DECKS_DIR / f"{deck_slug}.json"
-    old: dict[str, Any] | None = None
-    if json_path.exists():
-        try:
-            old = json.loads(json_path.read_text("utf-8"))
-        except ValueError:
-            old = None
+    old: dict[str, Any] | None = read_json(_path(deck_slug))
+    if expect_version is not None and (old or {}).get("version") != expect_version:
+        deck["change_note"] = note
+        raise ConflictError(f"Das Deck „{deck.get('name', deck_slug)}“ wurde inzwischen geändert – bitte neu laden.")
+    for key, value in (old or {}).items():
+        if key not in deck and key not in _CONTENT_KEYS and key not in _PER_SAVE_KEYS:
+            deck[key] = value
+    if os.environ.get("MTG_JOB_ID"):  # saved by the MCP server of a GUI job: lets the GUI find "its" deck
+        deck["last_job"] = os.environ["MTG_JOB_ID"]
 
     if old and not old.get("version"):  # deck from before versioning: keep it as version 1
         old["version"] = 1
@@ -148,20 +174,21 @@ def set_extra(deck_slug: str, key: str, value: Any) -> dict[str, Any]:
     current file – no new version, ``updated`` stays as it is."""
     if key in _CONTENT_KEYS or key in ("slug", "version", "history", "cards"):
         raise ValueError(f"{key} ist Deck-Inhalt")
-    deck = load(deck_slug)
-    if value is None:
-        deck.pop(key, None)
-    else:
-        deck[key] = value
-    _write_current(deck)
+    with locked(_path(deck_slug)):
+        deck = load(deck_slug)
+        if value is None:
+            deck.pop(key, None)
+        else:
+            deck[key] = value
+        _write_current(deck)
     return deck
 
 
 def load(deck_slug: str) -> dict[str, Any]:
-    path = DECKS_DIR / f"{slug(deck_slug)}.json"
-    if not path.exists():
+    deck = read_json(_path(deck_slug))
+    if deck is None:
         raise FileNotFoundError(f"No saved deck '{deck_slug}' in {DECKS_DIR}")
-    return json.loads(path.read_text("utf-8"))
+    return deck
 
 
 # --- versions -------------------------------------------------------------------------------
@@ -182,10 +209,10 @@ def load_version(deck_slug: str, version: int | None = None) -> dict[str, Any]:
     """A full deck snapshot; ``None`` = current version."""
     if version is None:
         return load(deck_slug)
-    path = _versions_dir(deck_slug) / f"v{int(version):04d}.json"
-    if not path.exists():
+    snap = read_json(_versions_dir(deck_slug) / f"v{int(version):04d}.json")
+    if snap is None:
         raise FileNotFoundError(f"Deck '{deck_slug}' has no version {version}")
-    return json.loads(path.read_text("utf-8"))
+    return snap
 
 
 def compare(deck_slug: str, a: int, b: int | None = None) -> dict[str, Any]:
@@ -234,17 +261,76 @@ def copy(deck_slug: str, new_name: str | None = None, version: int | None = None
     return save(new)
 
 
-def delete(deck_slug: str) -> None:
+def _deck_files(s: str) -> dict[str, Path]:
+    """Everything that belongs to a deck, by its name inside a trash entry."""
+    return {"deck.json": DECKS_DIR / f"{s}.json", "deck.txt": DECKS_DIR / f"{s}.txt",
+            "questions.json": _questions_file(s), "games.json": DECKS_DIR / ".games" / f"{s}.json",  # games.GAMES_DIRNAME
+            "versions": _versions_dir(s)}  # fmt: skip
+
+
+def delete(deck_slug: str) -> str:
+    """Move a deck with its versions, questions and games to the trash; returns the trash id."""
     s = slug(deck_slug)
-    for ext in ("json", "txt"):
-        (DECKS_DIR / f"{s}.{ext}").unlink(missing_ok=True)
-    _questions_file(s).unlink(missing_ok=True)
-    (DECKS_DIR / ".games" / f"{s}.json").unlink(missing_ok=True)  # games.GAMES_DIRNAME
-    vdir = _versions_dir(s)
-    if vdir.exists():
-        for f in vdir.glob("*.json"):
-            f.unlink()
-        vdir.rmdir()
+    with locked(_path(s)):
+        deck = load(s)
+        trash_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{s}"
+        target = DECKS_DIR / TRASH_DIRNAME / trash_id
+        target.mkdir(parents=True, exist_ok=True)
+        write_json(target / "info.json", {"slug": s, "name": deck.get("name") or s, "commanders": deck.get("commanders", []),
+                                          "deleted": _now(), "version": deck.get("version")})  # fmt: skip
+        for name, src in _deck_files(s).items():
+            if src.exists():
+                shutil.move(str(src), str(target / name))
+    return trash_id
+
+
+def trash() -> list[dict[str, Any]]:
+    """Deleted decks, newest first."""
+    base = DECKS_DIR / TRASH_DIRNAME
+    out = []
+    for d in sorted(base.iterdir(), reverse=True) if base.exists() else []:
+        try:
+            info = read_json(d / "info.json")
+        except StoreError:
+            info = None
+        if info:
+            out.append({**info, "id": d.name})
+    return out
+
+
+def _trash_dir(trash_id: str) -> Path:
+    if not re.fullmatch(r"\d{8}-\d{6}-[a-z0-9-]+", trash_id):
+        raise FileNotFoundError(f"Nicht im Papierkorb: {trash_id}")
+    d = DECKS_DIR / TRASH_DIRNAME / trash_id
+    if not (d / "info.json").exists():
+        raise FileNotFoundError(f"Nicht im Papierkorb: {trash_id}")
+    return d
+
+
+def restore_deleted(trash_id: str) -> dict[str, Any]:
+    """Bring a deleted deck back (under a new slug if the old one is taken again)."""
+    d = _trash_dir(trash_id)
+    info = read_json(d / "info.json")
+    s = unique_slug(info["slug"]) if _path(info["slug"]).exists() else info["slug"]
+    with locked(_path(s)):
+        deck = read_json(d / "deck.json")
+        deck["slug"] = s
+        for name, dst in _deck_files(s).items():
+            src = d / name
+            if src.exists() and name != "deck.json":
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+        _write_current(deck)
+    shutil.rmtree(d, ignore_errors=True)
+    return {"slug": s, "name": deck.get("name")}
+
+
+def purge_deleted(trash_id: str | None = None) -> int:
+    """Finally delete one trash entry, or all of them; returns how many."""
+    targets = [_trash_dir(trash_id)] if trash_id else [DECKS_DIR / TRASH_DIRNAME / t["id"] for t in trash()]
+    for d in targets:
+        shutil.rmtree(d, ignore_errors=True)
+    return len(targets)
 
 
 # --- questions about a deck ("Fragen zum Deck") ---------------------------------------------------
@@ -258,33 +344,27 @@ def _questions_file(deck_slug: str) -> Path:
 
 def questions(deck_slug: str) -> list[dict[str, Any]]:
     """Questions asked about a deck, oldest first: id, asked, question, answer, version."""
-    path = _questions_file(deck_slug)
-    if not path.exists():
-        return []
-    try:
-        items = json.loads(path.read_text(encoding="utf-8"))
-    except ValueError:
-        return []
+    items = read_json(_questions_file(deck_slug), [])
     return items if isinstance(items, list) else []
 
 
 def add_question(deck_slug: str, question: str, answer: str, **extra: Any) -> dict[str, Any]:
     entry = {"id": uuid.uuid4().hex[:10], "asked": _now(), "question": question, "answer": answer, **extra}
-    path = _questions_file(deck_slug)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(questions(deck_slug) + [entry], ensure_ascii=False, indent=2), encoding="utf-8")
+    with update_json(_questions_file(deck_slug), []) as items:
+        items.append(entry)
     return entry
 
 
 def delete_questions(deck_slug: str, entry_id: str | None = None) -> int:
     """Delete one question (``entry_id``) or all of them; returns how many were removed."""
-    items = questions(deck_slug)
-    keep = [q for q in items if entry_id is not None and q.get("id") != entry_id]
     path = _questions_file(deck_slug)
-    if keep:
-        path.write_text(json.dumps(keep, ensure_ascii=False, indent=2), encoding="utf-8")
-    else:
-        path.unlink(missing_ok=True)
+    with locked(path):
+        items = questions(deck_slug)
+        keep = [q for q in items if entry_id is not None and q.get("id") != entry_id]
+        if keep:
+            write_json(path, keep)
+        else:
+            path.unlink(missing_ok=True)
     return len(items) - len(keep)
 
 
@@ -296,7 +376,9 @@ def list_decks() -> list[dict[str, Any]]:
     for path in sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             d = json.loads(path.read_text("utf-8"))
-        except ValueError:
+        except (ValueError, OSError):  # damaged: listed so it does not silently vanish; opening it keeps a copy
+            out.append({"slug": path.stem, "name": f"{path.stem} (beschädigt)", "commanders": [], "damaged": True,
+                        "level": "", "updated": None, "version": None, "valid": False})  # fmt: skip
             continue
         out.append(
             {
@@ -311,6 +393,7 @@ def list_decks() -> list[dict[str, Any]]:
                 "version": d.get("version"),
                 "valid": (d.get("validation") or {}).get("legal"),
                 "table_rule": d.get("table_rule"),
+                "last_job": d.get("last_job"),
             }
         )
     return out

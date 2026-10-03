@@ -108,7 +108,7 @@ Rules while picking:
 Call `save_deck` (with `power_profile` if one was given) with a good deck name, all cards with a `category` (Ramp, Draw, Removal,
 Board Wipe, Synergy, Win Condition, Protection, Utility, Land), a short `description` (game plan,
 key synergies, assumptions) and `notes` (mulligan/play tips, combos, upgrade options for later).
-If `save_deck` reports errors, fix and save again with the same `slug`.
+`save_deck` returns the deck's `slug` – pass it on every further save of this deck (a save without `slug` creates a new deck when another deck already has the name). If `save_deck` reports errors, fix and save again with that `slug`.
 
 Then present to the user:
 - Deck name, commander, bracket (target vs. estimated), total price (for proxy decks: "Proxy",
