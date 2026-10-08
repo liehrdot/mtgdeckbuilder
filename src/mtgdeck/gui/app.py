@@ -204,7 +204,7 @@ async def _run_claude(
             query,
         )
     except ImportError:
-        job.emit(type="error", text="claude-agent-sdk fehlt: `uv sync --extra gui` ausführen.")
+        job.emit(type="error", text="Das KI-Paket fehlt (claude-agent-sdk): `uv sync --extra gui` ausführen.")
         job.emit(type="done", ok=False)
         return
 
@@ -242,6 +242,8 @@ async def _run_claude(
                         job.emit(type="tool", name=name, summary=_tool_summary(name, block.input or {}))
             elif isinstance(msg, ResultMessage):
                 ok = not msg.is_error
+                if ok:
+                    _ai_failure.clear()
                 structured = msg.structured_output
                 final_text = (msg.result or "").strip() or last_text
                 cost = f" · Kosten {fmt_money(msg.total_cost_usd, 'usd')}" if getattr(msg, "total_cost_usd", None) else ""
@@ -249,7 +251,9 @@ async def _run_claude(
     except asyncio.CancelledError:
         job.emit(type="error", text="Abgebrochen.")
     except Exception as exc:  # surface everything in the UI
-        job.emit(type="error", text=_error_text(exc))
+        _note_ai_failure(exc)
+        job.emit(type="error", text=_error_text(exc) + (" – Claude Code ist nicht bereit: installiert und angemeldet? "
+                 "Ohne KI kannst du weiter drucken, importieren und bearbeiten." if _ai_failure else ""))
 
     if finish is not None:
         await finish(job, ok, final_text, structured)
@@ -314,7 +318,61 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(ts - 1))
 
 
+# --- is Claude there? Everything without AI (printing, collection, import, editing …) works regardless ---------
+
+_ai_failure: dict[str, Any] = {}  # the last run that failed because Claude Code itself was missing/not logged in
+_AI_SETUP_HINTS = ("not found", "nicht gefunden", "login", "log in", "logged in", "authenticat", "api key", "api_key",
+                   "credit balance", "unauthorized", "401", "claude code")  # fmt: skip
+
+
+def _find_claude_cli() -> str | None:
+    import shutil
+
+    try:
+        import claude_agent_sdk
+
+        bundled = Path(claude_agent_sdk.__file__).parent / "_bundled"
+        for name in ("claude", "claude.exe"):
+            if (bundled / name).is_file():
+                return str(bundled / name)
+    except ImportError:
+        return None
+    return shutil.which("claude")
+
+
+def ai_status() -> dict[str, Any]:
+    """``{enabled, available, reason}`` – reason is a German sentence when AI features cannot run."""
+    enabled = bool(settings_mod.load().get("ai_enabled", True))
+    if not enabled:
+        return {"enabled": False, "available": False, "reason": "KI-Funktionen sind in den Einstellungen ausgeschaltet."}
+    try:
+        import claude_agent_sdk  # noqa: F401
+    except ImportError:
+        return {"enabled": True, "available": False,
+                "reason": "Das KI-Paket fehlt (claude-agent-sdk) – `uv sync --extra gui` ausführen."}  # fmt: skip
+    if not _find_claude_cli():
+        return {"enabled": True, "available": False,
+                "reason": "Claude Code wurde nicht gefunden – installieren (claude.ai/code) und einmal `claude` zum Anmelden starten."}  # fmt: skip
+    if _ai_failure:
+        return {"enabled": True, "available": True, "reason": None, "last_error": _ai_failure.get("text"),
+                "last_error_at": _ai_failure.get("at")}  # fmt: skip
+    return {"enabled": True, "available": True, "reason": None}
+
+
+def _require_ai() -> None:
+    st = ai_status()
+    if not st["available"]:
+        raise HTTPException(503, f"{st['reason']} Alles ohne KI – Drucken, Sammlung, Import, Bearbeiten – funktioniert weiter.")
+
+
+def _note_ai_failure(exc: BaseException) -> None:
+    text = f"{type(exc).__name__}: {exc}"
+    if type(exc).__name__ in ("CLINotFoundError", "CLIConnectionError") or any(h in text.lower() for h in _AI_SETUP_HINTS):
+        _ai_failure.update(text=text[:300], at=time.time())
+
+
 def _start(prompt: str, model: str | None, output_format: dict[str, Any] | None = None, **kw: Any) -> dict[str, str]:
+    _require_ai()
     job = Job(id=uuid.uuid4().hex[:12])
     return _register(job, _run_claude(job, prompt, model, output_format, **kw))
 
@@ -808,6 +866,38 @@ def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/ai")
+async def api_ai() -> dict[str, Any]:
+    return ai_status()
+
+
+class NewDeckRequest(BaseModel):
+    name: str = Field("", max_length=120)
+    commander: str = Field(min_length=2)
+    partner: str | None = None
+    bracket: int = Field(2, ge=1, le=5)
+    currency: str = "eur"
+
+
+@app.post("/api/decks/new")
+async def api_deck_new(req: NewDeckRequest) -> dict[str, Any]:
+    """An empty deck with just its commander(s) – put together by hand (no AI needed)."""
+    names = [n.strip() for n in (req.commander, req.partner) if n and n.strip()]
+    try:
+        cards, renames, missing = await resolve(names)
+    except HttpError as exc:
+        raise HTTPException(502, exc.friendly) from exc
+    if missing:
+        raise HTTPException(404, f"Karte nicht gefunden: {', '.join(missing)}")
+    commanders = [renames.get(n, n) for n in names]
+    try:
+        deck = await deckimport.save(name=req.name.strip() or " + ".join(commanders), commanders=commanders, cards=[],
+                                     bracket=req.bracket, currency=req.currency, note="Leer angelegt")  # fmt: skip
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"slug": deck["slug"]}
 
 
 @app.get("/api/brackets")
@@ -1513,6 +1603,23 @@ async def api_deskmat_generate(req: DeskmatGenerateRequest) -> dict[str, str]:
     if req.deck:
         deck = _not_found(storage.load, req.deck)
 
+    if not ai_status()["available"]:  # without Claude: the user's description is the image prompt
+        if not req.setting.strip():
+            raise HTTPException(400, "Beschreibe das Motiv – ohne KI wird deine Beschreibung direkt als Bild-Prompt genutzt.")
+        style = deskmat.STYLES.get(req.style, deskmat.STYLES["painting"])[1]
+        prompt = ", ".join(p for p in (req.setting.strip(), style, "wide panorama, highly detailed, no text") if p)
+
+        async def runner(job: Job) -> None:
+            job.emit(type="status", text="Ohne KI: deine Beschreibung geht direkt an den Bildgenerator …")
+            project = await deskmat.generate(req.setting.strip()[:40], prompt[:900], req.format, variants=req.variants,
+                                             setting=req.setting, style=req.style, progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
+            for e in project.get("errors") or []:
+                job.emit(type="status", text=f"Eine Variante fehlte: {e}")
+            job.emit(type="deskmat", project=project)
+            job.emit(type="done", ok=True, deck=None)
+
+        return _start_runner(runner)
+
     async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
         prompt = str((structured or {}).get("prompt") or "").strip() if isinstance(structured, dict) else ""
         if not ok or not prompt:
@@ -1898,6 +2005,7 @@ async def api_chat_delete(chat_id: str) -> dict[str, bool]:
 @app.post("/api/chat")
 async def api_chat(req: ChatRequest) -> dict[str, Any]:
     """A question to the whole app: a read-only Claude run with the app overview; the answer goes into the conversation."""
+    _require_ai()  # before a new conversation is created
     question = req.question.strip()
     if req.chat_id:
         try:
@@ -2486,6 +2594,7 @@ class SettingsUpdate(BaseModel):
     upscale_model: str | None = None
     descreen: str | None = None
     image_generator_url: str | None = None
+    ai_enabled: bool | None = None
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:

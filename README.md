@@ -243,6 +243,17 @@ uv run mtg-gui              # → http://127.0.0.1:8765
 
 Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
 
+**Ohne KI nutzbar:** Claude Code braucht nur, wer Decks bauen, umbauen oder bewerten lässt (Deck bauen lassen,
+Commander vorschlagen, Gegen meine Runde bauen, Anpassen, Upgrade-Vorschläge/-Plan, Anleitung, Fragen, „Frag
+Claude“). Alles andere läuft ohne: Deck importieren (Link, Liste, Starterdeck) oder unter „Ich habe schon ein Deck“
+→ **„Selbst zusammenstellen“** ein leeres Deck mit Commander anlegen und Karten im Bearbeiten-Modus hinzufügen,
+Deck-Check mit Kartenvorschlägen, Testhand, Rule-0-Text, Drucken samt eigener Bilder und Tokens, Sammlung,
+Sammelbestellungen, Partien, Gegnerdecks, Tischregeln, Blacklist, Glossar, Sicherung. Das Deskmat-Studio
+schickt ohne KI deine Beschreibung direkt an den Bildgenerator. Die App erkennt, ob Claude Code installiert
+ist (und merkt sich, wenn ein Lauf an fehlender Anmeldung scheitert); unter Einstellungen → „KI-Funktionen“ lassen
+sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis sagt, was stattdessen geht.
+
+
 - **Seitenleiste:** „+ Neues Deck“, **Frag Claude** (Chat mit der ganzen App, siehe unten), deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
   legale), unten Meine Sammlung und drei Gruppen: **Meine Runde** (Gegnerdecks, Tischregeln, Blacklist),
   **Werkstatt** (Sammelbestellungen, Deskmat-Studio) und **Hilfe** (Glossar, Einstellungen). Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben

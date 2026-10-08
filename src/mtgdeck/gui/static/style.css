@@ -260,7 +260,8 @@ details.more[open] > summary { margin-bottom: var(--space-3); }
 .meta-list .key-cards span { background: var(--surface-2); border-radius: 99px; padding: 1px 8px; font-size: var(--fs-xs); }
 #meta-sources { margin: var(--space-2) 0 0; padding-left: 1.1em; word-break: break-word; }
 #import-box:not([data-imode="link"]) .imode-link, #import-box:not([data-imode="text"]) .imode-text,
-#import-box:not([data-imode="precon"]) .imode-precon, #import-box[data-imode="precon"] .import-preview { display: none !important; }
+#import-box:not([data-imode="precon"]) .imode-precon, #import-box:not([data-imode="manual"]) .imode-manual,
+#import-box[data-imode="precon"] .import-preview, #import-box[data-imode="manual"] .import-preview { display: none !important; }
 #import-box .segmented { margin-bottom: var(--space-3); }
 #import-box textarea { margin-bottom: var(--space-2); font-family: var(--mono); font-size: var(--fs-sm); }
 .import-preview { flex-wrap: wrap; }
@@ -1118,3 +1119,9 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 #picker.dragging .picker-upload { border-color: var(--accent); background: var(--accent-soft); }
 .picker-grid .pcard .del { position: absolute; top: 4px; right: 4px; padding: 2px 7px; border-radius: 99px; background: rgb(0 0 0 / .75); color: #fff; font-size: 12px; line-height: 1.3; }
 .picker-grid .pcard .del:hover { background: var(--bad); }
+
+/* without Claude: say so where AI features live */
+.ai-off { margin: 0 0 var(--space-3); padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--border-strong);
+  background: var(--surface-2); font-size: var(--fs-sm); }
+.ai-off::before { content: "ⓘ "; }
+.imode-manual .btn { margin-top: var(--space-2); }

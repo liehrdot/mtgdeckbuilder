@@ -36,6 +36,8 @@ DEFAULTS: dict[str, Any] = {
     "descreen": "normal",
     # Deskmat studio: image generator as URL template ({prompt} {width} {height} {seed}); empty = pollinations.ai (free)
     "image_generator_url": "",
+    # AI features (Claude Code). Off = the app works without Claude: printing, collection, import, editing …
+    "ai_enabled": True,
 }
 _ENV = {
     "autofill_path": "MTG_AUTOFILL_PATH",

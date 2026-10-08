@@ -98,6 +98,7 @@
           <label><input type="radio" name="mode" value="import"><span><svg class="icon"><use href="#i-box"/></svg>Ich habe schon ein Deck</span></label>
           <label><input type="radio" name="mode" value="meta"><span><svg class="icon"><use href="#i-swords"/></svg>Gegen meine Runde bauen</span></label>
         </div>
+        <p class="ai-off" data-ai-note hidden></p>
 
         <section class="step">
           <span class="step-num" aria-hidden="true">1</span>
@@ -142,6 +143,21 @@
                 <label><input type="radio" name="imode" value="link" checked><span>Link</span></label>
                 <label><input type="radio" name="imode" value="text"><span>Liste einfügen</span></label>
                 <label><input type="radio" name="imode" value="precon"><span>Starterdeck (Precon)</span></label>
+                <label><input type="radio" name="imode" value="manual"><span>Selbst zusammenstellen</span></label>
+              </div>
+              <div class="imode-manual">
+                <p class="muted small">Ein leeres Deck mit deinem Commander – die Karten fügst du danach unter „Karten“ → „Bearbeiten“ selbst hinzu
+                  (mit Suche, „Ähnliche Karten“ und „Karten vorschlagen“ im Deck-Check). Geht ganz ohne KI.</p>
+                <div class="row2">
+                  <label class="field">Commander <input id="manual-cmd" list="ac-manual" placeholder="z. B. Meren (auch deutsch)"><datalist id="ac-manual"></datalist></label>
+                  <label class="field">Partner / Background <span class="muted">(optional)</span><input id="manual-partner" list="ac-manual-p"><datalist id="ac-manual-p"></datalist></label>
+                </div>
+                <div class="row2">
+                  <label class="field">Deckname <span class="muted">(optional)</span><input id="manual-name" maxlength="120" placeholder="sonst der Commander"></label>
+                  <label class="field">Bracket <select id="manual-bracket"><option value="1">1 – Exhibition</option><option value="2" selected>2 – Core</option>
+                    <option value="3">3 – Upgraded</option><option value="4">4 – Optimized</option><option value="5">5 – cEDH</option></select></label>
+                </div>
+                <button type="button" class="btn primary" id="manual-btn">Leeres Deck anlegen</button>
               </div>
               <div class="imode-link">
                 <p class="muted small">Link zu einem öffentlichen Deck von Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats
@@ -474,6 +490,7 @@
               </div>
               <button type="button" class="btn primary no-print" id="guide-btn"><svg class="icon"><use href="#i-spark"/></svg><span>Anleitung erstellen</span></button>
             </div>
+            <p class="ai-off no-print" data-ai-note hidden></p>
             <div id="guide-job-slot" class="no-print"></div>
             <p id="guide-empty" class="empty-inline no-print">Claude schreibt dir einen Spickzettel: Spielplan, was du früh, mittel und spät tust,
               wann du die Starthand behältst, die wichtigsten Karten und worauf du achten musst. Dauert etwa ein bis zwei Minuten.</p>
@@ -520,6 +537,7 @@
         </section>
 
         <div class="tune-choice">
+          <p class="ai-off" data-ai-note hidden></p>
           <h2 id="tune-q">Was willst du ändern?</h2>
           <div class="tune-options" role="radiogroup" aria-labelledby="tune-q">
             <label><input type="radio" name="tune" value="refine"><span><b>Mit eigenen Worten</b>
@@ -636,6 +654,7 @@
             </div>
             <button type="button" class="btn ghost" id="qa-clear" hidden>Verlauf löschen</button>
           </div>
+          <p class="ai-off" data-ai-note hidden></p>
           <div id="qa-list" class="qa-list"></div>
           <div id="qa-live" class="qa-live" aria-live="polite" hidden>
             <span class="spinner" aria-hidden="true"></span>
@@ -1014,6 +1033,7 @@
           </div>
           <p class="muted small" id="dm-gen-note">Claude schreibt daraus einen Bild-Prompt; das Bild erzeugt der kostenlose Generator
             <b id="dm-gen-host">pollinations.ai</b> (der Prompt wird dorthin geschickt). Danach wählst du eine Variante.</p>
+          <p class="ai-off" data-ai-note="deskmat" hidden></p>
           <button type="submit" class="btn primary" id="dm-gen-btn"><svg class="icon"><use href="#i-spark"/></svg>Bild erzeugen lassen</button>
           <div id="dm-job-slot"></div>
         </form>
@@ -1151,6 +1171,7 @@
               </div>
             </details>
           </div>
+          <p class="ai-off" data-ai-note hidden></p>
           <div id="chat-start" class="chat-start">
             <p class="muted">Zum Beispiel:</p>
             <div class="chips-row" id="chat-chips">
@@ -1410,9 +1431,18 @@
       <header class="page-head">
         <div>
           <h1>Einstellungen</h1>
-          <p class="lead">Datensicherung, Papierkorb, Kartendatenbank und Proxy-Druck.</p>
+          <p class="lead">KI-Funktionen, Datensicherung, Papierkorb, Kartendatenbank und Proxy-Druck.</p>
         </div>
       </header>
+
+      <section class="panel" id="ai-panel">
+        <h2>KI-Funktionen (Claude)</h2>
+        <p class="muted small">Deck bauen lassen, Umbauen, Upgrade-Vorschläge, Anleitung, Fragen und „Frag Claude“ nutzen Claude Code.
+          Alles andere – Importieren, selbst zusammenstellen, Bearbeiten, Drucken, Sammlung, Sammelbestellungen, Partien, Gegnerdecks,
+          Tischregeln, Testhand – funktioniert auch ohne.</p>
+        <label class="check"><input type="checkbox" id="ai-enabled"> KI-Funktionen nutzen</label>
+        <p id="ai-status" class="small"></p>
+      </section>
 
       <section class="panel" id="backup-panel">
         <div class="panel-head">

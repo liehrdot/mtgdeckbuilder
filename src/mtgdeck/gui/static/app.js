@@ -368,6 +368,26 @@ function setImportMode(mode) {
 }
 $("#import-box").addEventListener("change", (e) => { if (e.target.name === "imode") setImportMode(e.target.value); });
 $("#import-url-btn").addEventListener("click", () => loadImport({ url: $("#import-url").value }));
+wireAutocomplete($("#manual-cmd"), $("#ac-manual"));
+wireAutocomplete($("#manual-partner"), $("#ac-manual-p"));
+$("#manual-btn").addEventListener("click", async () => {
+  const commander = $("#manual-cmd").value.trim();
+  if (commander.length < 2) { toast("Gib zuerst den Commander ein.", "error"); $("#manual-cmd").focus(); return; }
+  const b = $("#manual-btn");
+  b.disabled = true;
+  b.textContent = "Lege an …";
+  try {
+    const r = await api("/api/decks/new", { method: "POST", body: { commander, partner: $("#manual-partner").value.trim() || null,
+      name: $("#manual-name").value.trim(), bracket: Number($("#manual-bracket").value), currency: buildForm.elements.currency.value || "eur" } });
+    await refreshDeckList();
+    for (const id of ["#manual-cmd", "#manual-partner", "#manual-name"]) $(id).value = "";
+    go(`#/deck/${enc(r.slug)}/karten`);
+    for (let k = 0; k < 50 && currentDeck?.slug !== r.slug; k++) await new Promise((res) => setTimeout(res, 100));  // deck view loads
+    if (currentDeck?.slug === r.slug && !edit) setEditing(true);
+    toast("Deck angelegt – füge jetzt Karten hinzu.", "info", 6000);
+  } catch (err) { fail(err); }
+  finally { b.disabled = false; b.textContent = "Leeres Deck anlegen"; }
+});
 $("#import-text-btn").addEventListener("click", () => loadImport({ text: $("#import-text").value }));
 
 async function loadImport(body) {
@@ -644,10 +664,46 @@ function tickElapsed() {
 function setBusy(busy) {
   for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn", "#plan-btn", "#dm-gen-btn", "#dm-render-btn"]) {
     const b = $(sel);
-    b.disabled = busy;
-    b.title = busy ? "Es läuft gerade ein Auftrag" : "";
+    const noAi = AI_ONLY.includes(sel) && !aiState.available;
+    b.disabled = busy || noAi;
+    b.title = busy ? "Es läuft gerade ein Auftrag" : noAi ? "Braucht Claude (KI) – gerade nicht verfügbar" : "";
   }
 }
+
+// ---------- without Claude: AI features are switched off with a note, everything else works ----------
+let aiState = { enabled: true, available: true, reason: null };
+const AI_ONLY = ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#upgrade-btn", "#guide-btn", "#plan-btn"];
+const AI_OFF_TEXT = "Ohne KI geht weiter: Deck importieren oder selbst zusammenstellen, bearbeiten, drucken, Sammlung, Partien, Gegnerdecks.";
+async function refreshAi(first = false) {
+  aiState = await api("/api/ai").catch(() => aiState);
+  applyAi();
+  // without AI a new deck starts with what works: put it together yourself
+  if (first && !aiState.available && buildForm.dataset.mode === "build") { setMode("import"); setImportMode("manual"); }
+}
+function applyAi() {
+  const off = !aiState.available;
+  document.body.classList.toggle("no-ai", off);
+  for (const el of $$("[data-ai-note]")) {
+    el.hidden = !off;
+    el.textContent = el.dataset.aiNote === "deskmat"
+      ? "Ohne KI geht deine Beschreibung direkt als Bild-Prompt an den Generator – beschreib das Motiv also möglichst genau (gern auf Englisch)."
+      : `${aiState.reason || "Claude ist gerade nicht verfügbar."} ${AI_OFF_TEXT}`;
+  }
+  setBusy(!!currentJob);
+  updateQaLive();
+  updateChatLive();
+  $("#ai-enabled").checked = !!aiState.enabled;
+  $("#ai-status").innerHTML = aiState.available
+    ? '<span class="ok">✓ Claude ist bereit.</span>' + (aiState.last_error ? ` <span class="warn">Der letzte Lauf scheiterte: ${esc(aiState.last_error)}</span>` : "")
+    : `<span class="warn">${esc(aiState.reason || "nicht verfügbar")}</span>`;
+}
+$("#ai-enabled").addEventListener("change", async (e) => {
+  try {
+    await api("/api/settings", { method: "POST", body: { ai_enabled: e.target.checked } });
+    await refreshAi();
+    toast(e.target.checked ? "KI-Funktionen sind an." : "KI-Funktionen sind aus – alles andere funktioniert wie gewohnt.");
+  } catch (err) { fail(err); }
+});
 
 function logLine(cls, text) {
   const log = $("#log");
@@ -2099,7 +2155,7 @@ async function renderQuestions(d) {
 function updateQaLive() {
   const run = qaRun && currentDeck && qaRun.slug === currentDeck.slug ? qaRun : null;
   $("#qa-live").hidden = !run;
-  $("#qa-btn").disabled = !!(qaRun && !qaRun.finished);
+  $("#qa-btn").disabled = !!(qaRun && !qaRun.finished) || !aiState.available;
   if (!run) return;
   $("#qa-question").textContent = run.question;
   $("#qa-live .spinner").hidden = !!run.finished;
@@ -4557,7 +4613,7 @@ function updateChatLive() {
   $("#chat-status").textContent = run?.error ? "Fehler: " + run.error : run?.status || "Claude sieht sich deine Decks an …";
   $("#chat-cancel").textContent = run?.finished ? "Schließen" : "Abbrechen";
   const busy = !!(run && !run.finished);
-  $("#chat-btn").disabled = busy;
+  $("#chat-btn").disabled = busy || !aiState.available;
   $("#chat-btn").title = busy ? "Claude antwortet noch" : "";
   $("#chat-running").hidden = !busy;
   $("#chat-start").hidden = !!(currentChat?.messages?.length || here);
@@ -4790,4 +4846,4 @@ wireAutocomplete($("#opp-form [name=partner]"), $("#ac-opp-partner"));
 setMode("build");
 refreshBlacklist();
 loadSettings().catch((err) => console.error(err));
-Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary(), refreshTableRules(), refreshOpponents()]).then(route, (err) => { fail(err); route(); });
+Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary(), refreshTableRules(), refreshOpponents(), refreshAi(true)]).then(route, (err) => { fail(err); route(); });
