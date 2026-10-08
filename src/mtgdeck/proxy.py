@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -203,13 +204,114 @@ def choose(slug: str, face: str, option: dict[str, Any] | None) -> dict[str, dic
     """Remember the image for one card face (``None`` = back to automatic choice)."""
     sel = load_selection(slug)
     if option:
-        sel[face] = {k: option.get(k) for k in ("origin", "id", "thumb", "full", "label", "dpi", "name")}
+        sel[face] = {k: option.get(k) for k in ("origin", "id", "thumb", "full", "label", "dpi", "name", "original", "upload")}
     else:
         sel.pop(face, None)
     from .jsonstore import write_json
 
     write_json(_selection_path(slug), sel)
     return sel
+
+
+# --- own images (uploads) ------------------------------------------------------------------------
+UPLOADS = "uploads"  # proxies/<slug>/uploads/<hash>.jpg (print-ready) + <hash>-original.<ext> + index.json
+MAX_UPLOAD_BYTES = 40_000_000
+_UPLOAD_FORMATS = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "TIFF": "tif", "BMP": "bmp", "GIF": "gif"}
+UPLOAD_NAME = re.compile(r"^[0-9a-f]{16}(-original)?\.(jpg|png|webp|tif|bmp|gif)$")
+
+
+def _uploads_dir(slug: str) -> Path:
+    return order_dir(slug) / UPLOADS
+
+
+def _local_path(ref: str | None) -> Path | None:
+    """Own images are stored relative to the proxies folder (portable across backups); old ones absolute."""
+    if not ref:
+        return None
+    p = Path(ref)
+    return p if p.is_absolute() else PROXIES_DIR / p
+
+
+def _upload_option(slug: str, key: str, meta: dict[str, Any]) -> dict[str, Any]:
+    base = f"/api/decks/{slug}/print/uploads"
+    return {"origin": "local", "upload": key, "id": f"{slug}/{UPLOADS}/{key}.jpg", "thumb": f"{base}/{key}.jpg",
+            "full": f"{base}/{key}.jpg", "original": f"{slug}/{UPLOADS}/{key}-original.{meta.get('ext', 'jpg')}",
+            "label": f"Eigenes Bild: {meta.get('filename') or 'Upload'}", "dpi": meta.get("dpi"), "name": meta.get("face"),
+            "created": meta.get("created")}  # fmt: skip
+
+
+def uploads(slug: str, face: str | None = None) -> list[dict[str, Any]]:
+    """The user's own images for this deck (or one card face), newest first."""
+    from .jsonstore import read_json
+
+    index = read_json(_uploads_dir(slug) / "index.json", {})
+    items = [(k, m) for k, m in index.items() if face is None or m.get("face") == face]
+    items.sort(key=lambda km: (km[1].get("created") or "", km[1].get("ts") or 0), reverse=True)
+    return [_upload_option(slug, k, m) for k, m in items if (_uploads_dir(slug) / f"{k}.jpg").exists()]
+
+
+def save_upload(slug: str, face: str, data: bytes, filename: str = "", bleed: str = "auto") -> dict[str, Any]:
+    """Store an own image for one card face, made print-ready (bleed, card shape, 300/600 DPI).
+    Returns the image option (choose it with ``choose``) plus ``notes`` for the user."""
+    import hashlib
+    import io
+
+    from PIL import Image, UnidentifiedImageError
+
+    from .jsonstore import update_json
+
+    if bleed not in ("auto", "yes", "no"):
+        raise ValueError("Beschnittrand: auto, yes oder no")
+    if not data:
+        raise ValueError("Leere Datei.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Das Bild ist zu groß (höchstens {MAX_UPLOAD_BYTES // 1_000_000} MB).")
+    try:
+        probe = Image.open(io.BytesIO(data))
+        fmt = probe.format
+        if probe.size[0] * probe.size[1] > imaging.UPLOAD_MAX_PIXELS:
+            raise ValueError("Das Bild hat zu viele Pixel (höchstens 80 Megapixel).")
+        probe.verify()
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+        raise ValueError("Das ist kein lesbares Bild (erlaubt: JPG, PNG, WebP, TIFF, BMP).") from exc
+    if fmt not in _UPLOAD_FORMATS:
+        raise ValueError("Bildformat nicht unterstützt (erlaubt: JPG, PNG, WebP, TIFF, BMP).")
+    out, info = imaging.card_from_upload(img, bleed)
+    key = hashlib.sha256(data + bleed.encode()).hexdigest()[:16]
+    folder = _uploads_dir(slug)
+    folder.mkdir(parents=True, exist_ok=True)
+    ext = _UPLOAD_FORMATS[fmt]
+    (folder / f"{key}-original.{ext}").write_bytes(data)
+    out.save(folder / f"{key}.jpg", "JPEG", quality=95, dpi=(info["dpi"], info["dpi"]))
+    meta = {"face": face, "filename": Path(filename).name[:120] if filename else "", "ext": ext, "dpi": info["dpi"],
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()), "ts": time.time(), **info}  # fmt: skip
+    with update_json(folder / "index.json", {}) as index:
+        index[key] = meta
+    notes = []
+    if info["cropped"]:
+        notes.append("Das Bild hatte kein Kartenformat und wurde mittig auf 63 × 88 mm zugeschnitten.")
+    notes.append("Beschnittrand war schon drin." if info["had_bleed"] else "Beschnittrand wurde ergänzt.")
+    if info["low_res"]:
+        notes.append(f"Niedrige Auflösung (etwa {info['source_dpi']} DPI) – der Druck wird unscharf.")
+    return {**_upload_option(slug, key, meta), "notes": notes}
+
+
+def delete_upload(slug: str, key: str) -> None:
+    """Remove an own image; a card that used it goes back to the automatic choice."""
+    from .jsonstore import update_json
+
+    folder = _uploads_dir(slug)
+    with update_json(folder / "index.json", {}) as index:
+        meta = index.pop(key, None)
+    if meta is None:
+        raise FileNotFoundError("Dieses Bild gibt es nicht mehr.")
+    for f in folder.glob(f"{key}*"):
+        f.unlink(missing_ok=True)
+    for face, opt in load_selection(slug).items():
+        if opt.get("upload") == key:
+            choose(slug, face, None)
 
 
 TOKEN_QTY_MAX = 99
@@ -406,7 +508,7 @@ async def alternatives(deck: dict[str, Any], card_name: str, side: str = "front"
     cfg = settings_mod.load()
     parts = card_name.split(" // ")
     face = parts[1] if side == "back" and len(parts) > 1 else parts[0]
-    options: list[dict[str, Any]] = []
+    options: list[dict[str, Any]] = uploads(deck["slug"], face) if page == 1 else []
     mpc = _mpc_client(cfg, "auto") if page == 1 else None
     if mpc:
         try:
@@ -523,7 +625,10 @@ async def _fetch(option: dict[str, Any], *, upscale: bool = False, cfg: dict[str
     With ``upscale`` Scryfall scans are enlarged 4x by Real-ESRGAN and rendered at 600 DPI.
     """
     if option["origin"] == "local":
-        return Path(option["id"])
+        path = _local_path(option["id"])
+        if path is None or not path.exists():
+            raise FileNotFoundError("eigenes Bild fehlt – bitte neu hochladen oder ein anderes Bild wählen")
+        return path
     raw = await download(option["full"], _cache_file(option))
     if option["origin"] == "mpcfill":
         return raw  # community scans already include the bleed edge
@@ -682,7 +787,7 @@ async def prepare(
             _link_or_copy(cached, dst)
             readable[option["id"]] = dst
             is_upscaled = upscale and option["origin"] == "scryfall" and face not in failed_faces
-            original = _cache_file(option) if option["origin"] != "local" else cached
+            original = _cache_file(option) if option["origin"] != "local" else (_local_path(option.get("original")) or cached)
             faces_info[face] = {
                 "file": str(dst),
                 "cache": str(cached),

@@ -2568,6 +2568,44 @@ async def api_print_choose(slug: str, req: ChooseRequest) -> dict[str, Any]:
     return proxy.choose(storage.slug(slug), req.face, req.option)
 
 
+@app.post("/api/decks/{slug}/print/upload")
+async def api_print_upload(slug: str, request: Request, face: str, filename: str = "", bleed: str = "auto",
+                           choose: bool = True) -> dict[str, Any]:  # fmt: skip
+    """Own image for one card face (raw image body): made print-ready, stored and – by default – chosen."""
+    _print_deck(slug)  # 404 for unknown decks/orders
+    if int(request.headers.get("content-length") or 0) > proxy.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"Das Bild ist zu groß (höchstens {proxy.MAX_UPLOAD_BYTES // 1_000_000} MB).")
+    data = await request.body()
+    try:
+        option = await asyncio.to_thread(proxy.save_upload, storage.slug(slug), face, data, filename, bleed)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if choose:
+        proxy.choose(storage.slug(slug), face, option)
+    return option
+
+
+@app.get("/api/decks/{slug}/print/uploads/{name}")
+async def api_print_upload_file(slug: str, name: str) -> FileResponse:
+    if not proxy.UPLOAD_NAME.match(name):
+        raise HTTPException(404, "Kein Bild")
+    path = proxy.order_dir(storage.slug(slug)) / proxy.UPLOADS / name
+    if not path.is_file():
+        raise HTTPException(404, "Bild nicht gefunden")
+    return FileResponse(path, headers={"Cache-Control": "max-age=86400"})
+
+
+@app.delete("/api/decks/{slug}/print/uploads/{key}")
+async def api_print_upload_delete(slug: str, key: str) -> dict[str, bool]:
+    if not re.fullmatch(r"[0-9a-f]{16}", key):
+        raise HTTPException(404, "Kein Bild")
+    try:
+        proxy.delete_upload(storage.slug(slug), key)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
 class TokenQtyRequest(BaseModel):
     counts: dict[str, int | None] = Field(description="token face -> copies (0 = leave out, null = default)")
 

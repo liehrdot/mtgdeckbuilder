@@ -345,6 +345,12 @@ Aufbau (bewusst schlicht: eine Hauptaktion pro Seite, Selteneres eingeklappt):
     10 Humans, 5 Treasures, 1 Monarch. „Standard je N“ gilt für Tokens ohne eigene Anzahl; Embleme und Marker
     bekommen standardmäßig 1. Die Anzahlen merkt sich das Deck (`proxies/<deck>/tokens.json`, Teil der
     Sicherung); „↺ Standard“ setzt eine zurück. In Sammelbestellungen stehen die Anzahlen in den Positionen.
+    Im Bildwähler einer Karte (Klick auf die Karte) gibt es neben MPC-Autofill- und Scryfall-Bildern
+    **„Eigenes Bild hochladen …“** (oder ein Bild in den Dialog ziehen): JPG, PNG, WebP, TIFF oder BMP. Die App macht
+    es druckfertig – Beschnittrand automatisch erkennen (MPC-Vorlage 2,74 × 3,74 Zoll) oder ergänzen, Bilder ohne
+    Kartenformat mittig auf 63 × 88 mm zuschneiden, 600 DPI ab etwa 1400 px Breite, sonst 300 DPI – und wählt es
+    gleich aus; bei zu niedriger Auflösung gibt es eine Warnung. Eigene Bilder stehen danach oben im Bildwähler
+    (mit ✕ zum Löschen), liegen in `proxies/<deck>/uploads/` und sind Teil der Sicherung.
   - „Liste kopieren“ steht oben rechts; im ⋯-Menü: „Als neues Deck kopieren“, „Neu prüfen“, Export für
     Cockatrice (.cod) und Tabletop Simulator (.json), Decklist als Textdatei, „Löschen“.
 - **Meine Sammlung** (eigene Seite, siehe unten), **Glossar** (Schlüsselwörter, Aktionen und

@@ -5,7 +5,7 @@ A backup holds everything that cannot be re-downloaded:
 - ``decks/`` – decks with versions, games, questions, opponent decks, meta suggestions and the trash;
 - ``collection.json``, ``blacklist.txt``, ``tablerules.json``, ``mtgdeck.settings.json``;
 - ``proxies/.orders/`` (collective print orders), ``proxies/<deck>/selection.json`` (chosen card images) and
-  ``proxies/<deck>/tokens.json`` (copies per token);
+  ``proxies/<deck>/tokens.json`` (copies per token), ``proxies/<deck>/uploads/`` (own card images);
 - ``deskmats/<id>/`` metadata and source image (no candidates or rendered print files – they are re-made).
 
 Backups live in ``backups/`` (``MTG_BACKUP_DIR``, gitignored): ``auto-*`` once a day when the GUI starts
@@ -63,6 +63,9 @@ def _members() -> list[tuple[str, Path]]:
     for name in PROXY_FILES:
         for p in sorted(proxy.PROXIES_DIR.glob(f"*/{name}")) if proxy.PROXIES_DIR.exists() else []:
             out.append((f"proxies/{p.parent.name}/{name}", p))
+    for p in sorted(proxy.PROXIES_DIR.glob("*/uploads/*")) if proxy.PROXIES_DIR.exists() else []:
+        if p.is_file() and not _SKIP.search(p.name):  # own card images
+            out.append((f"proxies/{p.parent.parent.name}/uploads/{p.name}", p))
     for d in sorted(deskmat.DESKMAT_DIR.iterdir()) if deskmat.DESKMAT_DIR.exists() else []:
         for p in [d / "meta.json", *d.glob("source.*")]:
             if p.is_file():
@@ -221,6 +224,10 @@ def restore(name: str) -> dict[str, Any]:
                 dest = proxy.PROXIES_DIR / sel.parent.name / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(sel, dest)
+        for up in (root / "proxies").glob("*/uploads/*") if (root / "proxies").exists() else []:
+            dest = proxy.PROXIES_DIR / up.parent.parent.name / "uploads" / up.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(up, dest)
         for d in (root / "deskmats").iterdir() if (root / "deskmats").exists() else []:
             dest = deskmat.DESKMAT_DIR / d.name
             dest.mkdir(parents=True, exist_ok=True)

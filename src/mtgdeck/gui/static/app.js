@@ -2297,6 +2297,8 @@ const planQuery = () => { const o = printOpts(); return new URLSearchParams({ so
 async function loadPlan() {
   $("#print-summary").textContent = "Lade Vorschau …";
   $("#print-grid").innerHTML = "";
+  $("#print-tokens").hidden = true;  // the old list may belong to another deck/order
+  $("#print-token-list").innerHTML = "";
   const slug = pctx().slug;
   try {
     [printPlan, prepared] = await Promise.all([
@@ -2324,6 +2326,7 @@ function renderPreparedInfo() {
 
 function originTag(img) {
   if (!img) return "";
+  if (img.origin === "local") return '<span class="tag own">eigenes Bild</span>';
   if (img.custom) return '<span class="tag own">eigene Wahl</span>';
   return img.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>';
 }
@@ -2508,13 +2511,15 @@ function renderPicker() {
   const q = $("#picker-filter").value.trim().toLowerCase();
   const current = ctx.card[ctx.side].image?.id;
   const mpc = ctx.options.filter((o) => o.origin === "mpcfill").length;
-  const scry = ctx.options.length - mpc;
+  const own = ctx.options.filter((o) => o.origin === "local").length;
+  const scry = ctx.options.length - mpc - own;
   const shown = ctx.options.map((o, k) => [o, k]).filter(([o]) => !q || `${o.label || ""} ${o.released || ""} ${o.dpi || ""}`.toLowerCase().includes(q));
-  $("#picker-hint").textContent = `${mpc ? `${mpc} MPC-Autofill-Scans (druckoptimiert) · ` : ""}${scry} von ${ctx.total} Scryfall-Drucken geladen`
+  $("#picker-hint").textContent = `${own ? `${own} eigene${own === 1 ? "s Bild" : " Bilder"} · ` : ""}${mpc ? `${mpc} MPC-Autofill-Scans (druckoptimiert) · ` : ""}${scry} von ${ctx.total} Scryfall-Drucken geladen`
     + (q ? ` · ${shown.length} passen zum Filter` : "") + (ctx.hasMore && q ? " – „Alle laden“ durchsucht alle Drucke" : "");
   $("#picker-grid").innerHTML = shown.map(([o, k]) => `<button type="button" class="pcard ${o.id === current ? "selected" : ""}" data-k="${k}">
     <img src="${esc(o.thumb)}" alt="" loading="lazy">
-    <div class="tags">${o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
+    ${o.upload ? `<span class="del" data-del="${esc(o.upload)}" title="Eigenes Bild löschen" aria-label="Eigenes Bild löschen">✕</span>` : ""}
+    <div class="tags">${o.origin === "local" ? '<span class="tag own">eigenes Bild</span>' : o.origin === "mpcfill" ? '<span class="tag mpc">MPC</span>' : '<span class="tag">Scryfall</span>'}${o.dpi ? `<span class="tag">${esc(o.dpi)} DPI</span>` : ""}</div>
     <div class="cap">${esc(o.label || "")}${o.released ? ` · ${esc(o.released.slice(0, 4))}` : ""}</div></button>`).join("")
     || '<p class="muted">Keine passenden Bilder.</p>';
   $("#picker-more").hidden = !ctx.hasMore;
@@ -2527,11 +2532,48 @@ $("#picker-all-btn").addEventListener("click", async () => {
 });
 
 async function pick(option) {
-  const { i, card, side, face } = pickerCtx;
-  const slug = pctx().slug;
-  await api(`/api/decks/${enc(slug)}/print/choose`, { method: "POST", body: { face, option } });
+  const ctx = pickerCtx;
+  await api(`/api/decks/${enc(pctx().slug)}/print/choose`, { method: "POST", body: { face: ctx.face, option } });
   $("#picker").close();
-  // update just this tile: re-rendering the whole grid would make the page jump to the top
+  await refreshAfterPick(ctx);
+}
+
+// own image: upload it for the picker's card face (it is chosen right away)
+async function uploadPickerImage(file) {
+  const ctx = pickerCtx;
+  if (!ctx || !file) return;
+  if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|tiff?|bmp)$/i.test(file.name)) { toast("Das ist keine Bilddatei.", "error"); return; }
+  const slug = pctx().slug;
+  const box = $("#picker-upload");
+  box.classList.add("busy");
+  $("#picker-hint").textContent = `Lade „${file.name}“ hoch und mache es druckfertig …`;
+  try {
+    const q = new URLSearchParams({ face: ctx.face, filename: file.name, bleed: $("#picker-bleed").value });
+    let res;
+    try { res = await fetch(`/api/decks/${enc(slug)}/print/upload?${q}`, { method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } }); }
+    catch { throw new Error("Keine Verbindung zur App – läuft mtg-gui noch?"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorText(res, data));
+    $("#picker").close();
+    toast(`Eigenes Bild für ${ctx.face} gewählt. ${(data.notes || []).join(" ")}`, data.notes?.some((n) => n.startsWith("Niedrige")) ? "error" : "info", 8000);
+    await refreshAfterPick(ctx);
+  } catch (err) { $("#picker-hint").textContent = err.message; fail(err); }
+  finally { box.classList.remove("busy"); $("#picker-file").value = ""; }
+}
+$("#picker-upload-btn").addEventListener("click", () => $("#picker-file").click());
+$("#picker-file").addEventListener("change", (e) => uploadPickerImage(e.target.files[0]));
+$("#picker").addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { e.preventDefault(); $("#picker").classList.add("dragging"); } });
+$("#picker").addEventListener("dragleave", (e) => { if (e.target === $("#picker")) $("#picker").classList.remove("dragging"); });
+$("#picker").addEventListener("drop", (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  $("#picker").classList.remove("dragging");
+  uploadPickerImage(e.dataTransfer.files[0]);
+});
+
+// after a pick/upload/delete: update just this tile – re-rendering the whole grid would make the page jump
+async function refreshAfterPick({ i, card, side }) {
+  const slug = pctx().slug;
   const plan = await api(`/api/decks/${enc(slug)}/print/plan?${planQuery()}`);
   if (pctx()?.slug !== slug) return;
   printPlan = plan;
@@ -2543,7 +2585,22 @@ async function pick(option) {
   if (card.token) renderTokenList();
   $(`#print-grid .pcard[data-i="${j}"]`)?.focus({ preventScroll: true });
 }
-$("#picker-grid").addEventListener("click", (e) => {
+$("#picker-grid").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    e.stopPropagation();
+    const ok = await ask({ title: "Eigenes Bild löschen?", text: "Das hochgeladene Bild wird entfernt. Nutzt die Karte es gerade, wählt die App wieder automatisch.", ok: "Löschen", danger: true });
+    if (!ok) return;
+    try {
+      const slug = pctx().slug, ctx = pickerCtx;
+      await api(`/api/decks/${enc(slug)}/print/uploads/${enc(del.dataset.del)}`, { method: "DELETE" });
+      ctx.options = ctx.options.filter((o) => o.upload !== del.dataset.del);
+      renderPicker();
+      await refreshAfterPick(ctx);
+      toast("Bild gelöscht.");
+    } catch (err) { fail(err); }
+    return;
+  }
   const t = e.target.closest("[data-k]");
   if (t) pick(pickerCtx.options[Number(t.dataset.k)]).catch(fail);
 });

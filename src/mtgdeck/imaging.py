@@ -42,8 +42,15 @@ def sizes(dpi: int = DPI) -> tuple[tuple[int, int], int, tuple[int, int]]:
 
 def add_bleed(src: Path, dst: Path, dpi: int = DPI) -> Path:
     """Card scan -> MPC-ready image at ``dpi``: fill rounded corners, scale to trim size, extend edges."""
+    out = bleed_image(Image.open(src), dpi)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    out.save(dst, "JPEG", quality=95, dpi=(dpi, dpi))
+    return dst
+
+
+def bleed_image(img: Image.Image, dpi: int = DPI) -> Image.Image:
+    """The card (trim size) at ``dpi`` with its edges replicated into the bleed area."""
     trim_px, bleed_px, full_px = sizes(dpi)
-    img = Image.open(src)
     img = img.convert("RGBA")
     base = Image.new("RGBA", img.size, _border_colour(img) + (255,))
     base.alpha_composite(img)
@@ -57,9 +64,44 @@ def add_bleed(src: Path, dst: Path, dpi: int = DPI) -> Path:
     out.paste(card.crop((0, h - 1, w, h)).resize((w, b)), (b, h + b))
     out.paste(out.crop((b, 0, b + 1, h + 2 * b)).resize((b, h + 2 * b)), (0, 0))
     out.paste(out.crop((w + b - 1, 0, w + b, h + 2 * b)).resize((b, h + 2 * b)), (w + b, 0))
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    out.save(dst, "JPEG", quality=95, dpi=(dpi, dpi))
-    return dst
+    return out
+
+
+TRIM_RATIO = TRIM_IN[0] / TRIM_IN[1]  # 0.714
+FULL_RATIO = (TRIM_IN[0] + 2 * BLEED_IN) / (TRIM_IN[1] + 2 * BLEED_IN)  # 0.733
+UPLOAD_MAX_PIXELS = 80_000_000
+
+
+def card_from_upload(img: Image.Image, bleed: str = "auto") -> tuple[Image.Image, dict[str, object]]:
+    """An uploaded card image -> print-ready (with bleed) at 300 or 600 DPI.
+
+    ``bleed``: "yes" (already an MPC template with bleed), "no" (card only – bleed is added) or "auto"
+    (decided by the aspect ratio). Images that are no card shape are cropped to it around the centre."""
+    from PIL import ImageOps
+
+    img = ImageOps.exif_transpose(img)
+    w, h = img.size
+    ratio = w / h
+    if bleed == "auto":
+        bleed = "yes" if abs(ratio - FULL_RATIO) < abs(ratio - TRIM_RATIO) and abs(ratio - FULL_RATIO) < 0.012 else "no"
+    target = FULL_RATIO if bleed == "yes" else TRIM_RATIO
+    cropped = abs(ratio - target) > 0.02
+    if cropped:  # centre crop to the card shape
+        if ratio > target:
+            nw = round(h * target)
+            img = img.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+        else:
+            nh = round(w / target)
+            img = img.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
+    trim_w = img.size[0] * (TRIM_IN[0] / (TRIM_IN[0] + 2 * BLEED_IN) if bleed == "yes" else 1)
+    dpi = 600 if trim_w >= 1400 else DPI
+    if bleed == "yes":
+        out = img.convert("RGB").resize(sizes(dpi)[2], Image.Resampling.LANCZOS)
+    else:
+        out = bleed_image(img, dpi)
+    effective = round(trim_w / TRIM_IN[0])
+    return out, {"dpi": dpi, "had_bleed": bleed == "yes", "cropped": cropped, "source_dpi": effective,
+                 "low_res": effective < 200, "size": [w, h]}  # fmt: skip
 
 
 def plain_cardback(dst: Path, rgb: tuple[int, int, int] = (38, 30, 58)) -> Path:

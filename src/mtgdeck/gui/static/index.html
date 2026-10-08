@@ -1577,6 +1577,17 @@
       <button type="button" class="icon-btn" id="picker-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
     </div>
   </div>
+  <div class="picker-upload" id="picker-upload">
+    <button type="button" class="btn" id="picker-upload-btn"><svg class="icon"><use href="#i-image"/></svg>Eigenes Bild hochladen …</button>
+    <input type="file" id="picker-file" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp" hidden>
+    <label class="check small">Beschnittrand
+      <select id="picker-bleed">
+        <option value="auto">automatisch erkennen</option>
+        <option value="yes">ist schon drin (MPC-Vorlage)</option>
+        <option value="no">fehlt – ergänzen</option>
+      </select></label>
+    <span class="muted small">oder ein Bild hierher ziehen · JPG, PNG, WebP, TIFF · am besten 63 × 88 mm mit 300–600 DPI</span>
+  </div>
   <div class="picker-bar">
     <input type="search" id="picker-filter" placeholder="Filtern: Set, Nummer oder Jahr …" aria-label="Drucke filtern">
     <p id="picker-hint" class="muted small"></p>
