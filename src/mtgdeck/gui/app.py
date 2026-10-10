@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -30,6 +31,7 @@ from .. import opponents as opponents_mod
 from .. import overview
 from ..jsonstore import ConflictError, StoreError, write_json
 from .. import backup, blacklist, brackets, chat, carddb, collection, deckedit, deckimport, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
+from .. import paths
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -44,6 +46,10 @@ log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 PROJECT_ROOT = storage.PROJECT_ROOT
+AGENT_ROOT = paths.agent_root()  # where Claude runs: its .claude/skills and CLAUDE.md (the repo, or the bundled agent/ folder)
+GUI_TOKEN = os.environ.get("MTG_GUI_TOKEN", "")  # set by the desktop shell: every request must carry it (cookie or Bearer)
+TOKEN_COOKIE = "mtg_token"
+VERSION = "0.1.0"
 
 
 @asynccontextmanager
@@ -69,6 +75,14 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_OPEN_PATHS = ("/api/health", "/static/", "/favicon")  # readable without the token (nothing personal in them)
+
+
+def _token_ok(request: Request) -> bool:
+    if not GUI_TOKEN:
+        return True
+    given = request.cookies.get(TOKEN_COOKIE) or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    return secrets.compare_digest(given, GUI_TOKEN) if given else False
 
 
 def _local_only() -> bool:
@@ -89,6 +103,15 @@ async def _guard(request: Request, call_next: Any) -> Any:
         origin = request.headers.get("origin")
         if origin and request.method not in _SAFE_METHODS and (urlsplit(origin).hostname or "") not in _LOCAL_HOSTS:
             return JSONResponse({"detail": "Anfrage von einer fremden Seite abgelehnt"}, status_code=403)
+    if GUI_TOKEN and not request.url.path.startswith(_OPEN_PATHS):
+        if request.url.path == "/" and request.query_params.get("token"):  # the desktop shell's first link
+            if not secrets.compare_digest(request.query_params["token"], GUI_TOKEN):
+                return JSONResponse({"detail": "Ungültiges Zugriffstoken"}, status_code=401)
+            response = RedirectResponse("/", status_code=303)
+            response.set_cookie(TOKEN_COOKIE, GUI_TOKEN, httponly=True, samesite="strict", path="/")
+            return response
+        if not _token_ok(request):
+            return JSONResponse({"detail": "Kein Zugriff: Die Oberfläche gehört zur Desktop-App. Bitte dort öffnen."}, status_code=401)
     response = await call_next(request)
     path = request.url.path
     if request.method not in _SAFE_METHODS and path.startswith("/api/") and not path.startswith("/api/sync") and response.status_code < 400:
@@ -241,10 +264,13 @@ async def _run_claude(
         return
 
     base_tools = ["Skill", "ToolSearch", "Read", "Glob", "Grep"] + (["WebSearch", "WebFetch"] if web else [])
+    mcp_cmd = _mcp_command()
+    cli = _find_claude_cli()
     options = ClaudeAgentOptions(
-        cwd=str(PROJECT_ROOT),
-        setting_sources=["project"],  # loads .claude/skills and CLAUDE.md
-        mcp_servers={"mtg": {"type": "stdio", "command": sys.executable, "args": ["-m", "mtgdeck.mcp_server"],
+        cwd=str(AGENT_ROOT),
+        setting_sources=["project"],  # loads .claude/skills and CLAUDE.md from AGENT_ROOT
+        cli_path=cli,
+        mcp_servers={"mtg": {"type": "stdio", "command": mcp_cmd[0], "args": mcp_cmd[1:],
                              "env": {**os.environ, "MTG_JOB_ID": job.id}}},  # decks saved by this job carry last_job
         strict_mcp_config=True,
         allowed_tools=base_tools + ([f"mcp__mtg__{t}" for t in READ_ONLY_TOOLS] if read_only else ["mcp__mtg"]),
@@ -357,19 +383,16 @@ _AI_SETUP_HINTS = ("not found", "nicht gefunden", "login", "log in", "logged in"
                    "credit balance", "unauthorized", "401", "claude code")  # fmt: skip
 
 
+def _mcp_command() -> list[str]:
+    """How a Claude job starts the mtg MCP server: the packaged backend runs itself with ``mcp``."""
+    return [sys.executable, "mcp"] if paths.frozen() else [sys.executable, "-m", "mtgdeck.mcp_server"]
+
+
 def _find_claude_cli() -> str | None:
     import shutil
 
-    try:
-        import claude_agent_sdk
-
-        bundled = Path(claude_agent_sdk.__file__).parent / "_bundled"
-        for name in ("claude", "claude.exe"):
-            if (bundled / name).is_file():
-                return str(bundled / name)
-    except ImportError:
-        return None
-    return shutil.which("claude")
+    bundled = paths.bundled_cli()
+    return str(bundled) if bundled else shutil.which("claude")
 
 
 def ai_status() -> dict[str, Any]:
@@ -880,6 +903,13 @@ def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/health")
+async def api_health() -> dict[str, Any]:
+    """Readiness for the desktop shell (no token needed): the backend is up and serving this data folder."""
+    return {"ok": True, "service": "mtgdeck-gui", "version": VERSION, "home": str(paths.home()), "frozen": paths.frozen(),
+            "agent_root": str(AGENT_ROOT), "skills": (AGENT_ROOT / ".claude" / "skills").is_dir(), "claude_cli": bool(_find_claude_cli())}  # fmt: skip
 
 
 @app.get("/api/ai")
@@ -2982,19 +3012,35 @@ async def api_sync_conflicts_clear() -> dict[str, bool]:
     return {"ok": True}
 
 
-def main() -> None:
+def serve() -> None:
+    """Run the GUI. ``MTG_GUI_PORT=0`` takes a free port; the address (with the token) goes to stdout as one
+    ``MTGDECK_URL=…`` line, which the desktop shell reads."""
+    import socket
+
     import uvicorn
 
     host = os.environ.get("MTG_GUI_HOST", "127.0.0.1")
     port = int(os.environ.get("MTG_GUI_PORT", 8765))
-    print(f"Commander Deckbuilder GUI: http://{host}:{port}")
+    sock = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    port = sock.getsockname()[1]
+    shown = f"[{host}]" if ":" in host else host
+    url = f"http://{shown}:{port}/" + (f"?token={GUI_TOKEN}" if GUI_TOKEN else "")
+    print(f"Commander Deckbuilder GUI: {url}")
+    print(f"MTGDECK_URL={url}", flush=True)
     try:
         made = backup.auto_backup()
         if made:
             print(f"Automatische Sicherung: {backup.BACKUP_DIR / made['name']}")
     except Exception as exc:  # a failed backup must not stop the GUI
         print(f"Automatische Sicherung fehlgeschlagen: {exc}")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    uvicorn.Server(config).run(sockets=[sock])
+
+
+def main() -> None:  # the old console script; ``mtg-gui`` now goes through launch.main (arguments first)
+    serve()
 
 
 if __name__ == "__main__":

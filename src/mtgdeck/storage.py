@@ -16,11 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import paths
 from .deck import DeckEntry, to_text
 from .jsonstore import ConflictError, StoreError, atomic_write_text, locked, read_json, update_json, write_json
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DECKS_DIR = Path(os.environ.get("MTG_DECKS_DIR", PROJECT_ROOT / "decks"))
+PROJECT_ROOT = paths.REPO_ROOT  # the code; user data lives under paths.home()
+DECKS_DIR = Path(os.environ.get("MTG_DECKS_DIR", paths.home() / "decks"))
 
 
 def slug(name: str) -> str:

@@ -47,8 +47,9 @@ from . import settings as settings_mod
 from .cards import deck_tokens, resolve
 from .http import download, get_json, post_json
 from .storage import PROJECT_ROOT
+from . import paths
 
-PROXIES_DIR = Path(os.environ.get("MTG_PROXIES_DIR", PROJECT_ROOT / "proxies"))
+PROXIES_DIR = Path(os.environ.get("MTG_PROXIES_DIR", paths.home() / "proxies"))
 
 STOCKS = ["(S27) Smooth", "(S30) Standard Smooth", "(S33) Superior Smooth", "(M31) Linen", "(P10) Plastic"]
 MPC_BRACKETS = [18, 36, 55, 72, 90, 108, 126, 144, 162, 180, 198, 216, 234, 396, 504, 612]

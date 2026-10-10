@@ -10,9 +10,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .storage import PROJECT_ROOT
+from . import paths
 
-SETTINGS_FILE = Path(os.environ.get("MTG_SETTINGS_FILE", PROJECT_ROOT / "mtgdeck.settings.json"))
+SETTINGS_FILE = Path(os.environ.get("MTG_SETTINGS_FILE", paths.home() / "mtgdeck.settings.json"))
 
 DEFAULTS: dict[str, Any] = {
     # MPC Autofill desktop tool (https://github.com/chilli-axe/mpc-autofill/releases)

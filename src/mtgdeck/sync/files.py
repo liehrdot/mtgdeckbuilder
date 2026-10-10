@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ..jsonstore import atomic_write_text, locked, write_json
+from .. import paths
 
 RULES: list[tuple[re.Pattern[str], str]] = [(re.compile(p), k) for p, k in [
     (r"decks/[^/.][^/]*\.json", "deck"),
@@ -71,7 +72,7 @@ class Roots:
         """The app's configured folders (read at call time, so tests and env overrides apply)."""
         from .. import blacklist, collection, proxy, storage, tablerules
 
-        state = Path(os.environ.get("MTG_SYNC_DIR", storage.PROJECT_ROOT / ".sync"))
+        state = Path(os.environ.get("MTG_SYNC_DIR", paths.home() / ".sync"))
         return cls(storage.DECKS_DIR, collection.COLLECTION_FILE, blacklist.BLACKLIST_FILE, tablerules.TABLERULES_FILE,
                    proxy.PROXIES_DIR, state)  # fmt: skip
 

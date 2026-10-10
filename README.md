@@ -540,6 +540,9 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_BULK_MAX_AGE_DAYS` | `7` | ab wann die lokale DB als veraltet gilt |
 | `MTG_DATA_DIR` / `MTG_CACHE_DIR` | `~/.cache/mtgdeck` | Speicherort DB / HTTP-Cache |
 | `MTG_CACHE_TTL` | `86400` | HTTP-Cache-Dauer in Sekunden |
+| `MTG_HOME` | Projektordner (Desktop-App: `%APPDATA%\MTG Deckbuilder`) | alle Nutzerdaten: Decks, Sammlung, Blacklist, Tischregeln, Sicherungen, Proxies, Einstellungen, Sync-Stand |
+| `MTG_CACHE_HOME` | `~/.cache/mtgdeck` (Desktop-App: `%LOCALAPPDATA%\MTG Deckbuilder\cache`) | Kartendatenbank und HTTP-Cache |
+| `MTG_GUI_TOKEN` | – | Zugriffstoken der Oberfläche (setzt die Desktop-App; ohne Token ist die Oberfläche für diesen Rechner offen) |
 | `MTG_DECKS_DIR` | `./decks` | Speicherort der Decks |
 | `MTG_BLACKLIST_FILE` | `./blacklist.txt` | Blacklist-Datei |
 | `MTG_TABLERULES_FILE` | `./tablerules.json` | Tischregeln |

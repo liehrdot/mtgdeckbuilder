@@ -1,0 +1,54 @@
+# Desktop backend for Windows: the PyInstaller folder build of mtgdeck-backend.exe, smoke-tested (starts on a free
+# port with a token, answers /api/health, refuses requests without the token) and uploaded as an artifact.
+# The Tauri shell and the installer come on top of this (desktop/, see docs/plan-desktop-app.md).
+name: Desktop
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["src/**", "desktop/**", "pyproject.toml", "uv.lock", ".claude/skills/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+jobs:
+  backend-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          uv sync --all-extras
+          uv pip install pyinstaller
+      - name: Build backend
+        run: uv run pyinstaller --noconfirm --clean desktop/sidecar/backend.spec
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "mtgdata"
+          $p = Start-Process -FilePath "dist/mtgdeck-backend/mtgdeck-backend.exe" -ArgumentList "--data", $data, "--port", "0", "--token", "auto" -RedirectStandardOutput out.txt -RedirectStandardError err.txt -PassThru -NoNewWindow
+          $url = $null
+          for ($i = 0; $i -lt 120 -and -not $url; $i++) {
+            Start-Sleep -Milliseconds 500
+            if (Test-Path out.txt) { $m = Select-String -Path out.txt -Pattern '^MTGDECK_URL=(.*)$' | Select-Object -First 1; if ($m) { $url = $m.Matches[0].Groups[1].Value } }
+          }
+          Get-Content out.txt, err.txt -ErrorAction SilentlyContinue
+          if (-not $url) { throw "backend printed no MTGDECK_URL" }
+          $base = $url.Split('?')[0]
+          $health = Invoke-RestMethod "$base" + "api/health"
+          if (-not $health.ok -or -not $health.frozen) { throw "health: $($health | ConvertTo-Json)" }
+          try { Invoke-WebRequest "$base" + "api/decks" -UseBasicParsing | Out-Null; throw "no token, but answered" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw $_ } }
+          $token = $url.Split('=')[1]
+          $decks = Invoke-RestMethod ("$base" + "api/decks") -Headers @{ Authorization = "Bearer $token" }
+          Write-Host "decks: $($decks.Count), url: $base"
+          Stop-Process -Id $p.Id -Force
+      - name: Size
+        shell: pwsh
+        run: '"{0:N0} MB" -f ((Get-ChildItem dist/mtgdeck-backend -Recurse | Measure-Object Length -Sum).Sum / 1MB)'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mtgdeck-backend-windows
+          path: dist/mtgdeck-backend
+          retention-days: 14

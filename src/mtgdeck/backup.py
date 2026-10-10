@@ -25,8 +25,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import storage
+from . import paths
 
-BACKUP_DIR = Path(os.environ.get("MTG_BACKUP_DIR", storage.PROJECT_ROOT / "backups"))
+BACKUP_DIR = Path(os.environ.get("MTG_BACKUP_DIR", paths.home() / "backups"))
 KEEP_AUTO = 10
 PROXY_FILES = ("selection.json", "tokens.json")  # per deck: chosen images, token quantities
 FORMAT = 1

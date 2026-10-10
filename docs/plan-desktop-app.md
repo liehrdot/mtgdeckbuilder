@@ -153,10 +153,15 @@ desktop/                      Tauri-2-Projekt (Rust-Hülle, wenige hundert Zeile
 | Schritt | Inhalt | fertig, wenn |
 |---|---|---|
 | **5a – Aufräumen** ✅ | Deskmat-Studio und die Online-Exporte entfernt; „Fragen zum Deck“ in „Frag Claude“ aufgegangen (Deckbezug, alte Fragen als Gespräche übernommen); Seitenleiste und Einstellungen gestrafft. KI-Hochskalierung und das Browser-Terminal bleiben auf Wunsch | Tests grün, Oberfläche ohne Leerstellen, alte Daten übernommen |
-| **5b – Backend als Programm** | `gui.main --port 0 --token`, Datenordner unter `%APPDATA%`, PyInstaller-Ordner-Build in GitHub Actions, Start unter einer Sekunde messen | `mtgdeck-backend.exe` startet ohne Python |
+| **5b – Backend als Programm** ✅ | `mtg-gui --data … --port 0 --token auto` (Launcher `mtgdeck.launch`, Datenordner `paths.home()`, Token-Schutz, `/api/health`, `mcp`-Modus), PyInstaller-Ordner-Build (`desktop/sidecar/backend.spec`), Workflow „Desktop“ baut und prüft die Windows-Exe | `mtgdeck-backend.exe` startet ohne Python |
 | **5c – Tauri-Hülle** | Fenster, Sidecar-Aufsicht mit Neustart, Single Instance, Fensterzustand, Tray mit Zustand, Autostart-Option, Benachrichtigungen | Installer aus GitHub Actions läuft auf einem frischen Windows |
 | **5d – Desktop-Feinschliff** | Tastenkürzel + Übersicht, Gerüst beim Start, Mica/Titelleiste, Schließen in den Tray, Einstellungen „Desktop“ | die zehn Regeln oben erfüllt |
 | **5e – Updates** | Signaturschlüssel, `latest.json`, Release-Workflow bei Tag, Update-Hinweis in der App | ein Update von v0.1 auf v0.2 läuft durch |
+
+**Stand 5b.** Gemessen am Linux-Build (Ordner, 302 MB, davon 230 MB die Claude-CLI des Agent-SDK): die Adresse
+steht nach 0,98 s auf stdout, `/api/health` antwortet nach 1,05 s. Ohne Token antwortet die Oberfläche mit 401, der
+erste Link setzt das Cookie, danach läuft alles wie gewohnt; `mtgdeck-backend mcp` meldet 43 Werkzeuge über stdio.
+Die Windows-Exe baut und prüft der Workflow `.github/workflows/desktop.yml`.
 
 ## Bewusst nicht
 

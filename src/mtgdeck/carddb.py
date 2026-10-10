@@ -30,8 +30,9 @@ from typing import Any, Iterable, Iterator
 
 from . import scryfall
 from .http import client, get_json
+from . import paths
 
-DATA_DIR = Path(os.environ.get("MTG_DATA_DIR", Path.home() / ".cache" / "mtgdeck"))
+DATA_DIR = Path(os.environ.get("MTG_DATA_DIR", paths.cache_home()))
 DB_PATH = DATA_DIR / "cards.sqlite"
 MAX_AGE = float(os.environ.get("MTG_BULK_MAX_AGE_DAYS", 7)) * 86400
 BULK_TYPE = os.environ.get("MTG_BULK_TYPE", "all_cards")

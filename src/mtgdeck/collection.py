@@ -26,8 +26,9 @@ from typing import Any
 from . import scryfall, storage
 from .cards import resolve
 from .jsonstore import locked, read_json, write_json
+from . import paths
 
-COLLECTION_FILE = Path(os.environ.get("MTG_COLLECTION_FILE", storage.PROJECT_ROOT / "collection.json"))
+COLLECTION_FILE = Path(os.environ.get("MTG_COLLECTION_FILE", paths.home() / "collection.json"))
 
 BASIC_LANDS = {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"} | {
     f"Snow-Covered {b}" for b in ("Plains", "Island", "Swamp", "Mountain", "Forest")

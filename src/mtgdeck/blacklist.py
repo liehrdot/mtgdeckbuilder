@@ -23,9 +23,9 @@ from typing import Any, Callable
 
 from .cards import resolve
 from .jsonstore import atomic_write_text, locked
-from .storage import PROJECT_ROOT
+from . import paths
 
-BLACKLIST_FILE = Path(os.environ.get("MTG_BLACKLIST_FILE", PROJECT_ROOT / "blacklist.txt"))
+BLACKLIST_FILE = Path(os.environ.get("MTG_BLACKLIST_FILE", paths.home() / "blacklist.txt"))
 
 _HEADER = (
     "# Karten und Regeln, die nie in ein Deck dürfen. Eine pro Zeile:\n"

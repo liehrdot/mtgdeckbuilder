@@ -17,3 +17,8 @@ tablerules.json
 backups/
 .sync/
 sync-data/
+
+# desktop builds
+dist/
+build/
+desktop/src-tauri/target/

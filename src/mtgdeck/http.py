@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import paths
+
 USER_AGENT = "mtgdeck/0.1 (Claude Code Commander deckbuilder; +https://github.com/liehrdot/mtgdeckbuilder)"
 
 # Minimum seconds between two requests to the same host (or host + path prefix).
@@ -35,7 +37,7 @@ _MIN_INTERVAL = {
 }
 _DEFAULT_INTERVAL = 0.25
 
-CACHE_DIR = Path(os.environ.get("MTG_CACHE_DIR", Path.home() / ".cache" / "mtgdeck"))
+CACHE_DIR = Path(os.environ.get("MTG_CACHE_DIR", paths.cache_home()))
 DEFAULT_TTL = int(os.environ.get("MTG_CACHE_TTL", 24 * 3600))  # Scryfall recommends caching >= 24h
 
 

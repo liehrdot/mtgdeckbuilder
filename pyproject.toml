@@ -20,6 +20,9 @@ gui = [
     "ptyprocess>=0.7; sys_platform != 'win32'",
     "segno>=1.6",  # QR code for pairing another device with the sync server
 ]
+desktop = [
+    "pyinstaller>=6.10",  # folder build of the desktop backend (desktop/sidecar/backend.spec)
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -29,7 +32,7 @@ dev = [
 
 [project.scripts]
 mtg-mcp = "mtgdeck.mcp_server:main"
-mtg-gui = "mtgdeck.gui.app:main"
+mtg-gui = "mtgdeck.launch:main"
 mtg-sync-server = "mtgdeck.sync.server:main"
 
 [build-system]

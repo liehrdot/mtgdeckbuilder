@@ -23,9 +23,9 @@ from typing import Any
 
 from . import blacklist
 from .jsonstore import locked, read_json, write_json
-from .storage import PROJECT_ROOT
+from . import paths
 
-TABLERULES_FILE = Path(os.environ.get("MTG_TABLERULES_FILE", PROJECT_ROOT / "tablerules.json"))
+TABLERULES_FILE = Path(os.environ.get("MTG_TABLERULES_FILE", paths.home() / "tablerules.json"))
 LIMITS = ("max_bracket", "max_game_changers", "max_tutors", "deck_budget")
 _CUR = {"eur": "€", "usd": "$"}
 

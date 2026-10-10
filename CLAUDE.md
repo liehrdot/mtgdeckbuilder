@@ -15,7 +15,8 @@ uv sync --all-extras                               # install (extras: gui, dev)
 uv run pytest                                      # all tests (offline, <2 s)
 uv run pytest tests/test_validate.py::test_game_changer_limits   # single test
 uv run mtg-mcp                                     # MCP server on stdio (normally started by Claude Code via .mcp.json)
-uv run mtg-gui                                     # web GUI on http://127.0.0.1:8765
+uv run mtg-gui                                     # web GUI on http://127.0.0.1:8765 (mtgdeck.launch: --data DIR --port 0 --token auto; `mcp` = MCP server)
+uv run pyinstaller desktop/sidecar/backend.spec     # desktop backend as a folder build → dist/mtgdeck-backend/ (extra: desktop)
 uv run mtg-sync-server                             # sync server on :8080 (normally the Docker image, deploy/sync)
 ```
 
@@ -24,6 +25,9 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 ## Architecture
 
 **Layers in `src/mtgdeck/`:**
+- **`paths.py`** (no package imports): the three roots every module reads its default path from. `home()` = user data (`MTG_HOME`, else the repo root in a checkout, else the platform app-data folder `%APPDATA%\MTG Deckbuilder` when `frozen()` = packaged with PyInstaller), `cache_home()` = card DB + HTTP cache (`MTG_CACHE_HOME`), `agent_root()` = where Claude runs with its `.claude/skills` and `CLAUDE.md` (`MTG_AGENT_ROOT`, else repo, else the bundled `agent/` folder = `desktop/agent/CLAUDE.md` + the skills). The per-file env vars (`MTG_DECKS_DIR` …) still win. `bundled_cli()` finds the Agent SDK's Claude binary (also inside the bundle).
+- **`launch.py`**: the `mtg-gui` entry point and the packaged backend's. Arguments (`--data`, `--cache`, `--host`, `--port` (0 = a free port), `--token TOKEN|auto`) become env vars *before* the app modules import; command `mcp` runs the MCP server (what `gui._mcp_command()` uses when frozen: `[sys.executable, "mcp"]`). `gui.serve()` binds the socket itself and prints one line `MTGDECK_URL=http://127.0.0.1:<port>/?token=…` for the desktop shell. With `GUI_TOKEN` set, the `_guard` middleware requires it on everything but `_OPEN_PATHS` (`/api/health`, static): the first `/?token=` link sets the HttpOnly cookie `mtg_token` and redirects, `Authorization: Bearer` works too. `GET /api/health` = readiness (`ok`, `version`, `home`, `frozen`).
+- **`desktop/`**: `sidecar/backend.spec` (PyInstaller `--onedir`: static files, `claude_agent_sdk/_bundled`, `agent/` with skills; excludes the sync server), `sidecar/entry.py`, `agent/CLAUDE.md` (the short instructions Claude gets inside the app). Workflow `.github/workflows/desktop.yml` builds it on Windows and smoke-tests the exe (port 0, token, health, 401 without token). Plan: `docs/plan-desktop-app.md`.
 - **`http.py`**
   - The single shared `httpx.AsyncClient` for every data source.
   - Rate limits are per host, or per host plus path prefix (Scryfall search, named and collection lookups: 500 ms; everything else: 100 ms).
@@ -215,6 +219,7 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
   - replaces `http._client` with an `httpx.MockTransport` that fakes Scryfall, EDHREC and Spellbook;
   - redirects the cache, DB, decks, blacklist, table rules, backups, collection and proxies to `tmp_path`, and sets `MTG_SYNC_DIR` / `MTG_SYNC_DATA` there;
   - disables throttling.
+- Backend as a program: `test_launch.py` (paths under `MTG_HOME`/frozen, launcher arguments, token guard, health; `MTG_TEST_SUBPROCESS=1` also starts a real server on a free port).
 - Questions from the phone: `test_phone_questions.py` (the chat ops, the job routes incl. long poll, lease and cancel, and the PC's `_answer_phone` with a faked `claude_agent_sdk.query` against a real server app).
 - Phone app: `test_phone_app.py` (read model, served files and CSP, `appops` linking/idempotency/errors, the full route round trip phone → server → PC `SyncClient`, redirects and the versioned `sw.js`, and that importing `sync.server` pulls in no httpx/PIL/mcp/SDK). The UI itself is checked with Playwright scripts outside the repo (iPhone and Pixel emulation, demo flows, tap counts, tap targets ≥ 44 px, light/dark; paired against a real server: pairing by code/link/iPhone steps/fake-camera QR, offline queue, offline start, undo after sending, sign-off, revoked).
 - Sync tests: `test_sync.py` runs two `Roots.under()` devices against a `SyncStore` via `LocalTransport`; `test_sync_server.py` runs the real server app in a `TestClient` and passes it as `client=` to `HttpTransport`/`service` (GUI route tests patch `service.HttpTransport` the same way and set `MTG_SYNC_AUTO=0`).
@@ -230,7 +235,8 @@ No linter or formatter is configured. Code uses `# fmt: skip` on some dense lite
 Environment variables (see README for the full table):
 - `MTG_BULK_TYPE`, `MTG_BULK_MAX_AGE_DAYS`
 - `MTG_DATA_DIR`, `MTG_CACHE_DIR`, `MTG_CACHE_TTL`
-- `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_TABLERULES_FILE`, `MTG_BACKUP_DIR`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_SYNC_DIR`, `MTG_SYNC_AUTO`
+- `MTG_HOME` (all user data), `MTG_CACHE_HOME`, `MTG_AGENT_ROOT`; per file: `MTG_DECKS_DIR`, `MTG_BLACKLIST_FILE`, `MTG_TABLERULES_FILE`, `MTG_BACKUP_DIR`, `MTG_COLLECTION_FILE`, `MTG_PROXIES_DIR`, `MTG_SETTINGS_FILE`, `MTG_SYNC_DIR`, `MTG_SYNC_AUTO`
+- GUI as a program: `MTG_GUI_TOKEN` (access token, set by `--token`)
 - Sync server: `MTG_SYNC_DATA`, `MTG_SYNC_PUBLIC_URL`, `MTG_SYNC_HOST`, `MTG_SYNC_PORT`
 - `MTG_AUTOFILL_PATH`, `MTG_MPCFILL_SERVER`, `MTG_CARDBACK`, `MTG_UPSCALER_PATH`
 - `MTG_GUI_HOST`, `MTG_GUI_PORT`, `MTG_MAX_TURNS`
