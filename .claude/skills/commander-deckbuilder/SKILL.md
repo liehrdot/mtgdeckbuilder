@@ -159,6 +159,14 @@ Every `save_deck` creates a version with a snapshot. Use:
   retune the copy so both variants exist side by side.
 - `export_deck` with `version` – decklist of an old version.
 
+## Zwei Decks vergleichen / Umbau bestellen
+
+When the user rebuilt a deck as a new deck (or asks which cards a deck needs beyond another one):
+`compare_decks(slug, other)` lists `added` (with `missing` = not covered by the collection), `removed`
+(cards that become free) and shared cards; without `other` it picks the deck it was copied from or the
+one sharing most cards. To print the difference: `update_print_order(from_deck=slug, compare_with=other,
+only_missing=true)`.
+
 ## Proxies drucken (MPC Autofill)
 
 When the user wants to print/proxy a deck (always offer it for proxy decks after saving):

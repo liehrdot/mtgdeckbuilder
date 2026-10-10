@@ -379,6 +379,7 @@
               <a id="export-tts" role="menuitem" href="#" download>Export für Tabletop Simulator (.json)</a>
               <a id="export-txt" role="menuitem" href="#" download>Decklist als Textdatei</a>
               <hr>
+              <button type="button" id="compare-deck-btn" role="menuitem">Mit anderem Deck vergleichen …</button>
               <button type="button" id="order-from-deck" role="menuitem">Zur Sammelbestellung …</button>
               <button type="button" id="deskmat-from-deck" role="menuitem">Deskmat aus diesem Deck …</button>
               <hr>
@@ -752,6 +753,14 @@
           <div id="compare-result" class="compare-result" hidden></div>
           <ol id="history" class="history" reversed></ol>
         </section>
+        <section class="panel deck-compare-teaser">
+          <div>
+            <h2>Mit einem anderen Deck vergleichen</h2>
+            <p class="muted small" id="dc-teaser-text">Welche Karten hat dieses Deck, die ein anderes nicht hat? Praktisch nach einem Umbau
+              als neues Deck: den Unterschied direkt in eine Sammelbestellung packen.</p>
+          </div>
+          <button type="button" class="btn" id="dc-open">Deck vergleichen …</button>
+        </section>
       </div>
 
       <!-- print studio -->
@@ -927,6 +936,7 @@
               <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
               <div class="menu-list" role="menu">
                 <button type="button" id="order-rename" role="menuitem">Umbenennen …</button>
+                <button type="button" id="order-export-menu" role="menuitem">Als Moxfield-Liste kopieren</button>
                 <button type="button" id="order-delete" role="menuitem" class="danger">Löschen …</button>
               </div>
             </details>
@@ -978,7 +988,13 @@
         </section>
 
         <section class="panel">
-          <h2>Inhalt <span id="order-total" class="count"></span></h2>
+          <div class="panel-head">
+            <h2>Inhalt <span id="order-total" class="count"></span></h2>
+            <div class="btn-group" id="order-export" hidden>
+              <button type="button" class="btn small" id="order-export-copy" title="Als Text-Liste für den Import bei Moxfield, Archidekt oder ManaBox kopieren">Als Moxfield-Liste kopieren</button>
+              <a class="btn small ghost" id="order-export-file" href="#" download>.txt herunterladen</a>
+            </div>
+          </div>
           <div id="order-items"></div>
           <p id="order-items-empty" class="empty-inline">Noch leer – füge oben Karten, ein Deck oder Tokens hinzu.</p>
         </section>
@@ -1730,6 +1746,7 @@
   <div class="dialog-head">
     <h2 id="card-view-title"></h2>
     <div class="btn-group">
+      <button type="button" class="btn small" id="card-view-order"><svg class="icon"><use href="#i-cart"/></svg>Zur Sammelbestellung</button>
       <a id="card-view-link" class="link" href="#" target="_blank" rel="noopener">Auf Scryfall öffnen</a>
       <button type="button" class="icon-btn" id="card-view-close" aria-label="Schließen" autofocus><svg class="icon"><use href="#i-x"/></svg></button>
     </div>
@@ -1761,12 +1778,50 @@
   <p class="rule0-ask">Passt das für eure Runde?</p>
 </dialog>
 
+<dialog id="deck-compare" class="dialog deck-compare" aria-labelledby="dc-title">
+  <div class="dialog-head">
+    <h2 id="dc-title">Deck vergleichen</h2>
+    <button type="button" class="icon-btn" id="dc-close" aria-label="Schließen"><svg class="icon"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="dc-bar">
+    <label class="field"><span>„<b id="dc-name"></b>“ vergleichen mit</span><select id="dc-other"></select></label>
+    <p id="dc-summary" class="dc-summary" aria-live="polite"></p>
+  </div>
+  <div id="dc-body">
+    <section class="dc-section">
+      <div class="dc-section-head">
+        <h3 id="dc-added-title">Kommt neu dazu</h3>
+        <div class="segmented small" role="radiogroup" aria-label="Welche Karten bestellen?" id="dc-mode">
+          <label><input type="radio" name="dcmode" value="missing"><span>Nur was mir fehlt</span></label>
+          <label><input type="radio" name="dcmode" value="all"><span>Alle neuen Karten</span></label>
+        </div>
+      </div>
+      <p class="muted small" id="dc-added-hint"></p>
+      <ul id="dc-added" class="dc-list"></ul>
+    </section>
+    <details class="dc-section">
+      <summary id="dc-removed-title">Wird frei</summary>
+      <p class="muted small" id="dc-removed-hint"></p>
+      <ul id="dc-removed" class="dc-list"></ul>
+    </details>
+    <details class="dc-section">
+      <summary id="dc-common-title">Gemeinsam</summary>
+      <p class="dc-common muted small" id="dc-common"></p>
+    </details>
+  </div>
+  <div class="dialog-actions">
+    <button type="button" class="btn ghost" id="dc-copy">Auswahl als Liste kopieren</button>
+    <button type="button" class="btn primary" id="dc-order"><svg class="icon"><use href="#i-cart"/></svg><span>Zur Sammelbestellung …</span></button>
+  </div>
+</dialog>
+
 <dialog id="order-dialog" class="dialog small-dialog" aria-labelledby="order-dialog-title">
   <form method="dialog" id="order-dialog-form">
     <h2 id="order-dialog-title">In eine Sammelbestellung packen?</h2>
     <p id="order-dialog-text" class="muted"></p>
     <label class="field"><span>Sammelbestellung</span><select id="order-dialog-target"></select></label>
     <label class="field" id="order-dialog-name-field"><span>Name der neuen Bestellung</span><input id="order-dialog-name" maxlength="120"></label>
+    <label class="field" id="order-dialog-qty-row" hidden><span>Anzahl</span><input type="number" id="order-dialog-qty" min="1" max="99" value="1"></label>
     <label class="check small" id="order-dialog-missing-row"><input type="checkbox" id="order-dialog-missing"> Nur Karten, die in meiner Sammlung fehlen</label>
     <div class="dialog-actions">
       <button type="button" class="btn ghost" id="order-dialog-cancel">Nicht jetzt</button>

@@ -693,7 +693,7 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 .small-dialog { width: min(460px, 92vw); }
 .small-dialog h2 { margin-bottom: var(--space-2); }
 .small-dialog input { margin-top: var(--space-2); }
-.dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
 .picker-bar { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin: var(--space-2) 0 var(--space-3); }
 .picker-bar input { flex: 0 1 280px; }
 .picker-bar p { margin: 0; }
@@ -1125,3 +1125,27 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
   background: var(--surface-2); font-size: var(--fs-sm); }
 .ai-off::before { content: "ⓘ "; }
 .imode-manual .btn { margin-top: var(--space-2); }
+
+/* compare a deck with another deck (rebuild -> order the difference) */
+.deck-compare { width: min(760px, calc(100vw - 32px)); }
+.dc-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2) var(--space-4); margin-bottom: var(--space-3); }
+.dc-bar .field { flex: 1 1 260px; margin: 0; }
+.dc-summary { flex: 1 1 100%; margin: 0; font-size: var(--fs-sm); }
+.dc-section { border-top: 1px solid var(--border); padding: var(--space-3) 0; }
+.dc-section > summary { cursor: pointer; font-weight: 650; }
+.dc-section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.dc-section-head h3 { margin: 0; font-size: var(--fs-md); }
+.dc-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; max-height: 46vh; overflow: auto; }
+.dc-list li { display: grid; grid-template-columns: auto 3ch minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); padding: 5px 4px; border-bottom: 1px solid var(--border); }
+.dc-list li.have { opacity: .55; }
+.dc-list .qty { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.dc-list .name { border: none; background: none; padding: 0; text-align: left; color: var(--text); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.dc-list .name:hover { color: var(--accent); text-decoration: underline; }
+.dc-list .pill { font-size: var(--fs-xs); white-space: nowrap; }
+.dc-list .price { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dc-list.plain li { grid-template-columns: 3ch minmax(0, 1fr) auto; }
+.dc-common { columns: 2 220px; margin: var(--space-2) 0 0; }
+.deck-compare-teaser { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-3); }
+.deck-compare-teaser h2 { margin-bottom: 4px; }
+#card-view .dialog-head .btn-group { flex-wrap: wrap; }
+@media (max-width: 600px) { .dc-list li { grid-template-columns: auto 3ch minmax(0, 1fr) auto; } .dc-list .price { display: none; } }

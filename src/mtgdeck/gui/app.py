@@ -171,7 +171,7 @@ def _tool_summary(name: str, args: dict[str, Any]) -> str:
 READ_ONLY_TOOLS = ["app_overview", "search_cards", "local_card_search", "get_cards", "find_commanders", "game_changers",
                    "card_db_status", "edhrec_recommendations", "edhrec_average_deck", "find_combos",
                    "bracket_rules", "validate_deck", "get_blacklist", "table_rules", "opponent_decks", "list_decks", "load_deck", "deck_games",
-                   "list_deck_versions", "compare_deck_versions", "export_deck", "import_deck", "search_precons", "print_orders",
+                   "list_deck_versions", "compare_deck_versions", "compare_decks", "export_deck", "import_deck", "search_precons", "print_orders",
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "update_table_rule", "update_opponent_deck", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
@@ -1787,6 +1787,7 @@ class OrderAdd(BaseModel):
     names: list[str] | None = None  # ... only these
     only_missing: bool = False  # ... only what the collection lacks
     since_version: int | None = None  # ... only the cards that came in after this version of the deck
+    compare_with: str | None = None  # ... only the cards it needs beyond this other deck (e.g. its rebuild source)
     text: str | None = None  # pasted list "2 Sol Ring"
     url: str | None = None  # deck link (Moxfield, Archidekt, ...): all its cards incl. commanders
 
@@ -1817,11 +1818,54 @@ async def api_order_delete(oid: str) -> dict[str, bool]:
     return {"deleted": True}
 
 
+@app.get("/api/orders/{oid}/export")
+async def api_order_export(oid: str, download: bool = False) -> Response:
+    """The order's cards as a Moxfield text list (tokens left out: Moxfield imports none)."""
+    order = _not_found(printorders.load, oid)
+    text, tokens = printorders.to_moxfield(oid)
+    headers = {"X-Tokens-Left-Out": str(tokens)}
+    if download:
+        from urllib.parse import quote
+
+        name = re.sub(r"[^\w .-]+", "", order["name"]).strip() or "sammelbestellung"
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name)}-moxfield.txt"
+    return Response(text, media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@app.get("/api/decks/{slug}/compare")
+async def api_deck_compare(slug: str, other: str | None = None) -> dict[str, Any]:
+    """Compare a deck with another saved deck: what it needs beyond it (for a collective order), what becomes free.
+    Without ``other`` the best match is used (the deck it was copied from, else the one sharing most cards)."""
+    candidates = _not_found(printorders.compare_candidates, slug)
+    if not other:
+        if not candidates:
+            return {"candidates": [], "other": None}
+        other = candidates[0]["slug"]
+    try:
+        diff = _not_found(printorders.compare, slug, other)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    names = [i["name"] for i in diff["added"] + diff["removed"]]
+    try:
+        cards, renames, _ = await resolve(names) if names else ({}, {}, [])
+    except Exception:  # images are a nice-to-have
+        cards, renames = {}, {}
+    for i in diff["added"] + diff["removed"]:
+        c = cards.get(renames.get(i["name"], i["name"])) or {}
+        i["image"], i["image_back"], i["price"] = c.get("image"), c.get("image_back"), c.get("price_eur")
+    return {**diff, "candidates": candidates}
+
+
 @app.post("/api/orders/{oid}/items")
 async def api_order_add(oid: str, req: OrderAdd) -> dict[str, Any]:
     _not_found(printorders.load, oid)
     items = [i.model_dump() for i in req.items]
-    if req.deck and req.since_version:
+    if req.deck and req.compare_with:
+        try:
+            items += _not_found(lambda: printorders.compare_items(req.deck, req.compare_with, only_missing=req.only_missing, names=req.names))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    elif req.deck and req.since_version:
         items += _not_found(lambda: printorders.added_since(req.deck, req.since_version, only_missing=req.only_missing))
     elif req.deck:
         deck = _not_found(storage.load, req.deck)

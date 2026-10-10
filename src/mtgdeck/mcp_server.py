@@ -605,6 +605,28 @@ async def compare_deck_versions(
 
 
 @mcp.tool()
+async def compare_decks(
+    slug: str,
+    other: Annotated[str | None, Field(description="Slug of the other saved deck; default: the deck it was copied from, else the one sharing most cards")] = None,
+) -> dict[str, Any]:
+    """Compare two saved decks, e.g. a rebuild with the old deck it replaces: cards only `slug` has
+    (`added`, with copies owned and `missing` from the collection), cards only the other has (`removed`,
+    they become free) and shared cards. To print the difference: update_print_order(from_deck=slug,
+    compare_with=other, only_missing=...)."""
+    try:
+        if not other:
+            cands = printorders.compare_candidates(slug)
+            if not cands:
+                return {"error": "Es gibt kein anderes gespeichertes Deck zum Vergleichen."}
+            other = cands[0]["slug"]
+        diff = printorders.compare(slug, other)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"error": str(exc)}
+    diff["common"] = len(diff["common"])  # names of shared cards are not needed for the answer
+    return diff
+
+
+@mcp.tool()
 async def restore_deck_version(slug: str, version: int, note: str = "") -> dict[str, Any]:
     """Make an old version current again (saved as a new version, nothing is lost).
     Use for 'undo', 'go back to the version before ...'. Only on user request."""
@@ -731,6 +753,7 @@ async def update_print_order(
     add_tokens: Annotated[list[OrderPos] | None, Field(description="Tokens/emblems by name, e.g. Treasure x 50")] = None,
     from_deck: Annotated[str | None, Field(description="Add the cards of this saved deck (slug)")] = None,
     only_missing: Annotated[bool, Field(description="With from_deck: only cards the collection lacks")] = False,
+    compare_with: Annotated[str | None, Field(description="With from_deck: only the cards from_deck has beyond this other deck (e.g. the old deck a rebuild replaces)")] = None,
     source: Annotated[str, Field(description="Label of the added positions, e.g. 'Upgrades Aesi'")] = "",
 ) -> dict[str, Any]:
     """Add cards and tokens to a collective print order, printed together like one deck in the GUI
@@ -740,7 +763,9 @@ async def update_print_order(
     items = [{"kind": "card", "name": c.name, "qty": c.qty, "source": source or "Claude"} for c in add_cards or []]
     items += [{"kind": "token", "name": t.name, "qty": t.qty, "source": source or "Tokens"} for t in add_tokens or []]
     try:
-        if from_deck:
+        if from_deck and compare_with:
+            items += printorders.compare_items(from_deck, compare_with, only_missing=only_missing)
+        elif from_deck:
             items += printorders.deck_items(storage.load(from_deck), only_missing=only_missing)
         if not items:
             return {"error": "Nichts hinzuzufügen.", "order": target}

@@ -205,6 +205,21 @@ def deck_items(deck: dict[str, Any], *, names: list[str] | None = None, only_mis
     return out
 
 
+def to_moxfield(order_id: str) -> tuple[str, int]:
+    """The order's cards as a Moxfield/Archidekt/ManaBox text list ("2 Sol Ring", summed over sources, sorted).
+    Tokens are left out – Moxfield imports no tokens. Returns (text, number of token positions left out)."""
+    order = load(order_id)
+    cards: dict[str, int] = {}
+    tokens = 0
+    for i in order["items"]:
+        if i["kind"] == "card":
+            cards[i["name"]] = cards.get(i["name"], 0) + int(i["qty"])
+        else:
+            tokens += 1
+    text = "".join(f"{q} {n}\n" for n, q in sorted(cards.items(), key=lambda kv: kv[0].lower()))
+    return text, tokens
+
+
 def as_deck(order_id: str) -> dict[str, Any]:
     """The deck-shaped dict for the print pipeline (cards summed by name, tokens with own quantities)."""
     order = load(order_id)
@@ -224,6 +239,86 @@ def as_deck(order_id: str) -> dict[str, Any]:
             "cards": [{"name": n, "qty": q} for n, q in sorted(cards.items())], "print_tokens": list(tokens.values())}  # fmt: skip
 
 
+def card_counts(deck: dict[str, Any]) -> dict[str, int]:
+    """Card name -> copies in a deck, commanders included."""
+    out = {c: 1 for c in deck.get("commanders", [])}
+    for c in deck.get("cards", []):
+        out[c["name"]] = out.get(c["name"], 0) + int(c.get("qty", 1))
+    return out
+
+
+def _deck_ref(deck: dict[str, Any]) -> dict[str, Any]:
+    return {"slug": deck["slug"], "name": deck.get("name") or deck["slug"], "commanders": deck.get("commanders", []),
+            "version": deck.get("version")}  # fmt: skip
+
+
+def compare_candidates(deck_slug: str) -> list[dict[str, Any]]:
+    """The other saved decks, best match first: the deck this one was copied from, then by shared cards."""
+    from . import storage
+
+    deck = storage.load(deck_slug)
+    mine = card_counts(deck)
+    source = (deck.get("copied_from") or {}).get("slug")
+    out = []
+    for d in storage.list_decks():
+        if d["slug"] == deck["slug"] or d.get("damaged"):
+            continue
+        try:
+            other = card_counts(storage.load(d["slug"]))
+        except (FileNotFoundError, ValueError):
+            continue
+        common = sum(min(q, other.get(n, 0)) for n, q in mine.items())
+        same_cmd = bool(set(d.get("commanders") or []) & set(deck.get("commanders") or []))
+        out.append({"slug": d["slug"], "name": d["name"], "commanders": d.get("commanders") or [], "common": common,
+                    "copied_from": d["slug"] == source, "same_commander": same_cmd})  # fmt: skip
+    return sorted(out, key=lambda c: (c["copied_from"], c["common"], c["same_commander"]), reverse=True)
+
+
+def compare(deck_slug: str, other_slug: str) -> dict[str, Any]:
+    """What ``deck_slug`` needs beyond ``other_slug`` – e.g. a rebuild that takes the cards of an old deck.
+
+    ``added``: copies only the deck has (with ``owned`` copies in the collection, ``missing`` = what the
+    collection does not cover, ``basic``); ``removed``: copies only the other deck has (they become free);
+    ``common``: shared copies."""
+    from . import collection, storage
+    from .collection import BASIC_LANDS
+
+    deck, other = storage.load(deck_slug), storage.load(other_slug)
+    if deck["slug"] == other["slug"]:
+        raise ValueError("Wähle ein anderes Deck zum Vergleichen.")
+    mine, theirs = card_counts(deck), card_counts(other)
+    owned = collection.owned_counts()
+    missing = collection.missing_counts(deck)
+    added, removed, common = [], [], []
+    for name in sorted(set(mine) | set(theirs)):
+        a, b = mine.get(name, 0), theirs.get(name, 0)
+        if min(a, b):
+            common.append({"name": name, "qty": min(a, b)})
+        if a > b:
+            o = owned.get(name, {"real": 0, "proxy": 0})
+            added.append({"name": name, "qty": a - b, "owned": o["real"] + o["proxy"], "missing": min(a - b, missing.get(name, 0)),
+                          "basic": name in BASIC_LANDS, "commander": name in deck.get("commanders", [])})  # fmt: skip
+        elif b > a:
+            removed.append({"name": name, "qty": b - a})
+    return {"deck": _deck_ref(deck), "other": _deck_ref(other), "added": added, "removed": removed, "common": common,
+            "totals": {"added": sum(i["qty"] for i in added), "missing": sum(i["missing"] for i in added),
+                       "removed": sum(i["qty"] for i in removed), "common": sum(i["qty"] for i in common)}}  # fmt: skip
+
+
+def compare_items(deck_slug: str, other_slug: str, *, only_missing: bool = False,
+                  names: list[str] | None = None) -> list[dict[str, Any]]:  # fmt: skip
+    """Order positions for the cards a deck needs beyond another deck (optionally only what the collection lacks)."""
+    diff = compare(deck_slug, other_slug)
+    wanted = set(names) if names else None
+    source = f"{diff['deck']['name']} (statt {diff['other']['name']})"
+    out = []
+    for i in diff["added"]:
+        qty = i["missing"] if only_missing else i["qty"]
+        if qty > 0 and (wanted is None or i["name"] in wanted):
+            out.append({"kind": "card", "name": i["name"], "qty": qty, "source": source, "source_slug": diff["deck"]["slug"]})
+    return out
+
+
 def added_since(deck_slug: str, since: int, *, only_missing: bool = False) -> list[dict[str, Any]]:
     """Positions for the cards a rebuild brought in: copies in the current deck that version ``since``
     did not have (commanders included), optionally capped by what the collection lacks."""
@@ -231,14 +326,7 @@ def added_since(deck_slug: str, since: int, *, only_missing: bool = False) -> li
 
     deck = storage.load(deck_slug)
     old = storage.load_version(deck_slug, since)
-
-    def counts(d: dict[str, Any]) -> dict[str, int]:
-        out = {c: 1 for c in d.get("commanders", [])}
-        for c in d.get("cards", []):
-            out[c["name"]] = out.get(c["name"], 0) + int(c.get("qty", 1))
-        return out
-
-    before, now = counts(old), counts(deck)
+    before, now = card_counts(old), card_counts(deck)
     missing = collection.missing_counts(deck) if only_missing else None
     out = []
     for name, qty in now.items():

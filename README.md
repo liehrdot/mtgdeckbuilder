@@ -347,7 +347,11 @@ sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis
     Upgrades kennen die Partien auch (`deck_games`). Gespeichert in `decks/.games/<slug>.json`.
     Zu jedem Gegner gibt es ein Feld „Aufgefallen“; bekannte Gegnerdecks wählst du per Klick aus,
     neue Commander werden automatisch als Gegnerdeck gemerkt (abschaltbar).
-  - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren.
+  - **Verlauf:** Versionen vergleichen, wiederherstellen, als neues Deck kopieren. Darunter (und im ⋯-Menü)
+    **„Mit anderem Deck vergleichen“**: zeigt, welche Karten dieses Deck zusätzlich braucht, welche frei werden und
+    welche gemeinsam sind – vorausgewählt ist das Deck, von dem es kopiert wurde, sonst das mit den meisten
+    gemeinsamen Karten. Mit Sammlung lässt sich „Nur was mir fehlt“ wählen; einzelne Karten abwählen, die
+    Auswahl als Liste kopieren oder direkt **in eine Sammelbestellung** packen – ideal nach einem Umbau als neues Deck.
   - **Drucken:** oben Bildquelle, Kartenstärke, „Tokens mitdrucken“ und „Nur fehlende Karten“, darunter die
     Schritte 1 Druckdateien vorbereiten · 2 PDF · 3 MakePlayingCards · 4 gedruckte Karten in die Sammlung
     übernehmen. „Bilder prüfen und tauschen“ ist darunter eingeklappt (öffnet sich von selbst, wenn Bilder fehlen).
@@ -386,6 +390,9 @@ anderen Deck und 50 Treasure-Tokens, zusammen in **einer** MakePlayingCards-Best
   - **Tokens:** Scryfall-Suche („Treasure“, „Zombie“ …) oder die Tokens eines Decks, „je N“ Stück;
   - **Liste / Link:** eingefügte Liste („1 Craterhoof Behemoth“) oder ein Deck-Link (Moxfield, Archidekt,
     MTGGoldfish, TappedOut, Deckstats, EDHREC).
+- **Aus der Kartenansicht:** Klick auf eine Karte (oder einen Token unter „Tokens & Marker“) → „Zur
+  Sammelbestellung“ neben dem Scryfall-Link, mit Anzahl.
+- **Umbau bestellen:** im Deck „Mit anderem Deck vergleichen“ → den Unterschied zum alten Deck hinzufügen.
 - **Von überall:** Upgrade-Vorschläge („Zur Sammelbestellung“ – drucken, ohne sie schon ins Deck zu übernehmen),
   eine Stufe des Upgrade-Plans, das ⋯-Menü eines Decks und Claude (`update_print_order`).
 - **Nach jedem Umbau** eines Decks (Claude überarbeitet oder ändert die Stärke, manuelles Bearbeiten, Upgrades
@@ -393,6 +400,9 @@ anderen Deck und 50 Treasure-Tokens, zusammen in **einer** MakePlayingCards-Best
   sollen – auf Wunsch nur die, die in der Sammlung fehlen.
 - **Inhalt** gruppiert nach Herkunft (Deck, Upgrades, Liste, Tokens …), Anzahl änderbar, einzelne Positionen oder
   ganze Gruppen entfernen; oben stehen Karten, Tokens, Druckplätze und die MPC-Staffel (18, 36, 55, 72 …).
+- **Als Moxfield-Liste:** „Als Moxfield-Liste kopieren“ oder „.txt herunterladen“ – alle Karten zusammengezählt
+  („3 Sol Ring“), passend für den Import bei Moxfield, Archidekt oder ManaBox. Tokens sind nicht dabei
+  (Moxfield importiert keine); die App sagt, wie viele ausgelassen wurden.
 - **Drucken** wie bei einem Deck – derselbe Bereich mit Bildauswahl (MPC Autofill/Scryfall, eigene Wahl pro
   Karte), KI-Hochskalierung, Druckdateien, PDF, MakePlayingCards und „In die Sammlung übernehmen“. Tokens ohne
   gewähltes Bild bekommen das neueste passende Scryfall-Token.
@@ -506,6 +516,7 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `search_precons` / `import_precon` | Starterdecks (Precons) von MTGJSON suchen / als Deck speichern |
 | `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
 | `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
+| `compare_decks` | zwei Decks vergleichen (z. B. Umbau gegen altes Deck): neue, frei werdende und gemeinsame Karten, mit Sammlungs-Abgleich; `update_print_order(from_deck=, compare_with=)` bestellt den Unterschied |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
 | `app_overview` | alles auf einen Blick: alle Decks mit Stufe, Power, Legalität, Preis, Deck-Check, Bilanz, fehlenden Karten, dazu Gegnerdecks, Tischregeln, Sammlung |
 | `opponent_decks` / `update_opponent_deck` | Gegnerdecks mit Merkmalen, Beobachtungen und Bilanz lesen / anlegen, Beobachtung notieren, löschen |

@@ -1345,13 +1345,13 @@ async function loadTokens(d) {
   if (currentDeck?.slug !== d.slug || !toks.length) return;
   $("#token-panel").hidden = false;
   $("#token-count").textContent = toks.length;
-  $("#token-list").innerHTML = toks.map((t) => `<li class="card" data-img="${esc(t.image || "")}" data-name="${esc(t.name)}">
+  $("#token-list").innerHTML = toks.map((t) => `<li class="card" data-img="${esc(t.image || "")}" data-name="${esc(t.name)}" data-type="${esc(t.type_line)}" data-id="${esc(t.id || "")}">
     ${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : ""}
     <div><b>${esc(t.name)}</b><div class="muted small">${esc(t.type_line.replace(/^Token /, ""))} · von ${esc(t.from.slice(0, 3).join(", "))}${t.from.length > 3 ? ` +${t.from.length - 3}` : ""}</div></div></li>`).join("");
 }
 $("#token-list").addEventListener("click", (e) => {
   const li = e.target.closest("li[data-name]");
-  if (li) showCardView(li.dataset.name, { image: li.dataset.img });
+  if (li) showCardView(li.dataset.name, { image: li.dataset.img, token: true, type_line: li.dataset.type, id: li.dataset.id });
 });
 
 // ---------- replacement suggestions ----------
@@ -1512,7 +1512,9 @@ $("#cards").addEventListener("keydown", (e) => {
   if ((e.key === "Enter" || e.key === " ") && e.target.matches(".card[role=button]")) { e.preventDefault(); openCardFromEvent(e); }
 });
 
+let cardViewCard = null;  // { name, cd } of the open card view
 function showCardView(name, cd) {
+  cardViewCard = { name, cd: cd || {} };
   const faces = name.split(" // ");
   const imgs = [[cd.image, faces[0]], ...(cd.image_back ? [[cd.image_back, faces[1] || "Rückseite"]] : [])];
   $("#card-view-title").textContent = name + (cd.image_back ? " – doppelseitig" : "");
@@ -1528,6 +1530,17 @@ function showCardView(name, cd) {
   loadCardText(name);
 }
 $("#card-view-close").addEventListener("click", () => $("#card-view").close());
+$("#card-view-order").addEventListener("click", () => {
+  if (!cardViewCard) return;
+  const { name, cd } = cardViewCard;
+  const deck = parseHash().view === "deck" && currentDeck ? currentDeck : null;
+  const token = !!cd.token;
+  const item = { kind: token ? "token" : "card", name, qty: 1, source: deck ? deck.name : (token ? "Tokens" : "Einzelkarten"),
+    ...(deck ? { source_slug: deck.slug } : {}),
+    ...(token ? { type_line: cd.type_line || "Token", token_id: /^[0-9a-f-]{36}$/.test(cd.id || "") ? cd.id : null, image: cd.image || null } : {}) };
+  orderDialog({ title: token ? "Token drucken" : "Karte drucken", text: `„${name}“ in eine Sammelbestellung packen.`,
+    body: { items: [item] }, qtyField: true });
+});
 
 // rules text next to the image: German printed text or English Oracle text, glossary terms marked
 const cardTexts = new Map();
@@ -3895,6 +3908,8 @@ function renderOrder() {
   $("#order-meta").textContent = orderMeta(o.counts);
   $("#order-total").textContent = o.counts.slots || "";
   $("#order-items-empty").hidden = !!o.items.length;
+  $("#order-export").hidden = !o.items.some((i) => i.kind === "card");
+  $("#order-export-file").href = `/api/orders/${enc(o.id)}/export?download=1`;
   const groups = new Map();
   for (const i of o.items) {
     if (!groups.has(i.source)) groups.set(i.source, []);
@@ -3908,6 +3923,26 @@ function renderOrder() {
         <span>${esc(i.name)}${i.kind === "token" ? ` <span class="muted">${esc(i.type_line || "Token")}</span>` : ""}</span>
         <button type="button" class="icon-btn" data-remove="${esc(i.id)}" aria-label="${esc(i.name)} entfernen" title="Entfernen">${icon("x")}</button></li>`).join("")}</ul></section>`).join("");
 }
+
+// the order's cards as a Moxfield list (also Archidekt, ManaBox …); tokens are left out
+async function copyOrderList() {
+  $("#order-menu").open = false;
+  if (!currentOrder) return;
+  try {
+    const res = await fetch(`/api/orders/${enc(currentOrder.id)}/export`);
+    if (!res.ok) throw new Error(errorText(res, await res.json().catch(() => ({}))));
+    const text = await res.text();
+    if (!text.trim()) { toast("Die Bestellung enthält noch keine Karten.", "error"); return; }
+    const tokens = Number(res.headers.get("X-Tokens-Left-Out") || 0);
+    await navigator.clipboard.writeText(text);
+    toast(`Liste kopiert (${text.trim().split("\n").length} Zeilen) – in Moxfield unter „Import“ einfügen.`
+      + (tokens ? ` ${tokens} ${tokens === 1 ? "Token-Position ist" : "Token-Positionen sind"} nicht dabei (Moxfield importiert keine Tokens).` : ""), "info", 7000);
+  } catch (err) {
+    fail(err.name === "NotAllowedError" ? new Error("Kopieren nicht möglich – lade die Liste als .txt herunter.") : err);
+  }
+}
+$("#order-export-copy").addEventListener("click", copyOrderList);
+$("#order-export-menu").addEventListener("click", copyOrderList);
 
 // the print preview follows the order (MPC searches are cached, so this is cheap)
 const refreshOrderPlan = (() => {
@@ -4065,7 +4100,7 @@ $("#order-items").addEventListener("click", async (e) => {
 });
 
 // "In eine Sammelbestellung packen?" – after a rebuild, from upgrades, a plan stage or the deck menu
-function orderDialog({ title, text, body, missingToggle = false }) {
+function orderDialog({ title, text, body, missingToggle = false, qtyField = false }) {
   return refreshOrders().then(() => new Promise((resolve) => {
     const dlg = $("#order-dialog"), sel = $("#order-dialog-target");
     $("#order-dialog-title").textContent = title;
@@ -4078,6 +4113,8 @@ function orderDialog({ title, text, body, missingToggle = false }) {
     sel.onchange = syncName;
     syncName();
     $("#order-dialog-missing-row").hidden = !missingToggle;
+    $("#order-dialog-qty-row").hidden = !qtyField;
+    $("#order-dialog-qty").value = 1;
     $("#order-dialog-missing").checked = missingToggle && !!collSummary?.entries;
     const done = (r) => { dlg.onclose = null; if (dlg.open) dlg.close(); resolve(r); };
     $("#order-dialog-cancel").onclick = () => done(null);
@@ -4088,6 +4125,10 @@ function orderDialog({ title, text, body, missingToggle = false }) {
         let id = sel.value;
         if (!id) id = (await api("/api/orders", { method: "POST", body: { name: $("#order-dialog-name").value } })).id;
         const payload = { ...body, ...(missingToggle ? { only_missing: $("#order-dialog-missing").checked } : {}) };
+        if (qtyField) {
+          const qty = Math.max(1, Math.min(99, Math.round(Number($("#order-dialog-qty").value) || 1)));
+          payload.items = payload.items.map((i) => ({ ...i, qty }));
+        }
         const r = await api(`/api/orders/${enc(id)}/items`, { method: "POST", body: payload });
         refreshOrders();
         toast(`${r.added} ${r.added === 1 ? "Karte" : "Karten"} in „${r.name}“ – zu finden unter „Sammelbestellungen“.`);
@@ -4097,6 +4138,97 @@ function orderDialog({ title, text, body, missingToggle = false }) {
     dlg.showModal();
   }));
 }
+
+// ---------- compare with another deck: what a rebuild needs beyond the old deck -> collective order ----------
+let dcData = null;
+async function openDeckCompare(other = null) {
+  if (!currentDeck) return;
+  $("#deck-menu").open = false;
+  $("#dc-name").textContent = currentDeck.name;
+  $("#dc-summary").textContent = "Vergleiche …";
+  $("#dc-body").hidden = true;
+  if (!$("#deck-compare").open) $("#deck-compare").showModal();
+  try {
+    const slug = currentDeck.slug;
+    const r = await api(`/api/decks/${enc(slug)}/compare${other ? `?other=${enc(other)}` : ""}`);
+    if (currentDeck?.slug !== slug) return;
+    if (!r.other) { $("#dc-other").innerHTML = ""; $("#dc-summary").textContent = "Es gibt noch kein anderes Deck zum Vergleichen."; return; }
+    dcData = r;
+    $("#dc-other").innerHTML = r.candidates.map((c) => `<option value="${esc(c.slug)}" ${c.slug === r.other.slug ? "selected" : ""}>${esc(c.name)}`
+      + ` – ${c.copied_from ? "Vorlage dieses Decks, " : ""}${c.common} gemeinsame Karten</option>`).join("");
+    const hasColl = !!collSummary?.entries;
+    $(`#dc-mode [value="${hasColl && r.totals.missing < r.totals.added ? "missing" : "all"}"]`).checked = true;
+    $("#dc-mode").hidden = !hasColl;
+    renderDeckCompare();
+  } catch (err) { $("#dc-summary").textContent = err.message; }
+}
+const dcMode = () => ($("#dc-mode").hidden ? "all" : $("#dc-mode input:checked")?.value || "all");
+const dcQty = (i) => (dcMode() === "missing" ? i.missing : i.qty);
+function renderDeckCompare() {
+  const r = dcData, cur = currentDeck?.currency || "eur";
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  $("#dc-body").hidden = false;
+  $("#dc-summary").innerHTML = `<b>${n(r.totals.added, "Karte", "Karten")}</b> kommen neu dazu`
+    + (collSummary?.entries ? `, davon <b>${r.totals.missing}</b> nicht in deiner Sammlung` : "")
+    + ` · ${n(r.totals.removed, "Karte wird", "Karten werden")} frei · ${r.totals.common} gemeinsam`;
+  $("#dc-added-title").textContent = `Kommt neu dazu (${r.totals.added})`;
+  $("#dc-added-hint").textContent = `Karten in „${r.deck.name}“, die „${r.other.name}“ nicht hat.`
+    + (dcMode() === "missing" ? " Grau = hast du schon in deiner Sammlung." : "");
+  $("#dc-added").innerHTML = r.added.map((i, k) => {
+    const q = dcQty(i);
+    const status = i.basic ? '<span class="pill">Standardland</span>'
+      : i.missing === 0 ? `<span class="pill ok">in Sammlung${i.owned ? ` (${i.owned})` : ""}</span>`
+      : collSummary?.entries ? '<span class="pill bad">fehlt</span>' : "";
+    return `<li class="${q ? "" : "have"}"><input type="checkbox" data-k="${k}" ${q && !(i.basic && dcMode() === "all") ? "checked" : ""} ${q ? "" : "disabled"} aria-label="${esc(i.name)} bestellen">
+      <span class="qty">${q || i.qty}×</span><button type="button" class="name" data-name="${esc(i.name)}" data-k="${k}">${esc(i.name)}${i.commander ? " (Commander)" : ""}</button>
+      ${status}<span class="price">${i.price ? esc(fmtPrice(i.price, cur)) : ""}</span></li>`;
+  }).join("") || '<li class="muted small">Keine – alle Karten stecken auch im anderen Deck.</li>';
+  $("#dc-removed-title").textContent = `Wird frei (${r.totals.removed})`;
+  $("#dc-removed-hint").textContent = `Karten aus „${r.other.name}“, die „${r.deck.name}“ nicht braucht.`;
+  $("#dc-removed").className = "dc-list plain";
+  $("#dc-removed").innerHTML = r.removed.map((i) => `<li><span class="qty">${i.qty}×</span><button type="button" class="name" data-name="${esc(i.name)}">${esc(i.name)}</button>
+    <span class="price">${i.price ? esc(fmtPrice(i.price, cur)) : ""}</span></li>`).join("") || '<li class="muted small">Keine.</li>';
+  $("#dc-common-title").textContent = `Gemeinsam (${r.totals.common})`;
+  $("#dc-common").innerHTML = r.common.map((i) => esc(`${i.qty > 1 ? i.qty + "× " : ""}${i.name}`)).join("<br>");
+  updateDcSelection();
+}
+function dcSelected() {
+  return $$("#dc-added input[type=checkbox]:checked").map((b) => dcData.added[Number(b.dataset.k)]).map((i) => ({ ...i, order: dcQty(i) })).filter((i) => i.order > 0);
+}
+function updateDcSelection() {
+  const sel = dcSelected();
+  const copies = sel.reduce((a, i) => a + i.order, 0);
+  $("#dc-order span").textContent = copies ? `${copies} ${copies === 1 ? "Karte" : "Karten"} zur Sammelbestellung …` : "Zur Sammelbestellung …";
+  $("#dc-order").disabled = $("#dc-copy").disabled = !copies;
+}
+$("#dc-other").addEventListener("change", (e) => openDeckCompare(e.target.value));
+$("#dc-mode").addEventListener("change", renderDeckCompare);
+$("#dc-added").addEventListener("change", updateDcSelection);
+$("#deck-compare").addEventListener("click", (e) => {
+  const b = e.target.closest("button.name");
+  if (!b) return;
+  const i = [...(dcData?.added || []), ...(dcData?.removed || [])].find((x) => x.name === b.dataset.name) || {};
+  showCardView(b.dataset.name, { image: i.image, image_back: i.image_back });
+});
+$("#dc-close").addEventListener("click", () => $("#deck-compare").close());
+$("#dc-copy").addEventListener("click", async () => {
+  const text = dcSelected().map((i) => `${i.order} ${i.name}`).join("\n");
+  try { await navigator.clipboard.writeText(text); toast("Liste kopiert – z. B. für Moxfield, Cardmarket oder einen Laden."); }
+  catch { toast("Kopieren nicht möglich – der Browser erlaubt keinen Zugriff auf die Zwischenablage.", "error"); }
+});
+$("#dc-order").addEventListener("click", async () => {
+  const sel = dcSelected();
+  if (!sel.length) return;
+  const r = dcData;
+  $("#deck-compare").close();
+  const copies = sel.reduce((a, i) => a + i.order, 0);
+  await orderDialog({ title: "Umbau bestellen",
+    text: `${copies} ${copies === 1 ? "Karte" : "Karten"} aus „${r.deck.name}“, die „${r.other.name}“ nicht hat: `
+      + sel.slice(0, 6).map((i) => (i.order > 1 ? `${i.order}× ${i.name}` : i.name)).join(", ") + (sel.length > 6 ? ` und ${sel.length - 6} weitere` : "") + ".",
+    body: { items: sel.map((i) => ({ kind: "card", name: i.name, qty: i.order, source: `${r.deck.name} (statt ${r.other.name})`, source_slug: r.deck.slug })) } });
+});
+$("#compare-deck-btn").addEventListener("click", () => openDeckCompare());
+$("#dc-open").addEventListener("click", () => openDeckCompare());
 
 async function offerOrderAfterRebuild(slug, since) {
   if (!slug || !since) return;
@@ -4784,6 +4916,7 @@ function paletteItems() {
     for (const [tab, label] of Object.entries(tabNames)) items.push({ label, hint: d.name, run: () => selectTab(tab) });
     items.push({ label: "Karten bearbeiten", hint: d.name, run: () => { selectTab("karten"); if (!edit) setEditing(true); } });
     items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });
+    items.push({ label: "Mit anderem Deck vergleichen", hint: d.name, run: () => openDeckCompare() });
     items.push({ label: "Deskmat aus diesem Deck", hint: d.name, run: () => $("#deskmat-from-deck").click() });
     items.push({ label: "Partie festhalten", hint: d.name, run: () => { selectTab("partien"); $("#game-form input[name=result]").focus(); } });
   }
