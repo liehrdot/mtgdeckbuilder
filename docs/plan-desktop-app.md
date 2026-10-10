@@ -122,23 +122,35 @@ App rührt sie nicht mehr an.
 ## Aufbau der Desktop-App
 
 ```
-desktop/                      Tauri-2-Projekt (Rust-Hülle, wenige hundert Zeilen)
+desktop/                      Tauri-2-Projekt (Rust-Hülle, rund 450 Zeilen)
   src-tauri/
-    tauri.conf.json           Fenster, Bundle (NSIS), Updater, Sidecar
-    src/main.rs               Sidecar starten/überwachen, Tray, Single Instance, Fensterzustand
+    tauri.conf.json           Fenster, Bundle (NSIS, Backend als Ressource), Capabilities
+    src/lib.rs                Fenster, Tray, Single Instance, Fensterzustand, Autostart, --selftest
+    src/backend.rs            Backend starten, überwachen, neu starten, Protokoll
     icons/
-  sidecar/                    PyInstaller-Spec: mtgdeck.gui.app als Ordner-Build
+  ui/index.html               lokale Startseite (Gerüst), springt zur Adresse des Backends
+  sidecar/                    PyInstaller-Spec: mtgdeck-backend als Ordner-Build, agent/ mit Skills
+  agent/CLAUDE.md             Anweisungen für Claude innerhalb der App
 ```
 
-- **Start:** Tauri startet `mtgdeck-backend.exe --port 0 --token <zufällig>` (neu in `gui.main`: Port 0 bindet
-  einen freien Port, der Token schützt die lokale API; das Backend meldet den Port auf stdout). Das Fenster lädt
-  `http://127.0.0.1:<port>/?token=…` und zeigt bis zum `/api/health` das Gerüst.
-- **Daten:** `MTG_DATA_DIR` zeigt auf `%APPDATA%\MTG Deckbuilder`; die Kartendatenbank auf `%LOCALAPPDATA%`.
-  Ein Erststart übernimmt vorhandene Daten aus dem Projektordner, wenn er welche findet.
-- **Claude:** Der Agent-SDK bringt die CLI mit; die App zeigt in den Einstellungen, ob sie angemeldet ist, und
-  öffnet die Anmeldung in einem Konsolenfenster.
-- **Tray:** Symbol mit Zustand (verbunden, Sync läuft, Problem), Menü: Öffnen, Jetzt abgleichen, Beenden.
-  Fenster schließen minimiert in den Tray (einstellbar). Autostart optional (Plugin `autostart`).
+- **Start:** Tauri startet `mtgdeck-backend.exe --data … --cache … --port 0 --token auto` (Port 0 bindet einen
+  freien Port, der Token schützt die lokale API; das Backend meldet `MTGDECK_URL=…` auf stdout). Das Fenster zeigt
+  die lokale Startseite mit Gerüst und springt zur gemeldeten Adresse; der erste Aufruf mit `?token=` setzt das
+  Cookie. Stirbt das Backend, startet die Hülle es nach 1, 2, 5, 5, 5 s neu; danach zeigt die Startseite das Ende
+  des Protokolls und „Nochmal versuchen“. Ein langer gesunder Lauf setzt den Zähler zurück.
+- **Daten:** `--data` = `%APPDATA%\MTG Deckbuilder` (Decks, Sammlung, Einstellungen, Sync-Zustand), Cache
+  `%LOCALAPPDATA%\MTG Deckbuilder\cache`, Protokoll `<data>\logs\backend.log` (plus der vorige Lauf als
+  `backend.1.log`). Vorhandene Daten kommen per Sync oder über „Sicherung hochladen“ in die App; `MTG_HOME`
+  in der Umgebung überstimmt den Ordner.
+- **Claude:** Der Agent-SDK bringt die CLI mit (das Windows-Wheel erst ab 0.2.164, deshalb die Mindestversion in
+  `pyproject.toml`); `paths.bundled_cli()` findet sie im Paket. Offen (5d): die Einstellungen zeigen, ob Claude
+  angemeldet ist, und starten die Anmeldung mit der mitgelieferten CLI.
+- **Tray:** Menü Öffnen, Datenordner öffnen, „Beim Anmelden starten“ (Plugin `autostart`, Start mit `--hidden` nur
+  in den Tray), Beenden; Linksklick öffnet das Fenster. Fenster schließen versteckt es, beim ersten Mal mit einem
+  Hinweis. Offen (5d): Zustand im Tooltip (Sync, Fragen vom Handy) und „Jetzt abgleichen“.
+- **Einmal:** Plugin `single-instance` (als erstes registriert): ein zweiter Start holt das Fenster nach vorn.
+- **Selbsttest:** `--selftest` startet das Backend, liest `/api/health` und beendet sich mit Exit-Code – so prüft
+  der Workflow die gebaute Exe auf einem frischen Windows-Runner.
 - **Updates:** GitHub Actions baut bei einem Tag `v*` den NSIS-Installer, signiert die Updater-Artefakte und schreibt
   `latest.json` ins Release. Die App prüft beim Start und einmal täglich.
 - **Fenster:** Plugin `window-state` merkt Größe und Position. Systemtitelleiste (einfach, Snap-Layouts frei Haus),
@@ -154,14 +166,21 @@ desktop/                      Tauri-2-Projekt (Rust-Hülle, wenige hundert Zeile
 |---|---|---|
 | **5a – Aufräumen** ✅ | Deskmat-Studio und die Online-Exporte entfernt; „Fragen zum Deck“ in „Frag Claude“ aufgegangen (Deckbezug, alte Fragen als Gespräche übernommen); Seitenleiste und Einstellungen gestrafft. KI-Hochskalierung und das Browser-Terminal bleiben auf Wunsch | Tests grün, Oberfläche ohne Leerstellen, alte Daten übernommen |
 | **5b – Backend als Programm** ✅ | `mtg-gui --data … --port 0 --token auto` (Launcher `mtgdeck.launch`, Datenordner `paths.home()`, Token-Schutz, `/api/health`, `mcp`-Modus), PyInstaller-Ordner-Build (`desktop/sidecar/backend.spec`), Workflow „Desktop“ baut und prüft die Windows-Exe | `mtgdeck-backend.exe` startet ohne Python |
-| **5c – Tauri-Hülle** | Fenster, Sidecar-Aufsicht mit Neustart, Single Instance, Fensterzustand, Tray mit Zustand, Autostart-Option, Benachrichtigungen | Installer aus GitHub Actions läuft auf einem frischen Windows |
-| **5d – Desktop-Feinschliff** | Tastenkürzel + Übersicht, Gerüst beim Start, Mica/Titelleiste, Schließen in den Tray, Einstellungen „Desktop“ | die zehn Regeln oben erfüllt |
+| **5c – Tauri-Hülle** ✅ | Fenster, Sidecar-Aufsicht mit Neustart und Protokoll, Single Instance, Fensterzustand, Tray, Autostart-Option, Hinweis beim Schließen, `--selftest`; der Workflow baut Backend und Hülle, prüft beide und lädt den NSIS-Installer hoch | Installer aus GitHub Actions läuft auf einem frischen Windows |
+| **5d – Desktop-Feinschliff** | Anmelden bei Claude aus der App, Tastenkürzel + Übersicht, Tray-Zustand und „Jetzt abgleichen“, Benachrichtigungen bei verstecktem Fenster, Einstellungen „Desktop“ | die zehn Regeln oben erfüllt |
 | **5e – Updates** | Signaturschlüssel, `latest.json`, Release-Workflow bei Tag, Update-Hinweis in der App | ein Update von v0.1 auf v0.2 läuft durch |
 
 **Stand 5b.** Gemessen am Linux-Build (Ordner, 302 MB, davon 230 MB die Claude-CLI des Agent-SDK): die Adresse
 steht nach 0,98 s auf stdout, `/api/health` antwortet nach 1,05 s. Ohne Token antwortet die Oberfläche mit 401, der
 erste Link setzt das Cookie, danach läuft alles wie gewohnt; `mtgdeck-backend mcp` meldet 43 Werkzeuge über stdio.
 Die Windows-Exe baut und prüft der Workflow `.github/workflows/desktop.yml`.
+
+**Stand 5c.** Die Hülle besteht aus `backend.rs` (Aufsicht) und `lib.rs` (Fenster, Tray, Plugins, Selbsttest), die
+Startseite aus einer HTML-Datei ohne Framework. Die Oberfläche selbst läuft unverändert auf `127.0.0.1` und braucht
+keine Tauri-IPC – deshalb bleibt die Capability auf `core:default`, `window-state`, `notification`, `autostart`
+beschränkt. `cargo check --target x86_64-pc-windows-msvc` läuft auch unter Linux; gebaut wird nur auf dem
+Windows-Runner (Rust stabil, `npx @tauri-apps/cli build`, NSIS lädt Tauri selbst). Der Workflow führt die Exe mit
+`--selftest` aus und lädt den Installer als Artefakt hoch.
 
 ## Bewusst nicht
 

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The start page (local) listens for the backend's address and may ask for a restart; the app itself runs on 127.0.0.1 and needs no IPC.",
+  "windows": ["main"],
+  "permissions": ["core:default", "window-state:default", "notification:default", "autostart:default"]
+}

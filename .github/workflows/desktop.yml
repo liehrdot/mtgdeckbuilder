@@ -1,6 +1,7 @@
-# Desktop backend for Windows: the PyInstaller folder build of mtgdeck-backend.exe, smoke-tested (starts on a free
-# port with a token, answers /api/health, refuses requests without the token) and uploaded as an artifact.
-# The Tauri shell and the installer come on top of this (desktop/, see docs/plan-desktop-app.md).
+# The Windows desktop app: the PyInstaller folder build of the backend (mtgdeck-backend.exe), smoke-tested (starts
+# on a free port with a token, answers /api/health, refuses requests without the token, carries skills and the
+# Claude CLI), then the Tauri shell around it, self-tested (`--selftest` starts the backend from the shell and
+# reads /api/health), and the NSIS installer as the artifact. See docs/plan-desktop-app.md.
 name: Desktop
 
 on:
@@ -10,21 +11,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  backend-windows:
+  desktop-windows:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - name: Install
-        run: |
-          uv sync --all-extras
-          uv pip install pyinstaller
+        run: uv sync --all-extras
       - name: Build backend
         run: uv run pyinstaller --noconfirm --clean desktop/sidecar/backend.spec
-      - name: Smoke test
+      - name: Smoke test backend
         shell: pwsh
         run: |
           $data = Join-Path $env:RUNNER_TEMP "mtgdata"
@@ -47,11 +46,28 @@ jobs:
           if (-not $health.skills -or -not $health.claude_cli) { throw "bundle incomplete: $($health | ConvertTo-Json)" }
           Write-Host "decks: $($decks.Count), url: $base"
           Stop-Process -Id $p.Id -Force
-      - name: Size
+          '"backend: {0:N0} MB" -f ((Get-ChildItem dist/mtgdeck-backend -Recurse | Measure-Object Length -Sum).Sum / 1MB)' | Invoke-Expression
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build desktop app
+        working-directory: desktop
+        run: npx --yes @tauri-apps/cli@^2 build
+      - name: Self-test desktop app
         shell: pwsh
-        run: '"{0:N0} MB" -f ((Get-ChildItem dist/mtgdeck-backend -Recurse | Measure-Object Length -Sum).Sum / 1MB)'
+        run: |
+          $exe = Get-ChildItem desktop/src-tauri/target/release/*.exe | Select-Object -First 1
+          if (-not $exe) { throw "no desktop executable built" }
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList "--selftest" -Wait -PassThru -NoNewWindow -RedirectStandardOutput self.txt -RedirectStandardError selferr.txt
+          Get-Content self.txt, selferr.txt -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "selftest failed with exit code $($p.ExitCode)" }
+          Get-ChildItem desktop/src-tauri/target/release/bundle/nsis | ForEach-Object { '"{0}: {1:N0} MB" -f $_.Name, ($_.Length / 1MB)' | Invoke-Expression }
       - uses: actions/upload-artifact@v4
         with:
-          name: mtgdeck-backend-windows
-          path: dist/mtgdeck-backend
+          name: mtgdeck-desktop-windows-setup
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
           retention-days: 14

@@ -277,6 +277,30 @@ ein Befehl auf dem Server.
     „Fragen vom Handy beantworten“* abschalten. Die Gespräche stehen auch am PC unter „Frag Claude“.
   - **Vorschau:** „Erst mal mit Beispieldaten ansehen“ zeigt die App ohne Kopplung.
 
+## Desktop-App (Windows)
+
+Dieselbe Oberfläche als eigenes Programm – ohne Python, uv oder Claude Code installieren zu müssen. Der Installer
+(`MTG Deckbuilder_<Version>_x64-setup.exe`, pro Benutzer, ohne Adminrechte) kommt aus dem Workflow „Desktop“
+(GitHub Actions → Artefakt `mtgdeck-desktop-windows-setup`); Veröffentlichungen mit automatischen Updates folgen.
+
+- **Aufbau:** Eine kleine Tauri-2-Hülle (Rust, WebView2) startet das mitgelieferte Backend (`mtgdeck-backend.exe`,
+  ein PyInstaller-Ordner mit der Claude-CLI des Agent-SDK, den Skills und den statischen Dateien) auf einem freien
+  Port mit zufälligem Token und zeigt es im Fenster. Stirbt das Backend, startet die Hülle es neu; klappt das
+  fünfmal nicht, zeigt die Startseite das Protokoll und bietet einen neuen Versuch an.
+- **Daten:** `%APPDATA%\MTG Deckbuilder` (Decks, Sammlung, Blacklist, Tischregeln, Sicherungen, Sync-Zustand),
+  Cache in `%LOCALAPPDATA%\MTG Deckbuilder\cache`, Protokoll `%APPDATA%\MTG Deckbuilder\logs\backend.log`.
+  Bestehende Daten aus einem Projektordner kommen per Sync (siehe oben) oder über Einstellungen → Sicherung
+  hochladen in die App.
+- **Tray:** Schließen versteckt das Fenster, die App läuft weiter (Sync, Fragen vom Handy). Rechtsklick auf das
+  Symbol neben der Uhr: Öffnen, Datenordner öffnen, Beim Anmelden starten, Beenden.
+- **Claude:** Die CLI steckt im Paket und nutzt die Anmeldung von Claude Code auf diesem Rechner
+  (`%USERPROFILE%\.claude`). Fehlt sie, Claude Code installieren und einmal `claude` ausführen – die Anmeldung
+  direkt aus der App ist der nächste Schritt (Plan 5d in `docs/plan-desktop-app.md`).
+- **Entwicklung:** `uv run pyinstaller desktop/sidecar/backend.spec` baut das Backend nach `dist/mtgdeck-backend/`;
+  `cd desktop && npx @tauri-apps/cli@^2 dev` startet die Hülle damit (oder mit `MTGDECK_BACKEND=<Pfad zur Exe>`).
+  `cargo check --target x86_64-pc-windows-msvc` prüft den Rust-Teil auch unter Linux. Die fertige Exe kennt
+  `--selftest` (startet das Backend, liest `/api/health`, Exit-Code 0 = in Ordnung) und `--hidden` (nur in den Tray).
+
 ## Web-GUI
 
 ```bash
