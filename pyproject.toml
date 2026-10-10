@@ -14,7 +14,7 @@ dependencies = [
 gui = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
-    "claude-agent-sdk>=0.2",
+    "claude-agent-sdk>=0.2.164",
     # real terminal for the MPC Autofill tool (its menus need a console): ConPTY on Windows, pty elsewhere
     "pywinpty>=2; sys_platform == 'win32'",
     "ptyprocess>=0.7; sys_platform != 'win32'",
