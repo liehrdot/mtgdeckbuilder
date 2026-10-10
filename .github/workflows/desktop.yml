@@ -37,11 +37,14 @@ jobs:
           Get-Content out.txt, err.txt -ErrorAction SilentlyContinue
           if (-not $url) { throw "backend printed no MTGDECK_URL" }
           $base = $url.Split('?')[0]
-          $health = Invoke-RestMethod "$base" + "api/health"
+          $health = Invoke-RestMethod "${base}api/health"
           if (-not $health.ok -or -not $health.frozen) { throw "health: $($health | ConvertTo-Json)" }
-          try { Invoke-WebRequest "$base" + "api/decks" -UseBasicParsing | Out-Null; throw "no token, but answered" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw $_ } }
+          $code = 0
+          try { Invoke-WebRequest "${base}api/decks" -UseBasicParsing | Out-Null; $code = 200 } catch { $code = $_.Exception.Response.StatusCode.value__ }
+          if ($code -ne 401) { throw "without token: expected 401, got $code" }
           $token = $url.Split('=')[1]
-          $decks = Invoke-RestMethod ("$base" + "api/decks") -Headers @{ Authorization = "Bearer $token" }
+          $decks = Invoke-RestMethod "${base}api/decks" -Headers @{ Authorization = "Bearer $token" }
+          if (-not $health.skills -or -not $health.claude_cli) { throw "bundle incomplete: $($health | ConvertTo-Json)" }
           Write-Host "decks: $($decks.Count), url: $base"
           Stop-Process -Id $p.Id -Force
       - name: Size
