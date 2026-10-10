@@ -308,7 +308,7 @@ button.row:active, a.row:active { background: var(--surface-2); }
    layout viewport taller than the screen, so bottom: 0 would leave the sheet half below it */
 dialog.sheet {
   position: fixed; inset: auto 0 auto 0; top: calc(var(--vvt, 0px) + var(--vvh, 100dvh)); transform: translateY(-100%);
-  margin: 0 auto; padding: 0; border: 0;
+  margin: 0 auto; padding: 0; border: 0; height: auto;
   width: min(100%, 680px); max-width: none; max-height: calc(var(--vvh, 100dvh) - var(--top) - 10px);
   background: var(--bg); color: var(--text); border-radius: var(--r-sheet) var(--r-sheet) 0 0;
   box-shadow: var(--shadow-sheet); display: flex; flex-direction: column; overflow: hidden;
@@ -326,7 +326,8 @@ dialog.sheet.entering::backdrop, dialog.sheet.closing::backdrop { opacity: 0; }
 .sheet-bar .title { font-weight: 700; font-size: var(--t-body); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet-bar > :first-child { justify-self: start; }
 .sheet-bar > :last-child { justify-self: end; }
-.sheet-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 20px; -webkit-overflow-scrolling: touch; }
+/* flex-basis auto, not 0%: iPhone WebKit (iOS 26) sizes the dialog from the items' basis, so flex: 1 left only the head */
+.sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 20px; -webkit-overflow-scrolling: touch; }
 .sheet-foot { flex: none; padding: 10px 20px calc(10px + max(env(safe-area-inset-bottom), 8px)); background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 0%, transparent), var(--bg) 30%); }
 body.kb-open .sheet-foot { padding-bottom: 10px; }
 .sheet .page { animation: page-in .32s var(--spring); }
