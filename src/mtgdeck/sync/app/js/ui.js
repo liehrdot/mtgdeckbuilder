@@ -16,15 +16,27 @@ function closeOverlay() {
 }
 addEventListener("popstate", () => { overlays.pop()?.(); });
 
-// ---------- keyboard: keep sheets and their buttons above it ----------
+// ---------- the visible area: sheets sit on its bottom edge, above the keyboard ----------
+// iOS can make the layout viewport taller than the screen (above all in a Home Screen app), and the keyboard only
+// shrinks the visual viewport – so sheets are placed from visualViewport (--vvt, --vvh), never with bottom: 0.
 const vv = window.visualViewport;
+let fullH = 0, fullW = 0;
 function onViewport() {
-  const kb = vv ? Math.max(0, innerHeight - vv.height - vv.offsetTop) : 0;
-  document.documentElement.style.setProperty("--kb", `${kb > 80 ? kb : 0}px`);
-  document.body.classList.toggle("kb-open", kb > 80);
+  if (!vv) return;
+  const root = document.documentElement.style;
+  root.setProperty("--vvt", `${vv.offsetTop}px`);
+  root.setProperty("--vvh", `${vv.height}px`);
+  if (vv.width !== fullW) { fullW = vv.width; fullH = 0; }  // turned: measure again
+  fullH = Math.max(fullH, vv.height);
+  document.body.classList.toggle("kb-open", fullH - vv.height > 120);
 }
 vv?.addEventListener("resize", onViewport);
 vv?.addEventListener("scroll", onViewport);
+onViewport();
+
+// content runs under the status bar of an installed app: once scrolled, a quiet backdrop keeps the clock readable
+const onScroll = () => document.body.classList.toggle("scrolled", scrollY > 2);
+addEventListener("scroll", onScroll, { passive: true });
 
 // ---------- sheet ----------
 const dlg = () => $("#sheet");
@@ -45,7 +57,9 @@ export function openSheet(render, { full = false, onClose = null } = {}) {
   d.showModal();
   document.body.classList.add("sheet-open");
   document.documentElement.style.overflow = "hidden";
-  requestAnimationFrame(() => requestAnimationFrame(() => d.classList.remove("entering")));
+  const enter = () => d.classList.remove("entering");
+  requestAnimationFrame(() => requestAnimationFrame(enter));
+  setTimeout(enter, 120);  // never left hidden below the screen, even without animation frames
   openOverlay(() => finishClose());
 }
 
@@ -184,8 +198,11 @@ export function topbar({ title = "", watch = null, back = null, always = false }
     <span class="title">${esc(title)}</span><span class="spacer"></span>`;
   const show = (on) => { bar.classList.toggle("show", on); bar.setAttribute("aria-hidden", on ? "false" : "true"); };
   show(always);
+  onScroll();
   if (watch && !always) {
-    observer = new IntersectionObserver(([e]) => show(!e.isIntersecting && e.boundingClientRect.top < 0), { rootMargin: "-52px 0px 0px 0px" });
+    // shown while the watched title is above the bar (not below the screen); the bar's height includes the status bar
+    observer = new IntersectionObserver(([e]) => show(!e.isIntersecting && e.boundingClientRect.top < (e.rootBounds?.top ?? 0)),
+      { rootMargin: `-${bar.offsetHeight || 52}px 0px 0px 0px` });
     observer.observe(watch);
   }
 }

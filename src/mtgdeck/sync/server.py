@@ -54,8 +54,9 @@ MAX_INFO_BYTES = 4096
 CLAIM_FAILS, CLAIM_WINDOW = 20, 600  # at most 20 wrong codes per 10 minutes
 BACKUP_KEEP = 14
 APP_DIR = Path(__file__).parent / "app"  # the phone app ("Am Tisch"), served under /app/
+# connect-src lists the image CDN too: the service worker (which gets this header with sw.js) fetches the card images
 APP_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.scryfall.io; "
-           "connect-src 'self' https://api.scryfall.com; manifest-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; "
+           "connect-src 'self' https://api.scryfall.com https://*.scryfall.io; manifest-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; "
            "base-uri 'none'; "
            "form-action 'self'; frame-ancestors 'none'")  # fmt: skip
 

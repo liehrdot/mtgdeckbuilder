@@ -185,6 +185,8 @@ def test_pairing_link_and_root_lead_to_the_app_and_the_worker_is_versioned(tmp_p
     sw = client.get("/app/sw.js")
     assert sw.status_code == 200 and "__VERSION__" not in sw.text and sw.headers["cache-control"] == "no-cache"
     assert "worker-src 'self' blob:" in client.get("/app/").headers["content-security-policy"]
+    # the worker gets the policy with sw.js and fetches the card images itself: the image CDN must be allowed there
+    assert "connect-src 'self' https://api.scryfall.com https://*.scryfall.io" in sw.headers["content-security-policy"]
 
 
 def test_the_server_image_needs_no_card_libraries(tmp_path):

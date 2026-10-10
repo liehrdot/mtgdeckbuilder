@@ -123,6 +123,13 @@ a { color: var(--accent); text-decoration: none; }
   opacity: 0; pointer-events: none; transition: opacity .2s var(--ease-out);
 }
 .topbar.show { opacity: 1; pointer-events: auto; }
+body::before {  /* behind the status bar of an installed app, once the page scrolls under it */
+  content: ""; position: fixed; inset: 0 0 auto; height: var(--top); z-index: 19; pointer-events: none;
+  background: var(--bar); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%);
+  opacity: 0; transition: opacity .2s var(--ease-out);
+}
+body.scrolled::before { opacity: 1; }
+body:has(.topbar.show)::before, body.no-tabs::before { opacity: 0; }
 .topbar .title { flex: 1; text-align: center; font-weight: 650; font-size: var(--t-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; }
 .topbar .spacer { width: 44px; flex: none; }
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) { .topbar, .tabbar, .fab-wrap .fab.secondary { background: var(--bar-solid); } }
@@ -297,16 +304,18 @@ button.row:active, a.row:active { background: var(--surface-2); }
 .disclose .summary { margin-left: auto; font-weight: 500; color: var(--text-3); font-size: var(--t-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
 
 /* ---------- sheets (one at a time, <dialog>) ---------- */
+/* placed on the bottom edge of the visible area (--vvt/--vvh from visualViewport, see ui.js): iOS can make the
+   layout viewport taller than the screen, so bottom: 0 would leave the sheet half below it */
 dialog.sheet {
-  position: fixed; inset: auto 0 0 0; margin: 0 auto; padding: 0; border: 0;
-  width: min(100%, 680px); max-width: none; max-height: calc(100dvh - var(--top) - 10px - var(--kb, 0px));
-  bottom: var(--kb, 0px);
+  position: fixed; inset: auto 0 auto 0; top: calc(var(--vvt, 0px) + var(--vvh, 100dvh)); transform: translateY(-100%);
+  margin: 0 auto; padding: 0; border: 0;
+  width: min(100%, 680px); max-width: none; max-height: calc(var(--vvh, 100dvh) - var(--top) - 10px);
   background: var(--bg); color: var(--text); border-radius: var(--r-sheet) var(--r-sheet) 0 0;
   box-shadow: var(--shadow-sheet); display: flex; flex-direction: column; overflow: hidden;
-  translate: 0 0; transition: translate .42s var(--spring), bottom .25s var(--ease-out);
+  translate: 0 0; transition: translate .42s var(--spring), top .25s var(--ease-out);
 }
 dialog.sheet:not([open]) { display: none; }
-dialog.sheet.full { height: calc(100dvh - var(--top) - 10px - var(--kb, 0px)); }
+dialog.sheet.full { height: calc(var(--vvh, 100dvh) - var(--top) - 10px); }
 dialog.sheet.closing { translate: 0 105%; transition: translate .24s cubic-bezier(.4, 0, 1, 1); }
 dialog.sheet.entering { translate: 0 105%; transition: none; }
 dialog.sheet::backdrop { background: var(--scrim); opacity: 1; transition: opacity .3s; }
