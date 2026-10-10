@@ -328,11 +328,19 @@ schneller.
 
 | Schritt | Inhalt | fertig, wenn |
 |---|---|---|
-| **3a – Prototyp** | Gestaltung und alle Kern-Bildschirme mit Demodaten, klickbar im Handy-Browser | Screenshots hell/dunkel abgenommen |
+| **3a – Prototyp** ✅ | Gestaltung und alle Kern-Bildschirme mit Demodaten, klickbar im Handy-Browser | Screenshots hell/dunkel abgenommen |
 | **3b – Daten** | Lesemodell `/api/app/data`, Operationen (Partie, Gegner, Notiz) mit Kennung, neue Partie-Felder in der Desktop-App | Handy-Eintrag erscheint am PC |
 | **3c – Offline** | Service Worker, Warteschlange, Entwürfe, Scryfall-Cache | Partie im Flugmodus eingetragen, später gesendet |
 | **3d – Kopplung** | Kopplungsseite, Installationsanleitung, QR-Scanner, Code-Eingabe, Einstellungen, Abmelden | iPhone und Android von Null gekoppelt |
 | **3e – Feinschliff** | Tests (Playwright mit iPhone- und Pixel-Emulation, Offline, Tap-Zähler, Tippflächen-Prüfung), Doku | alle Messlatten oben erfüllt |
+
+**Stand 3a:** Der Prototyp läuft unter `/app/` des Sync-Servers mit Beispieldaten. Einträge bleiben vorerst auf dem Gerät.
+Gemessen im Prototyp:
+
+- typische Partie: 3 Taps;
+- Rule 0 vom Start aus: 1 Tap;
+- Gegnerdeck: 6 Taps plus ein paar Buchstaben;
+- alle Tippflächen mindestens 44 px, kein seitliches Scrollen, hell und dunkel.
 
 **Prüfung der Messlatten:** Ein Playwright-Skript zählt die Taps für den typischen Ablauf (Partie, Gegnerdeck, Rule 0).
 Es prüft außerdem, dass jede Tippfläche mindestens 44 × 44 px groß ist, dass nichts seitlich scrollt und dass die

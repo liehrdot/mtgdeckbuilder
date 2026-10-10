@@ -29,6 +29,11 @@ ISSUES: dict[str, tuple[str, str]] = {
     "fliers": ("gegen Flieger / Ausweichen verloren", "Antworten auf fliegende Kreaturen"),
     "too_strong": ("Deck war zu stark für die Runde", "passend zur Runde etwas abschwächen"),
 }
+# how the game was decided (optional) and quick-pick labels
+HOW: dict[str, str] = {
+    "combat": "Kampfschaden", "commander": "Commander-Schaden", "combo": "Combo",
+    "alt": "alternative Siegbedingung", "concede": "Aufgabe", "other": "anders",
+}  # fmt: skip
 
 
 def _file(deck_slug: str) -> Path:

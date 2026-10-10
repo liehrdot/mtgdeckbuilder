@@ -257,6 +257,9 @@ ein Befehl auf dem Server.
   es neu geprüft. Haben beide Geräte dasselbe Feld unterschiedlich geändert, gilt die Fassung vom Server, und die
   andere steht unter „Konflikte“.
 - **Sicherheit:** nur HTTPS; Geräte-Schlüssel liegen auf dem Server nur als Hash; Geräte lassen sich einzeln abmelden.
+- **Handy-App „Am Tisch“** (in Arbeit, [Plan](docs/plan-handy-app.md)): Partien und Gegnerdecks am Tisch in Sekunden
+  eintragen, Rule 0 zeigen, Karten auf Deutsch nachschlagen – auch offline. Eine Vorschau mit Beispieldaten liegt unter
+  `https://<dein-sync-server>/app/`.
 
 ## Web-GUI
 

@@ -1,0 +1,22 @@
+{
+  "id": "/app/",
+  "name": "Am Tisch – Commander Deckbuilder",
+  "short_name": "Am Tisch",
+  "description": "Partien und Gegnerdecks am Spieltisch festhalten, Rule 0 zeigen, Karten nachschlagen – auch offline.",
+  "lang": "de",
+  "start_url": "/app/#/tisch",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f7",
+  "theme_color": "#6443d1",
+  "icons": [
+    { "src": "/app/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/app/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/app/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Partie eintragen", "url": "/app/#/tisch?neu=partie", "icons": [{ "src": "/app/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Gegnerdeck festhalten", "url": "/app/#/gegner?neu=gegner", "icons": [{ "src": "/app/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

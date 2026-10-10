@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .files import kind_of
@@ -49,6 +50,10 @@ MAX_DOC_BYTES = 64 * 1024 * 1024
 MAX_INFO_BYTES = 4096
 CLAIM_FAILS, CLAIM_WINDOW = 20, 600  # at most 20 wrong codes per 10 minutes
 BACKUP_KEEP = 14
+APP_DIR = Path(__file__).parent / "app"  # the phone app ("Am Tisch"), served under /app/
+APP_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.scryfall.io; "
+           "connect-src 'self' https://api.scryfall.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
+           "form-action 'self'; frame-ancestors 'none'")  # fmt: skip
 
 
 def data_dir() -> Path:
@@ -221,6 +226,26 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
     app = FastAPI(title="MTG-Deckbuilder Sync", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store, app.state.devices = store, devices
 
+    @app.middleware("http")
+    async def _headers(request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+        if request.url.path.startswith("/app"):
+            response.headers.setdefault("Content-Security-Policy", APP_CSP)
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
+            response.headers.setdefault("Cache-Control", "no-cache")  # revalidate (ETag); the service worker caches
+        return response
+
+    @app.get("/app", include_in_schema=False)
+    async def app_redirect() -> RedirectResponse:
+        return RedirectResponse("/app/")
+
+    @app.get("/app/", include_in_schema=False)
+    async def app_index() -> FileResponse:
+        return FileResponse(APP_DIR / "index.html", media_type="text/html")
+
+    app.mount("/app", StaticFiles(directory=APP_DIR), name="app")
+
     def base_url(request: Request) -> str:
         return (public_url or os.environ.get("MTG_SYNC_PUBLIC_URL") or str(request.base_url)).rstrip("/")
 
@@ -234,7 +259,8 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
     @app.get("/", response_class=HTMLResponse)
     async def home() -> HTMLResponse:
         return _page("<p>Der Sync-Server läuft. Geräte verbindest du in der App unter "
-                     "<b>Einstellungen → Sync</b>.</p>")  # fmt: skip
+                     "<b>Einstellungen → Sync</b>.</p><p>Vorschau der Handy-App mit Beispieldaten: "
+                     "<a href=\"/app/\">Am Tisch</a></p>")  # fmt: skip
 
     @app.get("/koppeln", response_class=HTMLResponse)
     async def pair_page() -> HTMLResponse:
