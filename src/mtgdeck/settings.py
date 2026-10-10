@@ -40,6 +40,8 @@ DEFAULTS: dict[str, Any] = {
     "sync_interval": 5,
     # questions for Claude from the phone app: this PC answers them while the app runs (uses Claude on this PC)
     "phone_questions": True,
+    # desktop app: system notifications while the window is hidden (deck finished, answer ready, news from the phone)
+    "desktop_notify": True,
 }
 _ENV = {
     "autofill_path": "MTG_AUTOFILL_PATH",

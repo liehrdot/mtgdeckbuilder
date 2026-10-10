@@ -1122,3 +1122,8 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 
 .sync-phone { display: flex; align-items: flex-start; margin-top: var(--space-3); }
 .sync-phone input { margin-top: 3px; }
+
+/* shortcuts overview */
+.shortcuts { border-collapse: collapse; width: 100%; margin: var(--space-3) 0; }
+.shortcuts td { padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); vertical-align: top; }
+.shortcuts td:first-child { white-space: nowrap; width: 1%; }

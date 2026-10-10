@@ -280,6 +280,13 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(backup, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(collection, "COLLECTION_FILE", tmp_path / "collection.json")
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
+    # the GUI's sign-in check would start the Claude CLI: fake it (test_desktop.py tests the real one with a fake CLI)
+    from mtgdeck.gui import app as gui_app
+    from mtgdeck.gui import desktop as gui_desktop
+
+    monkeypatch.setattr(gui_app, "_cli_auth_status", lambda cli: {"logged_in": True, "method": "test"})
+    gui_app._auth_cache.clear()
+    gui_desktop.reset()
     monkeypatch.setattr(proxy, "PROXIES_DIR", tmp_path / "proxies")
     for env in ("MTG_AUTOFILL_PATH", "MTG_MPCFILL_SERVER", "MTG_CARDBACK", "MTG_SYNC_PUBLIC_URL"):
         monkeypatch.delenv(env, raising=False)

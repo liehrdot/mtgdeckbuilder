@@ -241,12 +241,24 @@ fn host_port(url: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// A tiny HTTP GET (no dependency): the body of `url + path`, e.g. for `/api/health` in the self-test.
-pub fn http_get(base: &str, path: &str) -> Result<String, String> {
+/// A tiny HTTP client (no dependency): `GET` or `POST` to `base + path`, with the app's token and a JSON body if
+/// given; the body of a 200 answer. Used by the self-test (`/api/health`) and the bridge (`/api/desktop/poll`).
+pub fn http_request(base: &str, method: &str, path: &str, token: Option<&str>, body: Option<&str>) -> Result<String, String> {
     let addr = host_port(base).ok_or("keine Adresse")?;
     let mut s = TcpStream::connect_timeout(&addr.parse().map_err(|e| format!("{e}"))?, Duration::from_secs(3)).map_err(|e| e.to_string())?;
     s.set_read_timeout(Some(Duration::from_secs(5))).ok();
-    write!(s, "GET {path} HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+    let mut req = format!("{method} {path} HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n");
+    if let Some(t) = token {
+        req.push_str(&format!("Authorization: Bearer {t}\r\n"));
+    }
+    if let Some(b) = body {
+        req.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n", b.len()));
+    }
+    req.push_str("\r\n");
+    if let Some(b) = body {
+        req.push_str(b);
+    }
+    s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
     let mut buf = String::new();
     s.read_to_string(&mut buf).map_err(|e| e.to_string())?;
     let (head, body) = buf.split_once("\r\n\r\n").unwrap_or((&buf, ""));
@@ -254,6 +266,17 @@ pub fn http_get(base: &str, path: &str) -> Result<String, String> {
         return Err(head.lines().next().unwrap_or("").to_string());
     }
     Ok(body.to_string())
+}
+
+pub fn http_get(base: &str, path: &str) -> Result<String, String> {
+    http_request(base, "GET", path, None, None)
+}
+
+/// The access token in `http://127.0.0.1:1234/?token=…`.
+pub fn token_of(url: &str) -> Option<String> {
+    let (_, rest) = url.split_once("?token=")?;
+    let token = rest.split('&').next().unwrap_or("");
+    (!token.is_empty()).then(|| token.to_string())
 }
 
 pub fn stop(backend: &Backend) {

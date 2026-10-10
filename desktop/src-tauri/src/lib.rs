@@ -4,6 +4,7 @@
 //! the backend, checks `/api/health` and exits (used by CI).
 
 mod backend;
+mod bridge;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -26,7 +27,7 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-fn open_folder(path: &std::path::Path) {
+pub(crate) fn open_folder(path: &std::path::Path) {
     let _ = std::fs::create_dir_all(path);
     #[cfg(windows)]
     let _ = std::process::Command::new("explorer").arg(path).spawn();
@@ -55,7 +56,8 @@ fn open_log(app: AppHandle) {
     }
 }
 
-fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+/// The tray icon with its menu; returns the „Beim Anmelden starten“ item so the bridge can keep it in step.
+fn build_tray(app: &AppHandle) -> tauri::Result<CheckMenuItem<tauri::Wry>> {
     let open = MenuItem::with_id(app, "open", "Öffnen", true, None::<&str>)?;
     let data = MenuItem::with_id(app, "data", "Datenordner öffnen", true, None::<&str>)?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
@@ -86,7 +88,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-    Ok(())
+    Ok(autostart)
 }
 
 /// `--selftest`: start the backend, wait for it, read `/api/health`, print it and exit (0 = fine).
@@ -139,8 +141,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![backend_status, restart_backend, open_log])
         .setup(move |app| {
             let handle = app.handle().clone();
-            build_tray(&handle)?;
+            let autostart_item = build_tray(&handle)?;
             backend::start(handle.clone(), backend.clone());
+            if !is_selftest {
+                bridge::start(handle.clone(), backend.clone(), autostart_item);
+            }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.restore_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED);
                 if !hidden && !is_selftest {

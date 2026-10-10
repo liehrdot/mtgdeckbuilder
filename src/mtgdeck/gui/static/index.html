@@ -1264,6 +1264,29 @@
           Tischregeln, Testhand – funktioniert auch ohne.</p>
         <label class="check"><input type="checkbox" id="ai-enabled"> KI-Funktionen nutzen</label>
         <p id="ai-status" class="small"></p>
+        <div class="btn-row" id="ai-login-row" hidden>
+          <button type="button" class="btn primary" id="ai-login-btn">Bei Claude anmelden</button>
+        </div>
+        <p class="muted small" id="ai-login-hint" hidden>Die Anmeldung öffnet den Browser – bestätige dort und folge dem Terminal, das hier erscheint.
+          Öffnet sich kein Browser, kopiere den Link aus dem Terminal.</p>
+        <details class="more" id="ai-logout-more" hidden>
+          <summary>Abmelden</summary>
+          <p class="muted small">Meldet Claude auf diesem Rechner ab. Die KI-Funktionen brauchen danach eine neue Anmeldung.</p>
+          <button type="button" class="btn" id="ai-logout-btn">Bei Claude abmelden</button>
+        </details>
+        <div id="settings-job-slot" class="job-slot"></div>
+      </section>
+
+      <section class="panel" id="desktop-panel" hidden>
+        <h2>Desktop-App</h2>
+        <p class="muted small">Version <span id="desktop-version">–</span>. Schließen versteckt das Fenster – die App läuft im Infobereich neben der Uhr weiter
+          (Sync, Fragen vom Handy). Rechtsklick auf das Symbol: Öffnen, Datenordner öffnen, Beenden.</p>
+        <label class="check"><input type="checkbox" id="desktop-autostart"> Beim Anmelden im Hintergrund starten</label>
+        <label class="check"><input type="checkbox" id="desktop-notify"> Benachrichtigen, wenn das Fenster versteckt ist (Deck fertig, Antwort da, Neues vom Handy)</label>
+        <div class="btn-row">
+          <button type="button" class="btn" id="desktop-data">Datenordner öffnen</button>
+          <button type="button" class="btn" id="desktop-log">Protokoll öffnen</button>
+        </div>
       </section>
 
       <section class="panel" id="sync-panel">
@@ -1469,6 +1492,21 @@
       aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false"></div>
   <ul id="palette-list" role="listbox" aria-label="Treffer"></ul>
   <p class="muted small palette-foot">↑ ↓ auswählen · Enter öffnen · Esc schließen</p>
+</dialog>
+
+<dialog id="shortcuts" class="dialog small-dialog" aria-labelledby="shortcuts-title">
+  <h2 id="shortcuts-title">Tastenkürzel</h2>
+  <table class="shortcuts">
+    <tr><td><kbd>Strg</kbd> <kbd>K</kbd></td><td>Schnellsuche: Decks, Seiten, Aktionen</td></tr>
+    <tr><td><kbd>Strg</kbd> <kbd>N</kbd></td><td>Neues Deck</td></tr>
+    <tr><td><kbd>Strg</kbd> <kbd>J</kbd></td><td>Frag Claude</td></tr>
+    <tr><td><kbd>Strg</kbd> <kbd>,</kbd></td><td>Einstellungen</td></tr>
+    <tr><td><kbd>Strg</kbd> <kbd>S</kbd></td><td>Kartenänderungen speichern (im Bearbeiten-Modus)</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Dialog, Menü oder Schnellsuche schließen</td></tr>
+    <tr><td><kbd>?</kbd></td><td>Diese Übersicht</td></tr>
+  </table>
+  <p class="muted small">Auf dem Mac steht ⌘ für Strg. Im Browser kann Strg+N vom Browser belegt sein – in der Desktop-App nicht.</p>
+  <div class="dialog-actions"><button type="button" class="btn primary" id="shortcuts-close">Schließen</button></div>
 </dialog>
 
 <dialog id="ask-dialog" class="dialog small-dialog">

@@ -292,10 +292,13 @@ Dieselbe Oberfläche als eigenes Programm – ohne Python, uv oder Claude Code i
   Bestehende Daten aus einem Projektordner kommen per Sync (siehe oben) oder über Einstellungen → Sicherung
   hochladen in die App.
 - **Tray:** Schließen versteckt das Fenster, die App läuft weiter (Sync, Fragen vom Handy). Rechtsklick auf das
-  Symbol neben der Uhr: Öffnen, Datenordner öffnen, Beim Anmelden starten, Beenden.
-- **Claude:** Die CLI steckt im Paket und nutzt die Anmeldung von Claude Code auf diesem Rechner
-  (`%USERPROFILE%\.claude`). Fehlt sie, Claude Code installieren und einmal `claude` ausführen – die Anmeldung
-  direkt aus der App ist der nächste Schritt (Plan 5d in `docs/plan-desktop-app.md`).
+  Symbol neben der Uhr: Öffnen, Datenordner öffnen, Beim Anmelden starten, Beenden. Beim Zeigen auf das Symbol
+  steht der Zustand (laufende Aufträge, letzter Sync). Ist das Fenster versteckt, meldet die App „Deck fertig“,
+  „Antwort von Claude“, „Neu von deinen anderen Geräten“ und „Frage vom Handy beantwortet“ als Benachrichtigung.
+  Einstellungen → **Desktop-App**: Autostart, Benachrichtigungen an/aus, Datenordner und Protokoll öffnen.
+- **Claude:** Die CLI steckt im Paket. Einstellungen → KI-Funktionen zeigt, ob sie angemeldet ist; **„Bei Claude
+  anmelden“** startet die Anmeldung im Terminal der App (der Browser öffnet sich zum Bestätigen). Eine bestehende
+  Anmeldung von Claude Code auf demselben Rechner (`%USERPROFILE%\.claude`) gilt auch.
 - **Entwicklung:** `uv run pyinstaller desktop/sidecar/backend.spec` baut das Backend nach `dist/mtgdeck-backend/`;
   `cd desktop && npx @tauri-apps/cli@^2 dev` startet die Hülle damit (oder mit `MTGDECK_BACKEND=<Pfad zur Exe>`).
   `cargo check --target x86_64-pc-windows-msvc` prüft den Rust-Teil auch unter Linux. Die fertige Exe kennt

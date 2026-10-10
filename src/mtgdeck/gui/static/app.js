@@ -147,7 +147,7 @@ async function route() {
   }
   for (const v of $$(".view")) v.hidden = v.dataset.view !== r.view;
   if (r.view === "deck") selectTab(r.tab || "karten", false);
-  if (r.view === "settings") { refreshDbStatus(); refreshBackups(); refreshTrash(); refreshSync({ quiet: true }); }
+  if (r.view === "settings") { refreshDbStatus(); refreshBackups(); refreshTrash(); refreshSync({ quiet: true }); refreshDesktop(); }
   if (r.view === "collection") loadCollection();
   if (r.view === "glossary") showGlossary(r.slug);
   if (r.view === "orders") showOrders(r.slug);
@@ -687,13 +687,28 @@ function applyAi() {
     el.textContent = `${aiState.reason || "Claude ist gerade nicht verfügbar."} ${AI_OFF_TEXT}`;
   }
   setBusy(!!currentJob);
-  updateQaLive();
   updateChatLive();
   $("#ai-enabled").checked = !!aiState.enabled;
+  const login = aiState.login || null;
+  const how = { oauth_token: " Angemeldet mit deinem Claude-Konto.", api_key: " Angemeldet per API-Schlüssel." }[login?.method] || "";
   $("#ai-status").innerHTML = aiState.available
-    ? '<span class="ok">✓ Claude ist bereit.</span>' + (aiState.last_error ? ` <span class="warn">Der letzte Lauf scheiterte: ${esc(aiState.last_error)}</span>` : "")
+    ? `<span class="ok">✓ Claude ist bereit.</span>${esc(how)}` + (aiState.last_error ? ` <span class="warn">Der letzte Lauf scheiterte: ${esc(aiState.last_error)}</span>` : "")
     : `<span class="warn">${esc(aiState.reason || "nicht verfügbar")}</span>`;
+  const needsLogin = !!(aiState.enabled && login && login.logged_in !== true);
+  $("#ai-login-row").hidden = !needsLogin;
+  $("#ai-login-hint").hidden = !needsLogin;
+  $("#ai-logout-more").hidden = !(login && login.logged_in === true);
 }
+$("#ai-login-btn").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/ai/login", { method: "POST", body: { rows: 24, cols: 100 } });
+    startJob(r.job, "Bei Claude anmelden", { kind: "login", slot: "#settings-job-slot", route: "#/settings" });
+  } catch (err) { fail(err); }
+});
+$("#ai-logout-btn").addEventListener("click", async () => {
+  if (!(await ask({ title: "Bei Claude abmelden?", text: "Die KI-Funktionen brauchen danach eine neue Anmeldung.", ok: "Abmelden", danger: true }))) return;
+  try { aiState = await api("/api/ai/logout", { method: "POST" }); applyAi(); toast("Abgemeldet."); } catch (err) { fail(err); }
+});
 $("#ai-enabled").addEventListener("change", async (e) => {
   try {
     await api("/api/settings", { method: "POST", body: { ai_enabled: e.target.checked } });
@@ -733,7 +748,7 @@ function handleEvent(ev) {
     }
     case "print": onPrepared(ev.result); break;
     case "console":
-      if (ev.running) { openTerminal(); setJobStatus("MPC Autofill läuft – bediene es im Terminal."); }
+      if (ev.running) { openTerminal(); setJobStatus(jobInfo?.kind === "login" ? "Anmeldung läuft – folge den Schritten im Terminal und im Browserfenster." : "MPC Autofill läuft – bediene es im Terminal."); }
       else if (term) term.options.disableStdin = true;
       break;
     case "term":
@@ -752,6 +767,7 @@ async function finishJob(ev) {
   setBusy(false);
   $("#job").classList.add(ev.ok ? "finished" : "failed");
   $("#cancel-btn").textContent = "Schließen";
+  if (info.kind === "login") refreshAi();
   if (!ev.ok) {
     setJobStatus(info.error || "Beendet, ohne Ergebnis. Details unten.");
     placeJobPanel();
@@ -782,6 +798,10 @@ async function finishJob(ev) {
     case "print":
       info.dismissed = true;
       toast("Druckdateien sind fertig.");
+      break;
+    case "login":
+      info.dismissed = true;
+      toast("Angemeldet – Claude ist bereit.");
       break;
     default:  // autofill: keep the terminal output visible until closed
       setJobStatus("MPC Autofill ist beendet.");
@@ -4638,8 +4658,8 @@ refreshChats();
 
 function paletteItems() {
   const items = [
-    { label: "Neues Deck", hint: "Seite", run: () => { go("#/new"); setMode("build"); } },
-    { label: "Frag Claude", hint: "Chat mit der ganzen App", run: () => go("#/chat") },
+    { label: "Neues Deck", hint: "Seite · Strg+N", run: () => { go("#/new"); setMode("build"); } },
+    { label: "Frag Claude", hint: "Chat mit der ganzen App · Strg+J", run: () => go("#/chat") },
     { label: "Neues Gespräch mit Claude", hint: "Frag Claude", run: () => { go("#/chat"); $("#chat-new").click(); } },
     ...chatIndex.map((c) => ({ label: c.title, hint: "Gespräch", run: () => go(`#/chat/${enc(c.id)}`) })),
     { label: "Commander vorschlagen lassen", hint: "Neues Deck", run: () => { go("#/new"); setMode("find"); } },
@@ -4658,7 +4678,8 @@ function paletteItems() {
     { label: "Tischregeln", hint: "Seite", run: () => go("#/tables") },
     ...tableSets.map((t) => ({ label: t.name, hint: "Tischregel", run: () => go(`#/tables/${enc(t.id)}`) })),
     { label: "Blacklist", hint: "Seite", run: () => go("#/blacklist") },
-    { label: "Einstellungen", hint: "Seite", run: () => go("#/settings") },
+    { label: "Einstellungen", hint: "Seite · Strg+,", run: () => go("#/settings") },
+    { label: "Tastenkürzel", hint: "Übersicht · ?", run: () => openShortcuts() },
   ];
   if (currentDeck && parseHash().view === "deck") {
     const d = currentDeck;
@@ -4710,9 +4731,47 @@ $("#palette-input").addEventListener("keydown", (e) => {
   } else if (e.key === "Enter") { e.preventDefault(); runPalette(paletteSel); }
 });
 $("#palette-list").addEventListener("click", (e) => { const li = e.target.closest("li[data-i]"); if (li) runPalette(Number(li.dataset.i)); });
+// ---------- keyboard shortcuts (the palette shows them, "?" opens the overview) ----------
+const isTyping = (e) => {
+  const t = e.target;
+  if (!t || t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return !!t;
+  return t.tagName === "INPUT" && !/^(checkbox|radio|button|submit|range|color|file)$/.test(t.type);
+};
+function openShortcuts() { if (!$("#shortcuts").open) { setNavOpen(false); $("#shortcuts").showModal(); } }
+$("#shortcuts-close").addEventListener("click", () => $("#shortcuts").close());
 document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); }
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.shiftKey && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === "k") { e.preventDefault(); openPalette(); }
+    else if (k === "n") { e.preventDefault(); go("#/new"); setMode("build"); }
+    else if (k === "j") { e.preventDefault(); go("#/chat"); }
+    else if (k === ",") { e.preventDefault(); go("#/settings"); }
+    else if (k === "s" && edit) { e.preventDefault(); $("#edit-save").click(); }
+  } else if (e.key === "?" && !mod && !isTyping(e) && !document.querySelector("dialog[open]")) { e.preventDefault(); openShortcuts(); }
 });
+
+// ---------- desktop app (Tauri shell): the panel appears only while the shell polls the backend ----------
+async function refreshDesktop() {
+  let d;
+  try { d = await api("/api/desktop"); } catch { return; }
+  $("#desktop-panel").hidden = !d.shell;
+  if (!d.shell) return;
+  $("#desktop-version").textContent = d.shell.version || "–";
+  $("#desktop-autostart").checked = !!d.shell.autostart;
+  $("#desktop-notify").checked = !!d.notify;
+}
+$("#desktop-autostart").addEventListener("change", async (e) => {
+  try {
+    await api("/api/desktop/command", { method: "POST", body: { type: "autostart", value: e.target.checked } });
+    toast(e.target.checked ? "Startet künftig beim Anmelden im Hintergrund." : "Startet nicht mehr automatisch.");
+  } catch (err) { fail(err); }
+});
+$("#desktop-notify").addEventListener("change", async (e) => {
+  try { await api("/api/settings", { method: "POST", body: { desktop_notify: e.target.checked } }); } catch (err) { fail(err); }
+});
+$("#desktop-data").addEventListener("click", () => api("/api/desktop/command", { method: "POST", body: { type: "open_data" } }).catch(fail));
+$("#desktop-log").addEventListener("click", () => api("/api/desktop/command", { method: "POST", body: { type: "open_log" } }).catch(fail));
 if (/Mac|iPhone|iPad/.test(navigator.platform)) $("#palette-btn kbd").textContent = "⌘ K";
 
 // ============================================================================================

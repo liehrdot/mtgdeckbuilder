@@ -143,11 +143,17 @@ desktop/                      Tauri-2-Projekt (Rust-Hülle, rund 450 Zeilen)
   `backend.1.log`). Vorhandene Daten kommen per Sync oder über „Sicherung hochladen“ in die App; `MTG_HOME`
   in der Umgebung überstimmt den Ordner.
 - **Claude:** Der Agent-SDK bringt die CLI mit (das Windows-Wheel erst ab 0.2.164, deshalb die Mindestversion in
-  `pyproject.toml`); `paths.bundled_cli()` findet sie im Paket. Offen (5d): die Einstellungen zeigen, ob Claude
-  angemeldet ist, und starten die Anmeldung mit der mitgelieferten CLI.
+  `pyproject.toml`); `paths.bundled_cli()` findet sie im Paket. `GET /api/ai` fragt `claude auth status` (gecacht);
+  ist niemand angemeldet, sagt die Oberfläche das und bietet „Bei Claude anmelden“: `claude auth login` läuft im
+  Terminal der App (Pseudo-Terminal wie bei MPC Autofill), der Browser öffnet sich zum Bestätigen.
 - **Tray:** Menü Öffnen, Datenordner öffnen, „Beim Anmelden starten“ (Plugin `autostart`, Start mit `--hidden` nur
   in den Tray), Beenden; Linksklick öffnet das Fenster. Fenster schließen versteckt es, beim ersten Mal mit einem
-  Hinweis. Offen (5d): Zustand im Tooltip (Sync, Fragen vom Handy) und „Jetzt abgleichen“.
+  Hinweis. Der Tooltip zeigt den Zustand (laufende Aufträge, Sync, Frage vom Handy). Kein „Jetzt abgleichen“ im
+  Menü – der Sync läuft von selbst, der Knopf steht in den Einstellungen.
+- **Brücke:** Die Hülle fragt alle 10 s `POST /api/desktop/poll` (mit dem Token) und bekommt Tooltip, neue
+  Hinweise (bei verstecktem Fenster als Systembenachrichtigung: Deck fertig, Antwort von Claude, Neues von anderen
+  Geräten, Frage vom Handy beantwortet) und Befehle aus den Einstellungen (Autostart an/aus, Datenordner oder
+  Protokoll öffnen). Die Oberfläche selbst braucht so keine Tauri-IPC; im Browser fehlt das Panel einfach.
 - **Einmal:** Plugin `single-instance` (als erstes registriert): ein zweiter Start holt das Fenster nach vorn.
 - **Selbsttest:** `--selftest` startet das Backend, liest `/api/health` und beendet sich mit Exit-Code – so prüft
   der Workflow die gebaute Exe auf einem frischen Windows-Runner.
@@ -167,7 +173,7 @@ desktop/                      Tauri-2-Projekt (Rust-Hülle, rund 450 Zeilen)
 | **5a – Aufräumen** ✅ | Deskmat-Studio und die Online-Exporte entfernt; „Fragen zum Deck“ in „Frag Claude“ aufgegangen (Deckbezug, alte Fragen als Gespräche übernommen); Seitenleiste und Einstellungen gestrafft. KI-Hochskalierung und das Browser-Terminal bleiben auf Wunsch | Tests grün, Oberfläche ohne Leerstellen, alte Daten übernommen |
 | **5b – Backend als Programm** ✅ | `mtg-gui --data … --port 0 --token auto` (Launcher `mtgdeck.launch`, Datenordner `paths.home()`, Token-Schutz, `/api/health`, `mcp`-Modus), PyInstaller-Ordner-Build (`desktop/sidecar/backend.spec`), Workflow „Desktop“ baut und prüft die Windows-Exe | `mtgdeck-backend.exe` startet ohne Python |
 | **5c – Tauri-Hülle** ✅ | Fenster, Sidecar-Aufsicht mit Neustart und Protokoll, Single Instance, Fensterzustand, Tray, Autostart-Option, Hinweis beim Schließen, `--selftest`; der Workflow baut Backend und Hülle, prüft beide und lädt den NSIS-Installer hoch | Installer aus GitHub Actions läuft auf einem frischen Windows |
-| **5d – Desktop-Feinschliff** | Anmelden bei Claude aus der App, Tastenkürzel + Übersicht, Tray-Zustand und „Jetzt abgleichen“, Benachrichtigungen bei verstecktem Fenster, Einstellungen „Desktop“ | die zehn Regeln oben erfüllt |
+| **5d – Desktop-Feinschliff** ✅ | Anmelden bei Claude aus der App (Terminal), Tastenkürzel (Strg+K/N/J/,/S, `?` Übersicht), Tray-Tooltip mit Zustand, Benachrichtigungen bei verstecktem Fenster, Einstellungen „Desktop-App“ (Autostart, Benachrichtigungen, Ordner, Protokoll) | die zehn Regeln oben erfüllt |
 | **5e – Updates** | Signaturschlüssel, `latest.json`, Release-Workflow bei Tag, Update-Hinweis in der App | ein Update von v0.1 auf v0.2 läuft durch |
 
 **Stand 5b.** Gemessen am Linux-Build (Ordner, 302 MB, davon 230 MB die Claude-CLI des Agent-SDK): die Adresse
@@ -180,7 +186,14 @@ Startseite aus einer HTML-Datei ohne Framework. Die Oberfläche selbst läuft un
 keine Tauri-IPC – deshalb bleibt die Capability auf `core:default`, `window-state`, `notification`, `autostart`
 beschränkt. `cargo check --target x86_64-pc-windows-msvc` läuft auch unter Linux; gebaut wird nur auf dem
 Windows-Runner (Rust stabil, `npx @tauri-apps/cli build`, NSIS lädt Tauri selbst). Der Workflow führt die Exe mit
-`--selftest` aus und lädt den Installer als Artefakt hoch.
+`--selftest` aus und lädt den Installer als Artefakt hoch. Gemessen auf dem Windows-Runner: Backend-Build 30 s,
+Rust-Build kalt 8 min, Installer 105 MB (NSIS/LZMA über rund 600 MB Backend), Lauf insgesamt gut 10 min; der
+Selbsttest meldet `ok`, `frozen`, `skills`, `claude_cli`.
+
+**Stand 5d.** Die Brücke (`gui/desktop.py` ↔ `bridge.rs`) hält die Oberfläche frei von Tauri-IPC: Tooltip, Hinweise
+und Befehle gehen über die lokale API. Anmelden läuft über `claude auth login` im Terminal der App, der Zustand kommt
+von `claude auth status --json`. Der KI-Status in den Einstellungen war seit dem Aufräumen (5a) leer geblieben
+(verwaister Aufruf nach dem entfernten Fragen-Panel) – beim Prüfen im Browser gefunden und behoben.
 
 ## Bewusst nicht
 

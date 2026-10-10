@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse, RedirectResponse
@@ -40,7 +40,7 @@ from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
 from ..sync import service as sync_service
 from ..sync.remote import RemoteError
-from . import terminal
+from . import desktop, terminal
 
 log = logging.getLogger(__name__)
 
@@ -340,6 +340,8 @@ async def _run_claude(
             await _set_table_rule(deck["slug"], table_rule)
         except Exception as exc:
             job.emit(type="error", text=f"Tischregel konnte nicht gesetzt werden: {exc}")
+    if deck:
+        desktop.notify("Deck fertig", f"„{deck.get('name') or deck['slug']}“ ist gespeichert.")
     job.emit(type="done", ok=ok and deck is not None, deck=deck["slug"] if deck else None)
 
 
@@ -395,6 +397,34 @@ def _find_claude_cli() -> str | None:
     return str(bundled) if bundled else shutil.which("claude")
 
 
+_auth_cache: dict[str, Any] = {}  # {"logged_in": bool | None, "method": str | None, "at": float}
+AUTH_CACHE_SECONDS = 600
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # Windows: no console flashing up for the CLI
+
+
+def _cli_auth_status(cli: str) -> dict[str, Any]:
+    """``claude auth status --json`` → ``{logged_in, method}``; ``logged_in`` is None when it cannot be told."""
+    try:
+        out = subprocess.run([cli, "auth", "status", "--json"], capture_output=True, text=True, timeout=20,
+                             stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW)  # fmt: skip
+        data = json.loads(out.stdout or "{}")
+        return {"logged_in": bool(data.get("loggedIn")), "method": data.get("authMethod")}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {"logged_in": None, "method": None}
+
+
+def _auth_status(refresh: bool = False) -> dict[str, Any]:
+    """Whether the Claude CLI is signed in, cached for a while (starting the CLI costs about a second)."""
+    now = time.time()
+    if not refresh and _auth_cache and now - _auth_cache["at"] < AUTH_CACHE_SECONDS:
+        return _auth_cache
+    cli = _find_claude_cli()
+    result = {**(_cli_auth_status(cli) if cli else {"logged_in": None, "method": None}), "at": now}
+    _auth_cache.clear()
+    _auth_cache.update(result)
+    return _auth_cache
+
+
 def ai_status() -> dict[str, Any]:
     """``{enabled, available, reason}`` – reason is a German sentence when AI features cannot run."""
     enabled = bool(settings_mod.load().get("ai_enabled", True))
@@ -408,6 +438,9 @@ def ai_status() -> dict[str, Any]:
     if not _find_claude_cli():
         return {"enabled": True, "available": False,
                 "reason": "Claude Code wurde nicht gefunden – installieren (claude.ai/code) und einmal `claude` zum Anmelden starten."}  # fmt: skip
+    if _auth_cache.get("logged_in") is False:  # known from the last check; GET /api/ai refreshes it
+        return {"enabled": True, "available": False,
+                "reason": "Claude ist auf diesem Rechner noch nicht angemeldet – Einstellungen → „Bei Claude anmelden“."}  # fmt: skip
     if _ai_failure:
         return {"enabled": True, "available": True, "reason": None, "last_error": _ai_failure.get("text"),
                 "last_error_at": _ai_failure.get("at")}  # fmt: skip
@@ -913,8 +946,137 @@ async def api_health() -> dict[str, Any]:
 
 
 @app.get("/api/ai")
-async def api_ai() -> dict[str, Any]:
-    return ai_status()
+async def api_ai(refresh: bool = False) -> dict[str, Any]:
+    """``ai_status()`` plus, when the CLI is there, whether it is signed in (checked in a thread, cached)."""
+    st = ai_status()
+    if not st["enabled"] or not _find_claude_cli():
+        return st
+    auth = await asyncio.to_thread(_auth_status, refresh)
+    return {**ai_status(), "login": {"logged_in": auth["logged_in"], "method": auth["method"]},
+            "cli": {"bundled": paths.bundled_cli() is not None, "terminal": terminal.available()}}  # fmt: skip
+
+
+class LoginRequest(BaseModel):
+    rows: int = Field(default=24, ge=5, le=300)
+    cols: int = Field(default=100, ge=20, le=500)
+
+
+@app.post("/api/ai/login")
+async def api_ai_login(req: LoginRequest) -> dict[str, Any]:
+    """Sign in to Claude with the (bundled) CLI, interactively in the GUI's terminal: the CLI opens the browser, the
+    user confirms there and pastes the code if asked. Afterwards the sign-in state is checked again."""
+    cli = _find_claude_cli()
+    if not cli:
+        raise HTTPException(400, "Claude Code wurde nicht gefunden – installieren (claude.ai/code).")
+    if not terminal.available():
+        raise HTTPException(400, "Für die Anmeldung hier fehlt das Terminal-Paket (pywinpty/ptyprocess) – stattdessen einmal `claude` in einer Konsole ausführen.")  # fmt: skip
+
+    async def runner(job: Job) -> None:
+        job.emit(type="status", text="Anmeldung bei Claude … Es öffnet sich ein Browserfenster – bestätige dort und folge dem Terminal unten.")  # fmt: skip
+        term = terminal.Terminal([cli, "auth", "login"], cwd=str(AGENT_ROOT), rows=req.rows, cols=req.cols)
+        job.proc = term
+        job.emit(type="console", running=True)
+
+        def pump() -> None:
+            while data := term.read():
+                job.emit_threadsafe(type="term", data=data)
+
+        await asyncio.to_thread(pump)
+        code = await asyncio.to_thread(term.exit_code)
+        job.emit(type="console", running=False)
+        auth = await asyncio.to_thread(_auth_status, True)
+        ok = bool(auth["logged_in"]) if auth["logged_in"] is not None else code == 0
+        if ok:
+            _ai_failure.clear()
+        job.emit(type="result", text="Angemeldet – Claude ist bereit." if ok else f"Anmeldung nicht abgeschlossen (Code {code}).")
+        job.emit(type="done", ok=ok)
+
+    return _start_runner(runner)
+
+
+@app.post("/api/ai/logout")
+async def api_ai_logout() -> dict[str, Any]:
+    cli = _find_claude_cli()
+    if not cli:
+        raise HTTPException(400, "Claude Code wurde nicht gefunden.")
+    try:
+        await asyncio.to_thread(subprocess.run, [cli, "auth", "logout"], capture_output=True, text=True, timeout=30,
+                                stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW)  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(502, f"Abmelden fehlgeschlagen: {exc}") from exc
+    return await api_ai(refresh=True)
+
+
+# --- desktop shell (Tauri): tray tooltip, notifications while hidden, commands from the settings page ---------
+
+
+class DesktopPoll(BaseModel):
+    since: int = 0
+    visible: bool = True
+    autostart: bool | None = None
+    version: str | None = None
+
+
+class DesktopCommand(BaseModel):
+    type: Literal["autostart", "open_data", "open_log"]
+    value: bool | None = None
+
+
+def _ago(ts: Any) -> str:
+    from datetime import datetime
+
+    try:
+        t = float(ts) if isinstance(ts, (int, float)) else datetime.fromisoformat(str(ts)).timestamp()
+    except (TypeError, ValueError):
+        return "zuletzt unbekannt"
+    s = max(0, int(time.time() - t))
+    if s < 90:
+        return "gerade eben"
+    if s < 3600:
+        return f"vor {s // 60} Min."
+    if s < 86400:
+        return f"vor {s // 3600} Std."
+    return f"vor {s // 86400} Tagen"
+
+
+def _desktop_tooltip() -> str:
+    """What the tray icon shows on hover: the app's name and the state that matters."""
+    lines = [paths.APP_NAME]
+    running = sum(1 for j in JOBS.values() if not j.done)
+    if running:
+        lines.append("Ein Auftrag läuft" if running == 1 else f"{running} Aufträge laufen")
+    sv = _sync_view()
+    if sv.get("connected"):
+        if sv.get("revoked"):
+            lines.append("Sync: Gerät am Server abgemeldet")
+        elif sv.get("running"):
+            lines.append("Sync: läuft …")
+        elif sv.get("online") is False:
+            lines.append("Sync: Server nicht erreichbar")
+        elif sv.get("last_ok"):
+            lines.append(f"Sync: {_ago(sv['last_ok'])}")
+        else:
+            lines.append("Sync: noch kein Abgleich")
+    if (sv.get("phone") or {}).get("current"):
+        lines.append("Beantwortet gerade eine Frage vom Handy")
+    return "\n".join(lines)
+
+
+@app.get("/api/desktop")
+async def api_desktop() -> dict[str, Any]:
+    return {"shell": desktop.shell(), "notify": bool(settings_mod.load().get("desktop_notify", True))}
+
+
+@app.post("/api/desktop/poll")
+async def api_desktop_poll(req: DesktopPoll) -> dict[str, Any]:
+    return {**desktop.poll(req.model_dump(exclude_none=True), req.since), "tooltip": _desktop_tooltip()}
+
+
+@app.post("/api/desktop/command")
+async def api_desktop_command(req: DesktopCommand) -> dict[str, Any]:
+    if not desktop.present():
+        raise HTTPException(409, "Die Desktop-App läuft gerade nicht – diese Einstellung gibt es nur dort.")
+    return desktop.command(req.type, req.value)
 
 
 class NewDeckRequest(BaseModel):
@@ -1832,6 +1994,7 @@ async def api_chat(req: ChatRequest) -> dict[str, Any]:
             entry = chat.add(chat_id, question, answer, cards=await _card_refs(answer), decks=_deck_refs(answer),
                              deep=req.deep, **({"deck": deck["slug"]} if deck else {}))  # fmt: skip
             job.emit(type="answer", entry=entry, chat_id=chat_id)
+            desktop.notify("Antwort von Claude", question[:140])
         elif ok:
             job.emit(type="error", text="Keine Antwort erhalten.")
         if not (ok and answer) and not req.chat_id:  # a new conversation without an answer is not kept
@@ -2391,6 +2554,7 @@ class SettingsUpdate(BaseModel):
     ai_enabled: bool | None = None
     sync_interval: int | None = Field(default=None, ge=0, le=240)
     phone_questions: bool | None = None
+    desktop_notify: bool | None = None
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -2766,6 +2930,9 @@ async def _sync_now(reason: str) -> dict[str, Any]:
         _sync_state["online"] = True
         if sync_service.pending_revalidation():
             entry["revalidated"] = await sync_service.revalidate_pending()
+        if entry.get("incoming"):
+            more = entry.get("incoming_more") or 0
+            desktop.notify("Neu von deinen anderen Geräten", ", ".join(entry["incoming"][:3]) + (f" … und {more} mehr" if more else ""))
     return entry
 
 
@@ -2929,6 +3096,7 @@ async def _answer_phone(q: dict[str, Any]) -> str:
                 raise
             await asyncio.sleep(5)
     _phone_state["answered"] += 1
+    desktop.notify("Frage vom Handy beantwortet", (q.get("question") or "")[:140])
     try:
         await _sync_now("frage vom handy")  # the answered conversation comes to this PC too
     except Exception:
