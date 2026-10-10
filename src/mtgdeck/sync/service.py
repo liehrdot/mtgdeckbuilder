@@ -17,7 +17,7 @@ import httpx
 
 from ..jsonstore import locked, read_json, update_json, write_json
 from .client import SyncClient
-from .files import Roots, describe
+from .files import DECK_RE, Roots, describe
 from .remote import AuthError, HttpTransport, RemoteError, normalize_url, parse_link
 
 RUNS_KEEP = 20
@@ -104,9 +104,11 @@ def _deck_names() -> dict[str, str]:
         return {}
 
 
-def _labels(paths: list[str], names: dict[str, str]) -> list[str]:
-    out = [describe(p, names) for p in paths if "/.versions/" not in p]
-    return list(dict.fromkeys(out))[:LABELS_MAX]
+def _labels(paths: list[str], names: dict[str, str]) -> tuple[list[str], int]:
+    """German labels (decks first, versions left out), at most ``LABELS_MAX``, plus how many were left out."""
+    decks_first = sorted((p for p in paths if "/.versions/" not in p), key=lambda p: not DECK_RE.fullmatch(p))
+    out = list(dict.fromkeys(describe(p, names) for p in decks_first))
+    return out[:LABELS_MAX], max(0, len(out) - LABELS_MAX)
 
 
 def run(reason: str = "", roots: Roots | None = None, client: httpx.Client | None = None) -> dict[str, Any]:
@@ -135,9 +137,10 @@ def run(reason: str = "", roots: Roots | None = None, client: httpx.Client | Non
         entry.update(
             ok=not report["errors"], pulled=report["pulled"], pushed=report["pushed"], merged=report["merged"],
             skipped=report["skipped"], revalidate=report["revalidate"], conflicts=len(report["conflicts"]),
-            errors=report["errors"][:20], incoming=_labels(report["pulled"] + report["merged"], names),
-            outgoing=_labels(report["pushed"], names),
+            errors=report["errors"][:20],
         )  # fmt: skip
+        entry["incoming"], entry["incoming_more"] = _labels(report["pulled"] + report["merged"], names)
+        entry["outgoing"], entry["outgoing_more"] = _labels(report["pushed"], names)
         if report["errors"]:
             entry["error"] = report["errors"][0]
     except AuthError as exc:

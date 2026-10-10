@@ -290,3 +290,14 @@ def test_restoring_an_app_backup_on_a_synced_pc_merges_instead_of_deleting(net):
     run = service.run(roots=roots, client=client)
     assert run["ok"]
     assert [g["id"] for g in json.loads(roots.physical("decks/.games/meren.json").read_text())] == ["g1", "g2"]
+
+
+def test_run_lists_decks_first_and_counts_the_rest(net):
+    app, client, a, b, use, pair, code = net
+    use(a)
+    pair(a, "PC")
+    for i in range(15):
+        write_json(a.physical(f"decks/.games/deck{i:02d}.json"), [{"id": f"g{i}"}])
+    storage.save({"name": "Meren", "commanders": ["Meren of Clan Nel Toth"], "bracket": 2, "cards": []})
+    run = service.run(roots=a, client=client)
+    assert run["outgoing"][0] == "Deck „Meren“" and len(run["outgoing"]) == 12 and run["outgoing_more"] == 4

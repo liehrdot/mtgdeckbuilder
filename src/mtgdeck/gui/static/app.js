@@ -3836,8 +3836,9 @@ function syncSummary(run) {
   if (!run) return "Noch nicht abgeglichen.";
   if (run.error) return `<span class="warn">Letzter Abgleich ${esc(fmtAgo(run.at))} hat nicht geklappt: ${esc(run.error)}</span>`;
   const parts = [];
-  if (run.incoming?.length) parts.push(`geholt: ${esc(run.incoming.join(", "))}`);
-  if (run.outgoing?.length) parts.push(`gesendet: ${esc(run.outgoing.join(", "))}`);
+  const more = (n) => (n ? ` und ${n} weitere` : "");
+  if (run.incoming?.length) parts.push(`geholt: ${esc(run.incoming.join(", "))}${more(run.incoming_more)}`);
+  if (run.outgoing?.length) parts.push(`gesendet: ${esc(run.outgoing.join(", "))}${more(run.outgoing_more)}`);
   if (run.conflicts) parts.push(`<a href="#" data-sync-conflicts>${run.conflicts} ${run.conflicts === 1 ? "Konflikt" : "Konflikte"}</a>`);
   return `Zuletzt abgeglichen ${esc(fmtAgo(run.at))} (${fmtClock(run.at)}) – ${parts.length ? parts.join(" · ") : "alles war schon aktuell"}.`;
 }
@@ -3890,7 +3891,8 @@ function syncNews(run) {
   if (!run || !run.at || run.at <= syncSeenAt) return;
   syncSeenAt = run.at;
   if (!run.ok || !run.incoming?.length) return;
-  const items = run.incoming.slice(0, 3).join(", ") + (run.incoming.length > 3 ? ` und ${run.incoming.length - 3} weitere` : "");
+  const rest = run.incoming.length - 3 + (run.incoming_more || 0);
+  const items = run.incoming.slice(0, 3).join(", ") + (rest > 0 ? ` und ${rest} weitere` : "");
   refreshDeckList();
   toast(`Neu von deinen anderen Geräten: ${items}`, "info", 9000, { label: "Anzeigen", run: reloadAfterSync });
 }
