@@ -209,6 +209,9 @@ selbst“ ist damit der nächste Schritt auf einem echten Windows.
    (Inhalt der Datei `mtgdeck-updater.key`, eine Zeile) und `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (leer, der Schlüssel
    hat kein Passwort) anlegen. Den privaten Schlüssel sicher aufbewahren: ohne ihn lassen sich keine Updates mehr
    signieren, und installierte Apps nehmen nur Pakete an, die zum öffentlichen Schlüssel in `tauri.conf.json` passen.
+   Geht er verloren: `npx @tauri-apps/cli@^2 signer generate -w mtgdeck-updater.key` erzeugt ein neues Paar, der
+   neue öffentliche Schlüssel kommt nach `plugins.updater.pubkey`, das Secret wird ersetzt – bereits installierte
+   Apps nehmen das nächste Update dann nicht mehr von selbst an und werden einmal per Installer aktualisiert.
 2. Pro Version: `uv run python scripts/bump_version.py 0.2.0`, committen, `git tag v0.2.0`, `git push && git push --tags`.
 3. Der Workflow „Release“ läuft etwa 12 Minuten und legt das Release mit `MTG Deckbuilder_0.2.0_x64-setup.exe`,
    `.sig` und `latest.json` an. Installierte Apps melden die Version beim nächsten Start oder spätestens am nächsten
