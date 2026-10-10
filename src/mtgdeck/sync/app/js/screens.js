@@ -1,6 +1,7 @@
 // The four tabs and their detail screens. Each screen returns {html, fab, bar, bind}; main.js draws it.
 
 import { currentDeck, deckBy, failedOps, gamesOf, isDemo, isPending, op, oppBy, oppName, oppSub, pendingCount, setPref, shortName, state } from "./data.js";
+import { askSheet } from "./claude.js";
 import { cardSheet, gameDetailSheet, gameSheet, opponentSheet, settingsSheet, switchDeckSheet } from "./forms.js";
 import * as scry from "./scry.js";
 import { present, toast } from "./ui.js";
@@ -65,6 +66,8 @@ export function tisch() {
         <span class="main"><span class="title">Gegnerdeck festhalten</span><span class="subtitle">Jemand hat ein neues Deck dabei</span></span>${icon("chev-r", "sm chev")}</button>
       <a class="row" href="#/karten"><span class="res win" aria-hidden="true">${icon("search", "sm")}</span>
         <span class="main"><span class="title">Karte nachschlagen</span><span class="subtitle">Text auf Deutsch, auch für Karten deiner Decks</span></span>${icon("chev-r", "sm chev")}</a>
+      <button class="row" type="button" id="quick-ask"><span class="res ai" aria-hidden="true">${icon("spark", "sm")}</span>
+        <span class="main"><span class="title">Claude fragen</span><span class="subtitle">Strategie, Matchup oder Regelfrage – dein PC antwortet</span></span>${icon("chev-r", "sm chev")}</button>
     </div>`;
   return {
     html, fab: d ? { label: "Partie eintragen", run: () => gameSheet() } : null,
@@ -74,6 +77,7 @@ export function tisch() {
       $("#switch-deck", el)?.addEventListener("click", switchDeckSheet);
       $("#show-r0", el)?.addEventListener("click", () => showRule0(d));
       $("#quick-opp", el).addEventListener("click", () => opponentSheet());
+      $("#quick-ask", el).addEventListener("click", () => askSheet());
       $("#status-line", el)?.addEventListener("click", settingsSheet);
       $("#install-hint .x", el)?.addEventListener("click", () => { setPref("installHintDone", true); window.dispatchEvent(new Event("redraw")); });
       $("#install-now", el)?.addEventListener("click", async () => {
@@ -166,12 +170,14 @@ export function deck(slug, seg = "rule0") {
       ${d.description ? `<p class="sub muted">${esc(d.description)}</p>` : ""}
       <div class="recordbar"><div class="w"><b>${r.wins}</b><span>Siege</span></div><div class="l"><b>${r.losses}</b><span>Niederlagen</span></div>
         <div><b>${r.games ? Math.round((100 * r.wins) / r.games) : 0} %</b><span>${plural(r.games, "Partie", "Partien")}</span></div></div>
+      <button class="btn tint ask-deck" type="button" id="ask-deck">${icon("spark", "sm")}Claude zu diesem Deck fragen</button>
     </div>
     <div class="seg-sticky"><div class="segmented" role="tablist">${SEGMENTS.map(([k, label]) => `<button type="button" role="tab" data-seg="${k}" aria-pressed="${k === seg}" aria-selected="${k === seg}">${label}</button>`).join("")}</div></div>
     <div id="seg-body">${segment(d, seg)}</div>`;
   return {
     html, bar: { title: d.name, back: { href: "#/decks", label: "Decks" }, watch: ".detail-head h1" },
     bind(el) {
+      $("#ask-deck", el).addEventListener("click", () => askSheet({ prefill: `Zu meinem Deck „${d.name}“: ` }));
       for (const b of $$("[data-seg]", el)) b.addEventListener("click", () => {
         history.replaceState(history.state, "", `#/decks/${slug}/${b.dataset.seg}`);
         for (const x of $$("[data-seg]", el)) { x.setAttribute("aria-pressed", x === b); x.setAttribute("aria-selected", x === b); }

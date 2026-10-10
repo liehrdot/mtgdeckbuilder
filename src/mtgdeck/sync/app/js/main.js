@@ -1,6 +1,7 @@
 // Start, router and the parts every screen shares (tab bar, floating action, top bar, scroll positions),
 // the service worker (offline start, "Neu laden" for a new version) and pairing links (…/koppeln#CODE).
 
+import { chatThread, claude, unreadCount } from "./claude.js";
 import { boot, onChange, state } from "./data.js";
 import { applyTheme } from "./forms.js";
 import { codeFrom, welcome } from "./pair.js";
@@ -9,7 +10,7 @@ import { deck, decks, gegner, karten, opponent, paint, tisch } from "./screens.j
 import { clearToast, sheetIsOpen, toast, topbar } from "./ui.js";
 import { $, $$, esc, icon, reducedMotion } from "./util.js";
 
-const TABS = ["tisch", "decks", "gegner", "karten"];
+const TABS = ["tisch", "decks", "gegner", "karten", "claude"];
 const scrolls = {};
 let current = null;  // {key, depth}
 let linkCode = null;  // code from a pairing link
@@ -24,7 +25,8 @@ function screenFor(r) {
   if (!state.snap) return { html: `<div class="empty">${icon("cloud")}<h3>Lade deine Daten …</h3><p>Einen Moment – beim ersten Mal braucht es Netz.</p></div>`, bar: { title: "Am Tisch" } };
   if (r.tab === "decks" && r.id) return deck(r.id, r.seg || "rule0");
   if (r.tab === "gegner" && r.id) return opponent(r.id);
-  return { tisch, decks, gegner, karten }[r.tab]();
+  if (r.tab === "claude" && r.id) return chatThread(r.id);
+  return { tisch, decks, gegner, karten, claude }[r.tab]();
 }
 
 function draw({ keepScroll = false } = {}) {
@@ -46,6 +48,9 @@ function draw({ keepScroll = false } = {}) {
   for (const a of $$(".tabbar a")) {
     if (a.dataset.tab === r.tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
+  const unread = state.snap ? unreadCount() : 0;  // new answers from Claude
+  $(".tabbar [data-tab=claude] .tab-dot").hidden = !unread;
+  $(".tabbar [data-tab=claude]").setAttribute("aria-label", unread ? `Claude, ${unread === 1 ? "eine neue Antwort" : `${unread} neue Antworten`}` : "Claude");
   s.bind?.(main);
   scry.hydrate(main);
   paint(main);

@@ -248,6 +248,7 @@ async def test_the_pc_answers_a_phone_question_and_gets_the_conversation(tmp_pat
     assert await gui._answer_phone(job) == "done"
     assert "sieht sich „Meren“ an" in seen["labels"]
     assert seen["prompt"].endswith("Frage: Wie spiele ich Meren gegen Atraxa?") and "mcp__mtg__save_deck" in seen["options"].disallowed_tools
+    assert "aus der Handy-App" in seen["prompt"]  # short answers for the table
     m = chat.get(CHAT)["messages"][0]  # the sync after the answer brought the conversation to this PC
     assert m["answer"] == answer and m["source"] == "phone" and m["decks"]["meren"]["name"] == "Meren" and m["cards"]["Sol Ring"]["image"]
     assert client.get("/api/app/status", headers=phone).json()["jobs"][0]["status"] == "done"

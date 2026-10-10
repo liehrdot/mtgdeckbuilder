@@ -852,7 +852,7 @@ class ChatRequest(BaseModel):
 CHAT_HISTORY = 6  # earlier exchanges passed along for follow-ups
 
 
-def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data: dict[str, Any] | None = None) -> str:
+def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data: dict[str, Any] | None = None, *, phone: bool = False) -> str:
     lines = [
         "Du bist der Assistent der ganzen Commander-Deckbuilder-App. Beantworte die Frage des Nutzers über seine "
         "Decks, Partien, Gegnerdecks, Tischregeln und Sammlung. Nutze den Skill `commander-deckbuilder`, Abschnitt "
@@ -871,6 +871,8 @@ def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data
         "- Wenige Partien sind wenig Aussagekraft – sag das, statt aus 1–2 Spielen Schlüsse zu ziehen.",
         "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze, Listen oder eine Tabelle. "
         "Keine Vorrede über deine Arbeitsschritte.",
+        *(["- Die Frage kommt aus der Handy-App, oft mitten am Spieltisch: antworte knapp (meist unter 200 Wörtern), "
+           "kurze Listen statt langer Absätze, eine Tabelle nur, wenn sie wirklich hilft."] if phone else []),
         "",
         "Übersicht der App:",
         *overview.prompt_lines(data),
@@ -3168,7 +3170,7 @@ async def _answer_phone(q: dict[str, Any]) -> str:
             result.update(error=err or "Keine Antwort erhalten.")
         job.emit(type="done", ok=bool(ok and answer))
 
-    prompt = chat_prompt(q["question"], q.get("history") or [])
+    prompt = chat_prompt(q["question"], q.get("history") or [], phone=True)
     model, effort = (META_MODEL, META_EFFORT) if q.get("deep") else (None, None)
     job = Job(id=uuid.uuid4().hex[:12])
     _register(job, _run_claude(job, prompt, model, read_only=True, finish=finish, effort=effort))

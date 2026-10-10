@@ -120,7 +120,7 @@ fremde Fassung verglichen:
 | **1 – Sync-Kern** ✅ | logische Pfade, Basis-Speicher, Drei-Wege-Zusammenführung, Deck-Regel mit Neunummerierung, Konfliktprotokoll, Server-Speicher (SQLite) als Bibliothek | zwei Datenordner gleichen sich über den Speicher ab; Tests für alle Konfliktfälle |
 | **2 – Sync-Server** ✅ | HTTP-Schicht, Geräte-Token und QR-Kopplung, Anwesenheit, Docker-Image, Compose-Datei, Anleitung Hetzner; Seite „Sync“ in den Einstellungen (Status, jetzt synchronisieren, Konflikte, Geräte) | PC ↔ Server ↔ zweiter PC im Alltag |
 | **3 – Handy-PWA** ✅ | „Am Tisch“: Partie eintragen, Gegnerdeck schnell anlegen, Decks/Rule 0 ansehen, Karten nachschlagen; Offline-Warteschlange | Partie offline am Tisch eingetragen, später am PC sichtbar |
-| **4 – KI-Aufträge** | Aufträge vom Handy, Abarbeitung am PC, Statusanzeige | Frage vom Handy wird vom PC beantwortet |
+| **4 – KI-Aufträge** ✅ | Aufträge vom Handy, Abarbeitung am PC, Statusanzeige | Frage vom Handy wird vom PC beantwortet |
 | **5 – Desktop-App** | Tauri-Hülle, Sidecar, Infobereich, Installer, Auto-Update | Windows-Installer aus GitHub Actions |
 
 ## Phase 4 im Detail: „Frag Claude“ vom Handy
@@ -159,6 +159,20 @@ Einstieg, zum Beispiel „Wie spiele ich {Deck} gegen {letzter Gegner}?“ oder 
 
 **Grenzen.** Pro Handy sind höchstens 10 offene Fragen erlaubt. Das Handy liest die letzten 30 Gespräche, auch
 offline.
+
+**Stand.** Phase 4 ist umgesetzt. Getestet sind:
+- die Operationen;
+- die Server-Routen (sofortiges Wecken eines wartenden PCs, Freigabe nach Funkstille, Zurückziehen während der
+  Arbeit, Grenze offener Fragen);
+- der PC mit nachgestelltem Claude gegen einen echten Server-Ablauf.
+
+Im Browser geprüft sind die Vorschau (hell und dunkel, Tippflächen, kein seitliches Scrollen) und der Ablauf mit
+echtem Server und nachgestelltem PC:
+- Zwischenstand und Antwort mit Links;
+- Nachfrage offline;
+- Punkt am Tab;
+- Zurückziehen;
+- „PC beantwortet keine Fragen“.
 
 ## Risiken und offene Punkte
 

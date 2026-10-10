@@ -270,6 +270,11 @@ ein Befehl auf dem Server.
     beim nächsten Abgleich.
   - **Neue Versionen:** Sie kommen mit dem Server-Update. Die App bietet dann „Neu laden“ an.
   - **Abmelden:** in der App unter *Einstellungen* oder am PC in der Geräteliste.
+  - **Frag Claude:** Im Tab „Claude“ stellst du Fragen zu Decks, Gegnern oder Regeln. Dein PC beantwortet sie mit dem
+    „Frag Claude“ des Deckbuilders, solange er läuft – das Handy selbst braucht keine KI. Es zeigt ehrlich, ob der PC
+    bereit ist und was Claude gerade tut („liest Kartentexte …“). Kommt eine Frage ohne Netz, wartet sie auf dem Handy;
+    ist der PC aus, wartet sie auf dem Server. Am PC lässt sich das unter *Einstellungen → Sync zwischen Geräten →
+    „Fragen vom Handy beantworten“* abschalten. Die Gespräche stehen auch am PC unter „Frag Claude“.
   - **Vorschau:** „Erst mal mit Beispieldaten ansehen“ zeigt die App ohne Kopplung.
 
 ## Web-GUI
