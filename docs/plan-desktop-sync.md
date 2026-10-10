@@ -119,9 +119,46 @@ fremde Fassung verglichen:
 |---|---|---|
 | **1 – Sync-Kern** ✅ | logische Pfade, Basis-Speicher, Drei-Wege-Zusammenführung, Deck-Regel mit Neunummerierung, Konfliktprotokoll, Server-Speicher (SQLite) als Bibliothek | zwei Datenordner gleichen sich über den Speicher ab; Tests für alle Konfliktfälle |
 | **2 – Sync-Server** ✅ | HTTP-Schicht, Geräte-Token und QR-Kopplung, Anwesenheit, Docker-Image, Compose-Datei, Anleitung Hetzner; Seite „Sync“ in den Einstellungen (Status, jetzt synchronisieren, Konflikte, Geräte) | PC ↔ Server ↔ zweiter PC im Alltag |
-| **3 – Handy-PWA** | „Am Tisch“: Partie eintragen, Gegnerdeck schnell anlegen, Decks/Rule 0 ansehen, Karten nachschlagen; Offline-Warteschlange | Partie offline am Tisch eingetragen, später am PC sichtbar |
+| **3 – Handy-PWA** ✅ | „Am Tisch“: Partie eintragen, Gegnerdeck schnell anlegen, Decks/Rule 0 ansehen, Karten nachschlagen; Offline-Warteschlange | Partie offline am Tisch eingetragen, später am PC sichtbar |
 | **4 – KI-Aufträge** | Aufträge vom Handy, Abarbeitung am PC, Statusanzeige | Frage vom Handy wird vom PC beantwortet |
 | **5 – Desktop-App** | Tauri-Hülle, Sidecar, Infobereich, Installer, Auto-Update | Windows-Installer aus GitHub Actions |
+
+## Phase 4 im Detail: „Frag Claude“ vom Handy
+
+**Ablauf.** Die Frage ist ein Auftrag mit Kennung. Der Server ist die Drehscheibe, der PC arbeitet ihn ab.
+
+1. Das Handy schickt die Operation `chat.ask` (Gespräch, Frage, „Gründlich“) über die Warteschlange, also auch
+   offline. Der Server schreibt die Frage als offene Nachricht in das Gespräch `decks/.chats/<id>.json`. So
+   steht sie am PC unter „Frag Claude“, und das Handy zeigt sie sofort. Zusätzlich legt der Server einen Auftrag an.
+2. Der PC wartet über eine offene Leitung auf Aufträge (`POST /api/jobs/claim`, bis 25 s). Ein neuer Auftrag kommt
+   ohne Verzögerung an, ein ruhender PC kostet nichts. Der PC holt sich nur Aufträge, wenn Claude bereit ist und
+   „Fragen vom Handy beantworten“ an ist (Einstellung, Standard: an).
+3. Der PC beantwortet die Frage mit dem gleichen App-Chat wie am PC (nur lesen, Übersicht über alles, bisheriges
+   Gespräch als Zusammenhang). Unterwegs meldet er, was Claude gerade tut („liest Kartentexte“). Das ist zugleich
+   das Lebenszeichen: Bleibt es länger als `JOB_LEASE` aus, gibt der Server den Auftrag wieder frei.
+4. Der PC schickt die Antwort an den Server (`POST /api/jobs/<id>/finish`). Der Server trägt sie ins Gespräch ein
+   und ist damit der einzige, der Antworten auf Handy-Fragen schreibt. Danach gleicht der PC ab, und das Gespräch
+   steht auch dort.
+5. Das Handy fragt, solange eine Frage offen ist, alle paar Sekunden den Stand ab und lädt die Antwort, sobald sie
+   da ist.
+
+**Was das Handy zeigt** (ehrlich, wie Zustellstatus in Messengern):
+- „Wird gesendet, sobald Netz da ist“, solange die Frage noch auf dem Handy wartet;
+- „Wartet auf deinen PC“, wenn kein PC erreichbar ist (die Frage bleibt liegen, bis er läuft);
+- „Claude liest Kartentexte …“ während der Arbeit;
+- die Antwort, Kartennamen und Decks darin antippbar;
+- „Hat nicht geklappt“ mit Grund und „Nochmal fragen“.
+
+Offene Fragen lassen sich zurückziehen. Ein Punkt am Tab zeigt neue Antworten. Es gibt keine Benachrichtigungen,
+wie in der Handy-App überall.
+
+**Bedienung.** Ein fünfter Tab „Claude“ zeigt die Gespräche und den Stand des PCs. Neue Fragen und Nachfragen
+schreibt man in ein Sheet; das folgt der Tastatur, wie die anderen Sheets auch. Vorschläge als Chips helfen beim
+Einstieg, zum Beispiel „Wie spiele ich {Deck} gegen {letzter Gegner}?“ oder „Regelfrage: …“. Vom Deck aus führt
+„Claude fragen“ in eine Frage zu diesem Deck.
+
+**Grenzen.** Pro Handy sind höchstens 10 offene Fragen erlaubt. Das Handy liest die letzten 30 Gespräche, auch
+offline.
 
 ## Risiken und offene Punkte
 

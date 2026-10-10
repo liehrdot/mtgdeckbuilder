@@ -6,7 +6,8 @@ An operation is ``{"id", "type", "payload", "at"}``; ``apply(op, docs)`` takes t
 remembers applied ids, so an operation sent twice (the phone retries after a lost answer) changes nothing.
 
 Types: ``game.add`` · ``game.delete`` · ``opponent.add`` · ``opponent.update`` · ``opponent.note`` ·
-``opponent.note_delete`` · ``opponent.delete``.
+``opponent.note_delete`` · ``opponent.delete`` · ``chat.ask`` (a question for Claude: an open message in the
+conversation, answered later by a PC – see ``answer_chat``) · ``chat.cancel``.
 """
 
 from __future__ import annotations
@@ -23,7 +24,11 @@ OPPONENTS = "decks/.opponents.json"
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,80}")
 ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 ISO_RE = re.compile(r"\d{4}-\d\d-\d\dT[\d:.]+(Z|[+-]\d\d:\d\d)?")
-TYPES = ("game.add", "game.delete", "opponent.add", "opponent.update", "opponent.note", "opponent.note_delete", "opponent.delete")
+TYPES = ("game.add", "game.delete", "opponent.add", "opponent.update", "opponent.note", "opponent.note_delete", "opponent.delete",
+         "chat.ask", "chat.cancel")
+CHAT_RE = re.compile(r"[0-9a-f]{12}")  # like chat.py
+MSG_RE = re.compile(r"[0-9a-f]{10}")
+TITLE_LEN = 70  # like chat.py
 
 
 class OpError(ValueError):
@@ -53,7 +58,20 @@ def paths(op: dict[str, Any]) -> list[str]:
         return [f"decks/{slug}.json", f"decks/.games/{slug}.json", OPPONENTS]
     if t == "game.delete":
         return [f"decks/.games/{_deck_slug(p)}.json"]
+    if t.startswith("chat."):
+        return [chat_path(p.get("chat_id"))]
     return [OPPONENTS]
+
+
+def chat_path(chat_id: Any) -> str:
+    if not isinstance(chat_id, str) or not CHAT_RE.fullmatch(chat_id):
+        raise OpError("Unbekanntes Gespräch")
+    return f"decks/.chats/{chat_id}.json"
+
+
+def _chat_title(question: str) -> str:
+    t = " ".join(question.split())
+    return t if len(t) <= TITLE_LEN else t[: TITLE_LEN - 2].rstrip() + " …"
 
 
 def _text(value: Any, limit: int) -> str:
@@ -154,6 +172,8 @@ def apply(op: dict[str, Any], docs: dict[str, Any]) -> dict[str, Any]:
         if changed:
             out[OPPONENTS] = opp_doc
         return out
+    if t.startswith("chat."):
+        return _chat_op(t, p, docs, at)
     if t == "game.delete":
         path = f"decks/.games/{_deck_slug(p)}.json"
         games = [x for x in docs.get(path) or [] if isinstance(x, dict)]
@@ -202,6 +222,54 @@ def apply(op: dict[str, Any], docs: dict[str, Any]) -> dict[str, Any]:
         opp_doc["opponents"] = [x for x in items if x["id"] != o["id"]]
     out[OPPONENTS] = opp_doc
     return out
+
+
+def _chat_op(t: str, p: dict[str, Any], docs: dict[str, Any], at: str) -> dict[str, Any]:
+    path = chat_path(p.get("chat_id"))
+    msg_id = p.get("message_id")
+    if not isinstance(msg_id, str) or not MSG_RE.fullmatch(msg_id):
+        raise OpError("Ungültige Kennung: Frage")
+    doc = docs.get(path) if isinstance(docs.get(path), dict) else None
+    if t == "chat.cancel":  # take back a question that has no answer yet; an empty conversation goes away
+        if doc is None:
+            return {}
+        msgs = [m for m in doc.get("messages") or [] if isinstance(m, dict)]
+        keep = [m for m in msgs if not (m.get("id") == msg_id and not m.get("answer"))]
+        if len(keep) == len(msgs):
+            return {}
+        if not keep:
+            return {path: None}
+        return {path: {**doc, "messages": keep}}
+    question = _text(p.get("question"), 4000)
+    if len(question) < 2:
+        raise OpError("Die Frage ist zu kurz.")
+    doc = dict(doc) if doc else {"id": path.split("/")[-1][:-5], "title": _chat_title(question), "created": at, "updated": at}
+    msgs = [m for m in doc.get("messages") or [] if isinstance(m, dict)]
+    if any(m.get("id") == msg_id for m in msgs):
+        return {}  # sent twice
+    msgs.append({"id": msg_id, "asked": at, "question": question, "answer": None, "status": "waiting",
+                 "deep": bool(p.get("deep")), "source": "phone"})  # fmt: skip
+    doc["messages"], doc["updated"] = msgs, at
+    return {path: doc}
+
+
+def answer_chat(doc: Any, msg_id: str, *, at: str, answer: str = "", cards: dict[str, Any] | None = None,
+                decks: dict[str, Any] | None = None, error: str = "") -> dict[str, Any] | None:  # fmt: skip
+    """The PC's answer (or why there is none) into the open message ``msg_id``; ``None`` when the question is gone
+    (taken back meanwhile) or already answered. Only the sync server writes answers to questions from the phone."""
+    if not isinstance(doc, dict):
+        return None
+    msgs = [dict(m) for m in doc.get("messages") or [] if isinstance(m, dict)]
+    m = next((x for x in msgs if x.get("id") == msg_id), None)
+    if m is None or m.get("answer"):
+        return None
+    if answer.strip():
+        m.update(answer=answer.strip(), cards=cards or {}, decks=decks or {}, answered=at)
+        m.pop("status", None)
+        m.pop("error", None)
+    else:
+        m.update(status="failed", error=_text(error, 300) or "Keine Antwort erhalten.")
+    return {**doc, "messages": msgs, "updated": at}
 
 
 def apply_copy(op: dict[str, Any], docs: dict[str, Any]) -> dict[str, Any]:

@@ -473,6 +473,9 @@ ul.issues li { margin-bottom: 3px; }
 .qa-list { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
 .qa-list:empty { display: none; }
 .qa-item { flex: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.chat-from { display: block; margin-top: 4px; font-size: var(--fs-xs); font-weight: 400; opacity: .75; }
+.chat-msg.chat-open { color: var(--muted); font-style: italic; }
+.chat-msg.chat-open.failed { color: var(--bad); font-style: normal; }
 .qa-q { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 10px 14px; background: var(--surface-2); font-weight: 600; }
 .qa-q .meta { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; white-space: nowrap; }
 .qa-q .qa-del { background: none; border: none; color: var(--muted); padding: 0 0 0 6px; font-size: 14px; cursor: pointer; }
@@ -1167,3 +1170,5 @@ kbd { font: 600 11px var(--mono); padding: 1px 5px; border: 1px solid var(--bord
 @media (prefers-reduced-motion: reduce) { .sync-dot.busy { animation: none; } }
 .conflict-val { font-family: var(--mono, ui-monospace, monospace); font-size: var(--fs-xs, 12px); word-break: break-all; }
 
+.sync-phone { display: flex; align-items: flex-start; margin-top: var(--space-3); }
+.sync-phone input { margin-top: 3px; }

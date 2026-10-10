@@ -48,11 +48,12 @@ PROJECT_ROOT = storage.PROJECT_ROOT
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    task = asyncio.create_task(_sync_loop()) if os.environ.get("MTG_SYNC_AUTO", "1") != "0" else None
+    auto = os.environ.get("MTG_SYNC_AUTO", "1") != "0"
+    tasks = [asyncio.create_task(_sync_loop()), asyncio.create_task(_phone_loop())] if auto else []
     try:
         yield
     finally:
-        if task:
+        for task in tasks:
             task.cancel()
 
 
@@ -874,11 +875,11 @@ def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data
         "Übersicht der App:",
         *overview.prompt_lines(data),
     ]
-    earlier = (history or [])[-CHAT_HISTORY:]
+    earlier = [h for h in history or [] if h.get("answer")][-CHAT_HISTORY:]  # open/failed questions from the phone carry no answer
     if earlier:
         lines += ["", "Bisheriges Gespräch (zur Einordnung von Anschlussfragen):"]
         for h in earlier:
-            answer = h.get("answer", "")
+            answer = h.get("answer") or ""
             answer = answer if len(answer) <= 1500 else answer[:1500] + " …"
             lines += [f"Frage: {h.get('question', '')}", f"Antwort: {answer}", ""]
     lines += ["", f"Frage: {question.strip()}"]
@@ -2668,6 +2669,7 @@ class SettingsUpdate(BaseModel):
     image_generator_url: str | None = None
     ai_enabled: bool | None = None
     sync_interval: int | None = Field(default=None, ge=0, le=240)
+    phone_questions: bool | None = None
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -3078,7 +3080,7 @@ async def _sync_loop() -> None:
             if cfg and not cfg.get("revoked") and now - _sync_state["last_presence"] >= PRESENCE_EVERY:
                 _sync_state["last_presence"] = now
                 ai = ai_status()
-                info = {"app": "pc", "ai": {"ready": bool(ai["available"]), "reason": ai.get("reason")}}
+                info = {"app": "pc", "ai": {"ready": bool(ai["available"]), "reason": ai.get("reason")}, "answers": _phone_enabled()}
                 _sync_state["online"] = await asyncio.to_thread(sync_service.presence, info)
         except asyncio.CancelledError:
             raise
@@ -3086,9 +3088,141 @@ async def _sync_loop() -> None:
             log.exception("Sync-Schleife")
 
 
+# --- questions from the phone app („Frag Claude“ as a job for this PC; the sync server hands them out) ---------
+
+PHONE_CLAIM_WAIT = 25  # seconds one claim waits on the server for a question
+PHONE_BEAT_EVERY = 20  # heartbeat while answering (the server frees a question after JOB_LEASE s of silence)
+PHONE_RETRY = 30  # seconds to wait after the server could not be reached
+PHONE_LOOK = 3  # seconds between two looks at what Claude is doing (sent on change)
+PHONE_LABELS = {
+    "Skill": "liest die Anleitung", "Read": "liest eine Referenz", "Glob": "sieht in den Anleitungen nach", "Grep": "sieht in den Anleitungen nach",
+    "ToolSearch": "bereitet die Werkzeuge vor", "app_overview": "verschafft sich einen Überblick", "list_decks": "liest deine Decks",
+    "load_deck": "sieht sich ein Deck an", "deck_games": "liest deine Partien", "opponent_decks": "liest deine Gegnerdecks",
+    "table_rules": "liest deine Tischregeln", "get_blacklist": "liest deine Blacklist", "get_cards": "liest Kartentexte",
+    "search_cards": "sucht Karten", "local_card_search": "durchsucht die Kartendatenbank", "similar_cards": "sucht ähnliche Karten",
+    "edhrec_recommendations": "prüft EDHREC-Empfehlungen", "edhrec_average_deck": "lädt ein EDHREC-Durchschnittsdeck",
+    "find_combos": "sucht Combos", "find_commanders": "sucht Commander", "bracket_rules": "liest die Bracket-Regeln",
+    "game_changers": "prüft Game Changer", "validate_deck": "prüft ein Deck", "list_deck_versions": "liest den Verlauf",
+    "compare_deck_versions": "vergleicht Versionen", "compare_decks": "vergleicht Decks", "collection_status": "prüft deine Sammlung",
+    "collection_search": "durchsucht deine Sammlung", "WebSearch": "recherchiert im Netz", "WebFetch": "liest eine Webseite",
+}  # fmt: skip
+_phone_state: dict[str, Any] = {"current": None, "answered": 0, "error": None}
+
+
+def _phone_enabled() -> bool:
+    """This PC answers questions from the phone: connected, the setting is on and Claude is ready here."""
+    cfg = sync_service.config()
+    if not cfg or cfg.get("revoked") or not settings_mod.load().get("phone_questions", True):
+        return False
+    return bool(ai_status()["available"])
+
+
+def _phone_label(job: Job) -> str:
+    """What Claude is doing right now, in plain words for the phone."""
+    for e in reversed(job.events):
+        if e.get("type") == "tool":
+            name, summary = e.get("name", ""), e.get("summary", "")
+            if name in ("load_deck", "deck_games") and summary.startswith("slug="):
+                try:
+                    deck = storage.load(summary[5:])["name"]
+                    return f"sieht sich „{deck}“ an" if name == "load_deck" else f"liest die Partien mit „{deck}“"
+                except Exception:
+                    pass
+            return PHONE_LABELS.get(name, "arbeitet")
+        if e.get("type") == "text":
+            return "schreibt die Antwort"
+    return "denkt nach"
+
+
+async def _phone_loop() -> None:
+    """While the app runs: wait on the sync server for questions from the phone and answer them one at a time."""
+    while True:
+        try:
+            if not await asyncio.to_thread(_phone_enabled):
+                await asyncio.sleep(PHONE_RETRY)
+                continue
+            got = await asyncio.to_thread(sync_service.claim_job, PHONE_CLAIM_WAIT)
+            _phone_state["error"] = None
+            if got:
+                await _answer_phone(got)
+        except asyncio.CancelledError:
+            raise
+        except RemoteError as exc:
+            _phone_state["error"] = str(exc)
+            await asyncio.sleep(PHONE_RETRY)
+        except Exception:
+            log.exception("Fragen vom Handy")
+            await asyncio.sleep(PHONE_RETRY)
+
+
+async def _answer_phone(q: dict[str, Any]) -> str:
+    """Answer one question from the phone with the app chat (read-only, like „Frag Claude“ here); the server writes
+    the answer into the conversation, the next sync brings it to this PC too. Returns the job's end status."""
+    result: dict[str, Any] = {}
+
+    async def finish(job: Job, ok: bool, answer: str, _structured: Any = None) -> None:
+        if ok and answer:
+            result.update(answer=answer, cards=await _card_refs(answer), decks=_deck_refs(answer))
+        else:
+            err = next((e["text"] for e in reversed(job.events) if e.get("type") == "error"), "")
+            result.update(error=err or "Keine Antwort erhalten.")
+        job.emit(type="done", ok=bool(ok and answer))
+
+    prompt = chat_prompt(q["question"], q.get("history") or [])
+    model, effort = (META_MODEL, META_EFFORT) if q.get("deep") else (None, None)
+    job = Job(id=uuid.uuid4().hex[:12])
+    _register(job, _run_claude(job, prompt, model, read_only=True, finish=finish, effort=effort))
+    _phone_state["current"] = {"id": q["id"], "question": q["question"], "job": job.id, "started": time.time()}
+    stopped: dict[str, str] = {}
+
+    async def heartbeat() -> None:
+        sent, last = "", 0.0
+        while not job.done:
+            label = _phone_label(job)
+            if label != sent or time.time() - last >= PHONE_BEAT_EVERY:
+                try:
+                    status = await asyncio.to_thread(sync_service.job_progress, q["id"], label)
+                    sent, last = label, time.time()
+                    if status in ("cancelled", "taken", "done", "failed"):  # taken back on the phone, or another PC has it
+                        stopped["status"] = status
+                        if job.task:
+                            job.task.cancel()
+                        return
+                except RemoteError:
+                    pass  # offline for a moment: the answer still goes out at the end
+            await asyncio.sleep(PHONE_LOOK)
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        if job.task:
+            await asyncio.wait([job.task])
+    finally:
+        beat.cancel()
+        _phone_state["current"] = None
+    if stopped:
+        return stopped["status"]
+    status = ""
+    for attempt in range(3):
+        try:
+            status = await asyncio.to_thread(sync_service.job_finish, q["id"], result or {"error": "Abgebrochen."})
+            break
+        except RemoteError:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(5)
+    _phone_state["answered"] += 1
+    try:
+        await _sync_now("frage vom handy")  # the answered conversation comes to this PC too
+    except Exception:
+        _mark_dirty()
+    return status
+
+
 def _sync_view() -> dict[str, Any]:
     return {**sync_service.status(), "running": _sync_state["running"], "online": _sync_state["online"],
-            "interval": _sync_interval(), "pending_revalidation": sync_service.pending_revalidation()}  # fmt: skip
+            "interval": _sync_interval(), "pending_revalidation": sync_service.pending_revalidation(),
+            "phone_questions": bool(settings_mod.load().get("phone_questions", True)),
+            "phone": {k: _phone_state[k] for k in ("current", "answered", "error")}}  # fmt: skip
 
 
 async def _sync_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:

@@ -125,3 +125,13 @@ class HttpTransport:
 
     def claim(self, code: str, name: str, kind: str = "pc") -> dict[str, Any]:
         return self._call("POST", "/api/pair/claim", json={"code": code, "name": name, "kind": kind}).json()
+
+    # questions from the phone („Frag Claude“): this PC takes one, reports progress and sends the answer
+    def claim_job(self, wait: float = 0) -> dict[str, Any] | None:
+        return self._call("POST", "/api/jobs/claim", params={"wait": wait}).json().get("job")
+
+    def job_progress(self, job_id: str, text: str = "") -> str:
+        return self._call("POST", f"/api/jobs/{job_id}/progress", json={"text": text[:200]}).json().get("status", "")
+
+    def job_finish(self, job_id: str, result: dict[str, Any]) -> str:
+        return self._call("POST", f"/api/jobs/{job_id}/finish", json=result).json().get("status", "")

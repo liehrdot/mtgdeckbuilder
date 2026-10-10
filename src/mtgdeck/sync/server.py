@@ -12,8 +12,12 @@ Routes (JSON; document content as base64):
 - ``POST /api/pair/start`` – a paired device creates a code for the next one;
 - ``GET /api/sync/changes?since=`` / ``PUT /api/sync/doc`` – the protocol of ``SyncStore`` (409 + current document);
 - ``GET /api/devices``, ``DELETE /api/devices/{id}``, ``POST /api/presence``;
-- the phone app ("Am Tisch", ``/app/``): ``GET /api/app/data`` (read model, ETag), ``GET /api/app/status`` (PCs online),
-  ``POST /api/app/ops`` (operations, idempotent by id – see ``appops``); ``/`` and ``/koppeln#CODE`` lead to the app.
+- the phone app ("Am Tisch", ``/app/``): ``GET /api/app/data`` (read model, ETag), ``GET /api/app/status`` (PCs online,
+  the phone's open questions), ``POST /api/app/ops`` (operations, idempotent by id – see ``appops``); ``/`` and
+  ``/koppeln#CODE`` lead to the app;
+- questions for Claude from the phone (``chat.ask``) become jobs a PC answers: ``POST /api/jobs/claim?wait=`` (waits up
+  to ``CLAIM_WAIT_MAX`` s for one), ``POST /api/jobs/{id}/progress`` (what Claude is doing; also the heartbeat – after
+  ``JOB_LEASE`` s without one the job is free again), ``POST /api/jobs/{id}/finish`` (the server writes the answer).
 
 Tokens are stored as sha256 only; every request with a token updates the device's ``last_seen``.
 """
@@ -93,7 +97,80 @@ class Devices:
                     code_hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL, created_by TEXT, used REAL);
                 CREATE TABLE IF NOT EXISTS app_ops (
                     id TEXT PRIMARY KEY, at REAL NOT NULL, device TEXT, ok INTEGER NOT NULL, error TEXT);
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, device TEXT, status TEXT NOT NULL, created REAL NOT NULL,
+                    claimed_by TEXT, heartbeat REAL, progress TEXT, finished REAL, error TEXT);
             """)
+
+    # ---- questions for Claude (jobs): waiting → running (claimed by a PC) → done | failed | cancelled ----
+
+    def job_add(self, job_id: str, chat_id: str, device_id: str) -> None:
+        with self._lock, self._db() as db:
+            db.execute("INSERT OR IGNORE INTO jobs(id, chat_id, device, status, created) VALUES (?,?,?,'waiting',?)",
+                       (job_id, chat_id, device_id, time.time()))  # fmt: skip
+            db.execute("DELETE FROM jobs WHERE finished < ?", (time.time() - 30 * 86400,))
+
+    def jobs_open(self, device_id: str) -> int:
+        with self._db() as db:
+            return db.execute("SELECT COUNT(*) AS n FROM jobs WHERE device = ? AND status IN ('waiting','running')",
+                              (device_id,)).fetchone()["n"]  # fmt: skip
+
+    def job_claim(self, pc_id: str) -> dict[str, Any] | None:
+        """The oldest waiting job for this PC (a running one whose PC went silent counts as waiting again)."""
+        now = time.time()
+        with self._lock, self._db() as db:
+            db.execute("UPDATE jobs SET status = 'waiting', claimed_by = NULL, progress = NULL WHERE status = 'running' AND heartbeat < ?",
+                       (now - JOB_LEASE,))  # fmt: skip
+            row = db.execute("SELECT * FROM jobs WHERE status = 'waiting' ORDER BY created LIMIT 1").fetchone()
+            if row is None:
+                return None
+            db.execute("UPDATE jobs SET status = 'running', claimed_by = ?, heartbeat = ?, progress = NULL WHERE id = ?",
+                       (pc_id, now, row["id"]))  # fmt: skip
+        return {**dict(row), "status": "running", "claimed_by": pc_id, "heartbeat": now}
+
+    def job(self, job_id: str) -> dict[str, Any] | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+    def job_beat(self, job_id: str, pc_id: str, progress: str | None = None) -> str | None:
+        """Heartbeat (+ what Claude is doing) of the PC working on it; returns the job's status."""
+        with self._lock, self._db() as db:
+            row = db.execute("SELECT status, claimed_by FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                return None
+            if row["status"] == "waiting" and row["claimed_by"] is None:  # freed after a long silence, nobody took it: still ours
+                db.execute("UPDATE jobs SET status = 'running', claimed_by = ? WHERE id = ?", (pc_id, job_id))
+                row = {"status": "running", "claimed_by": pc_id}
+            if row["status"] == "running" and row["claimed_by"] == pc_id:
+                db.execute("UPDATE jobs SET heartbeat = ?, progress = COALESCE(?, progress) WHERE id = ?",
+                           (time.time(), progress, job_id))  # fmt: skip
+            return row["status"] if row["claimed_by"] in (pc_id, None) else "taken"
+
+    def job_end(self, job_id: str, ok: bool, error: str | None = None) -> None:
+        with self._lock, self._db() as db:
+            db.execute("UPDATE jobs SET status = ?, finished = ?, error = ?, progress = NULL WHERE id = ? AND status = 'running'",
+                       ("done" if ok else "failed", time.time(), error, job_id))  # fmt: skip
+
+    def job_cancel(self, job_id: str) -> None:
+        with self._lock, self._db() as db:
+            db.execute("UPDATE jobs SET status = 'cancelled', finished = ?, progress = NULL WHERE id = ? AND status IN ('waiting','running')",
+                       (time.time(), job_id))  # fmt: skip
+
+    def jobs_of(self, device_id: str) -> list[dict[str, Any]]:
+        """A phone's questions that are open or ended in the last day (for its status line)."""
+        now = time.time()
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM jobs WHERE device = ? AND (status IN ('waiting','running') OR finished > ?) ORDER BY created",
+                              (device_id, now - 86400)).fetchall()  # fmt: skip
+        out = []
+        for r in rows:
+            status = r["status"]
+            if status == "running" and (r["heartbeat"] or 0) < now - JOB_LEASE:
+                status = "waiting"  # its PC went silent: waits for the next one
+            out.append({"id": r["id"], "chat_id": r["chat_id"], "status": status, "progress": r["progress"] if status == "running" else None,
+                        "error": r["error"], "created": r["created"], "finished": r["finished"]})  # fmt: skip
+        return out
 
     def op_done(self, op_id: str) -> dict[str, Any] | None:
         """The outcome of an operation of the phone app that was already applied (sent twice)."""
@@ -186,8 +263,11 @@ def daily_backup(store: SyncStore, folder: Path, keep: int = BACKUP_KEEP) -> Pat
     return made
 
 
-APP_READ = re.compile(r"decks/[^/.][^/]*\.json|decks/\.games/[^/.][^/]*\.json|decks/\.opponents\.json")
+APP_READ = re.compile(r"decks/[^/.][^/]*\.json|decks/\.games/[^/.][^/]*\.json|decks/\.opponents\.json|decks/\.chats/[0-9a-f]{12}\.json")
 OP_ATTEMPTS = 8
+MAX_OPEN_QUESTIONS = 10  # per phone
+JOB_LEASE = 150  # seconds without a heartbeat before another PC may take over a question
+CLAIM_WAIT_MAX = 30  # seconds a PC's claim waits for a question
 
 
 def app_snapshot(store: SyncStore) -> dict[str, Any]:
@@ -214,6 +294,9 @@ def run_op(store: SyncStore, devices: Devices, op: dict[str, Any], device_id: st
     done = devices.op_done(op_id)
     if done is not None:
         return {"id": op_id, **done}
+    if op.get("type") == "chat.ask" and devices.jobs_open(device_id) >= MAX_OPEN_QUESTIONS:
+        return {"id": op_id, "ok": False, "retry": True,
+                "error": f"Es warten schon {MAX_OPEN_QUESTIONS} Fragen – neue gehen raus, sobald welche beantwortet sind."}  # fmt: skip
     for _ in range(OP_ATTEMPTS):
         try:
             paths = appops.paths(op)
@@ -225,8 +308,13 @@ def run_op(store: SyncStore, devices: Devices, op: dict[str, Any], device_id: st
                 seqs[path] = d["seq"] if d is not None else None
             changed = appops.apply(op, docs)
             if changed:
-                store.put_many([{"path": p, "kind": "json", "data": canonical("json", v), "base_seq": seqs[p]}
-                                for p, v in changed.items()], device=device_id)  # fmt: skip
+                store.put_many([{"path": p, "kind": "json", "data": None if v is None else canonical("json", v), "deleted": v is None,
+                                 "base_seq": seqs[p]} for p, v in changed.items()], device=device_id)  # fmt: skip
+            pl = op.get("payload") or {}
+            if op["type"] == "chat.ask":
+                devices.job_add(pl["message_id"], pl["chat_id"], device_id)
+            elif op["type"] == "chat.cancel":
+                devices.job_cancel(pl["message_id"])
             devices.op_record(op_id, device_id, True)
             return {"id": op_id, "ok": True}
         except SyncConflict:  # a PC wrote the same document meanwhile: read again
@@ -238,6 +326,60 @@ def run_op(store: SyncStore, devices: Devices, op: dict[str, Any], device_id: st
             devices.op_record(op_id, device_id, False, "Ungültige Daten")
             return {"id": op_id, "ok": False, "error": "Ungültige Daten"}
     return {"id": op_id, "ok": False, "retry": True, "error": "Gerade viel los auf dem Server – wird gleich noch einmal versucht."}
+
+
+def claim_job(store: SyncStore, devices: Devices, pc_id: str) -> dict[str, Any] | None:
+    """The next question for this PC with what it needs to answer it: the question, „Gründlich“, and the earlier
+    answered exchanges of the conversation. Questions taken back meanwhile are skipped."""
+    from . import appops
+
+    while True:
+        job = devices.job_claim(pc_id)
+        if job is None:
+            return None
+        doc = store.get(appops.chat_path(job["chat_id"]))
+        conv = decode("json", doc["data"]) if doc and not doc["deleted"] else {}
+        msgs = [m for m in (conv or {}).get("messages") or [] if isinstance(m, dict)]
+        idx = next((i for i, m in enumerate(msgs) if m.get("id") == job["id"]), None)
+        if idx is None or msgs[idx].get("answer"):
+            devices.job_cancel(job["id"])
+            continue
+        history = [{"question": m.get("question", ""), "answer": m["answer"]} for m in msgs[:idx] if m.get("answer")]
+        m = msgs[idx]
+        return {"id": job["id"], "chat_id": job["chat_id"], "title": conv.get("title", ""), "question": m.get("question", ""),
+                "deep": bool(m.get("deep")), "asked": m.get("asked"), "history": history}  # fmt: skip
+
+
+def finish_job(store: SyncStore, devices: Devices, job_id: str, pc_id: str, result: dict[str, Any]) -> str:
+    """The PC's answer (or failure) into the conversation, then the job ends. Returns the job's status: only the PC
+    that holds the job may finish it; a question taken back meanwhile stays unanswered."""
+    from . import appops
+
+    devices.job_beat(job_id, pc_id)  # takes it back if it was freed meanwhile and nobody else took it
+    job = devices.job(job_id)
+    if job is None:
+        return "unknown"
+    if job["status"] != "running" or job["claimed_by"] != pc_id:
+        return job["status"] if job["status"] != "running" else "taken"
+    answer = str(result.get("answer") or "")
+    error = str(result.get("error") or "")
+    path = appops.chat_path(job["chat_id"])
+    at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    for _ in range(OP_ATTEMPTS):
+        d = store.get(path)
+        doc = decode("json", d["data"]) if d and not d["deleted"] else None
+        new = appops.answer_chat(doc, job_id, at=at, answer=answer, cards=result.get("cards") or {}, decks=result.get("decks") or {},
+                                 error=error)  # fmt: skip
+        if new is None:
+            devices.job_cancel(job_id)
+            return "cancelled"
+        try:
+            store.put_many([{"path": path, "kind": "json", "data": canonical("json", new), "base_seq": d["seq"]}], device=pc_id)
+        except SyncConflict:  # the phone asked a follow-up meanwhile: read again
+            continue
+        devices.job_end(job_id, bool(answer.strip()), None if answer.strip() else error or "Keine Antwort erhalten.")
+        return "done" if answer.strip() else "failed"
+    raise SyncConflict({})
 
 
 def app_version() -> str:
@@ -270,6 +412,17 @@ class DocRequest(BaseModel):
 
 class OpsRequest(BaseModel):
     ops: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
+class JobProgress(BaseModel):
+    text: str = Field(default="", max_length=200)
+
+
+class JobResult(BaseModel):
+    answer: str = Field(default="", max_length=60000)
+    cards: dict[str, Any] = Field(default_factory=dict)
+    decks: dict[str, Any] = Field(default_factory=dict)
+    error: str = Field(default="", max_length=500)
 
 
 class PresenceRequest(BaseModel):
@@ -423,8 +576,21 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
         return snap_cache["body"], f'"{store.server_id()}-{store.epoch()}-{seq}"'
 
     def pcs() -> list[dict[str, Any]]:
-        return [{"name": d["name"], "online": d["online"], "last_seen": d["last_seen"], "ai": bool((d["info"].get("ai") or {}).get("ready"))}
-                for d in devices.list() if d["kind"] == "pc"]  # fmt: skip
+        return [{"name": d["name"], "online": d["online"], "last_seen": d["last_seen"], "ai": bool((d["info"].get("ai") or {}).get("ready")),
+                 "answers": bool(d["info"].get("answers"))} for d in devices.list() if d["kind"] == "pc"]  # fmt: skip
+
+    # a new question wakes the PCs waiting in /api/jobs/claim
+    signal: dict[str, asyncio.Event | None] = {"ev": None}
+
+    def job_event() -> asyncio.Event:
+        if signal["ev"] is None:
+            signal["ev"] = asyncio.Event()
+        return signal["ev"]
+
+    def notify_jobs() -> None:
+        ev, signal["ev"] = signal["ev"], asyncio.Event()
+        if ev is not None:
+            ev.set()
 
     @app.get("/api/app/data")
     async def app_data(request: Request, me: dict[str, Any] = Depends(device)) -> Response:
@@ -437,15 +603,54 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
     @app.get("/api/app/status")
     async def app_status(me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
         _, etag = await asyncio.to_thread(snapshot_body)
-        return {"etag": etag, "pcs": pcs(), "device": {"id": me["id"], "name": me["name"]}, "now": time.time()}
+        return {"etag": etag, "pcs": pcs(), "device": {"id": me["id"], "name": me["name"]}, "now": time.time(),
+                "jobs": await asyncio.to_thread(devices.jobs_of, me["id"])}  # fmt: skip
 
     @app.post("/api/app/ops")
     async def app_ops(req: OpsRequest, me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
         results = []
         for op in req.ops:
             results.append(await asyncio.to_thread(run_op, store, devices, op, me["id"]))
+        if any(r["ok"] and op.get("type") == "chat.ask" for r, op in zip(results, req.ops)):
+            notify_jobs()
         _, etag = await asyncio.to_thread(snapshot_body)
         return {"results": results, "etag": etag}
+
+    def pc_only(me: dict[str, Any]) -> None:
+        if me["kind"] == "phone":
+            raise HTTPException(403, "Fragen beantwortet ein PC.")
+
+    @app.post("/api/jobs/claim")
+    async def jobs_claim(wait: float = 0, me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
+        pc_only(me)
+        deadline = time.monotonic() + min(max(wait, 0.0), CLAIM_WAIT_MAX)
+        while True:
+            ev = job_event()
+            job = await asyncio.to_thread(claim_job, store, devices, me["id"])
+            left = deadline - time.monotonic()
+            if job or left <= 0:
+                return {"job": job}
+            try:
+                await asyncio.wait_for(ev.wait(), left)
+            except asyncio.TimeoutError:
+                pass
+
+    @app.post("/api/jobs/{job_id}/progress")
+    async def jobs_progress(job_id: str, req: JobProgress, me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
+        pc_only(me)
+        status = await asyncio.to_thread(devices.job_beat, job_id, me["id"], req.text or None)
+        if status is None:
+            raise HTTPException(404, "Unbekannte Frage")
+        return {"status": status}
+
+    @app.post("/api/jobs/{job_id}/finish")
+    async def jobs_finish(job_id: str, req: JobResult, me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
+        pc_only(me)
+        try:
+            status = await asyncio.to_thread(finish_job, store, devices, job_id, me["id"], req.model_dump())
+        except SyncConflict:
+            raise HTTPException(409, "Das Gespräch ändert sich gerade – gleich noch einmal.") from None
+        return {"status": status}
 
     return app
 

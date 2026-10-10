@@ -3876,6 +3876,13 @@ function renderSync() {
     + (st.pending_revalidation?.length ? ` <span class="muted">${st.pending_revalidation.length === 1 ? "Ein zusammengeführtes Deck wird" : `${st.pending_revalidation.length} zusammengeführte Decks werden`} noch geprüft (braucht Internet).</span>` : "");
   $("#sync-interval").value = String(st.interval);
   if (![...$("#sync-interval").options].some((o) => o.selected)) $("#sync-interval").value = "5";
+  $("#sync-phone-questions").checked = !!st.phone_questions;
+  const ph = st.phone || {};
+  const phoneLine = ph.current ? `Beantwortet gerade eine Frage vom Handy: „${ph.current.question}“`
+    : ph.error && st.phone_questions ? `Fragen vom Handy: ${ph.error}`
+    : ph.answered ? `${ph.answered === 1 ? "Eine Frage" : `${ph.answered} Fragen`} vom Handy beantwortet, seit die App läuft.` : "";
+  $("#sync-phone-line").textContent = phoneLine;
+  $("#sync-phone-line").hidden = !phoneLine;
   $("#sync-conflict-count").textContent = st.conflicts || "";
   $("#sync-details").textContent = `Server: ${d.server} · Gerät: ${d.name} (${d.device_id}) · verbunden seit ${fmtDate(new Date(d.paired_at * 1000).toISOString())}`;
 }
@@ -3949,6 +3956,14 @@ $("#sync-interval").addEventListener("change", async (e) => {
     toast(Number(e.target.value) ? "Gespeichert – abgeglichen wird beim Start, nach Änderungen und regelmäßig." : "Gespeichert – abgeglichen wird nur noch per Knopf.");
     refreshSync({ quiet: true });
   } catch (err) { fail(err); }
+});
+
+$("#sync-phone-questions").addEventListener("change", async (e) => {
+  try {
+    await api("/api/settings", { method: "POST", body: { phone_questions: e.target.checked } });
+    toast(e.target.checked ? "Dieser PC beantwortet jetzt Fragen aus der Handy-App." : "Dieser PC beantwortet keine Fragen vom Handy mehr – sie warten, bis ein PC sie übernimmt.");
+    refreshSync({ quiet: true });
+  } catch (err) { fail(err); e.target.checked = !e.target.checked; }
 });
 
 $("#sync-pair").addEventListener("click", async () => {
@@ -4946,8 +4961,13 @@ function renderChatList() {
   $("#chat-list-empty").hidden = chatIndex.length > 0;
 }
 
-const chatQuestion = (q, id = "") => `<div class="chat-msg user"${id ? ` id="${id}"` : ""}>${esc(q)}</div>`;
+const chatQuestion = (q, id = "", phone = false) => `<div class="chat-msg user"${id ? ` id="${id}"` : ""}>${esc(q)}${phone ? '<span class="chat-from">vom Handy</span>' : ""}</div>`;
 function chatAnswer(m) {
+  if (!m.answer) {  // a question from the phone that this or another PC has not answered (yet)
+    const text = m.status === "failed" ? `Hat nicht geklappt: ${m.error || "keine Antwort"}`
+      : "Wartet auf Antwort – ein PC mit „Fragen vom Handy beantworten“ beantwortet sie, sobald er läuft.";
+    return `<p class="chat-msg ai chat-open${m.status === "failed" ? " failed" : ""}" data-id="${esc(m.id)}">${esc(text)}</p>`;
+  }
   const decks = Object.entries(m.decks || {});
   return `<article class="chat-msg ai" data-id="${esc(m.id)}">
     <div class="qa-a" tabindex="0" role="region" aria-label="Antwort von Claude">${md(m.answer, m.cards || {}, m.decks || {})}</div>
@@ -4959,7 +4979,7 @@ function renderChat() {
   const c = currentChat;
   $("#chat-title").textContent = c ? c.title : "Neues Gespräch";
   $("#chat-menu").hidden = !c?.messages?.length;
-  $("#chat-log").innerHTML = (c?.messages || []).map((m) => chatQuestion(m.question) + chatAnswer(m)).join("");
+  $("#chat-log").innerHTML = (c?.messages || []).map((m) => chatQuestion(m.question, "", m.source === "phone") + chatAnswer(m)).join("");
   renderChatList();
   updateChatLive();
 }
@@ -5096,7 +5116,7 @@ $("#chat-rename").addEventListener("click", async () => {
 $("#chat-copy").addEventListener("click", async () => {
   $("#chat-menu").open = false;
   if (!currentChat) return;
-  const text = currentChat.messages.map((m) => `Frage: ${m.question}\n\n${m.answer.replace(/\{\{([a-z0-9-]+)\}\}/g, (_, sl) => (m.decks?.[sl]?.name || sl)).replace(/\[\[([^\]]+)\]\]/g, "$1")}`).join("\n\n---\n\n");
+  const text = currentChat.messages.filter((m) => m.answer).map((m) => `Frage: ${m.question}\n\n${m.answer.replace(/\{\{([a-z0-9-]+)\}\}/g, (_, sl) => (m.decks?.[sl]?.name || sl)).replace(/\[\[([^\]]+)\]\]/g, "$1")}`).join("\n\n---\n\n");
   try { await navigator.clipboard.writeText(text); toast("Gespräch kopiert."); }
   catch { toast("Kopieren nicht möglich – der Browser erlaubt keinen Zugriff auf die Zwischenablage.", "error"); }
 });

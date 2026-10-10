@@ -2,7 +2,8 @@
 
 ``snapshot(docs)`` takes ``{logical path: parsed document}`` (decks, game logs, opponents) and returns what the phone
 shows: decks with Rule 0, guide, card list (names + categories; card data comes from Scryfall on the phone) and record,
-opponents with their record against the user, all games (newest first) and the quick-pick lists. Pure – no files, no
+opponents with their record against the user, all games (newest first), the latest conversations with Claude
+(„Frag Claude“, also from the PC) and the quick-pick lists. Pure – no files, no
 network – so the sync server can build it from its store and tests from plain dicts.
 """
 
@@ -19,6 +20,9 @@ from ..storage import level_text
 from .files import DECK_RE
 
 GAMES_RE = re.compile(r"decks/\.games/([^/.][^/]*)\.json")
+CHATS_RE = re.compile(r"decks/\.chats/([0-9a-f]{12})\.json")
+CHATS_MAX = 30
+CHAT_MESSAGES_MAX = 20
 OPPONENTS_PATH = "decks/.opponents.json"
 GAMES_MAX = 400
 NOTES_MAX = 30
@@ -57,6 +61,22 @@ def _deck(slug: str, d: dict[str, Any], games: list[dict[str, Any]]) -> dict[str
     }  # fmt: skip
 
 
+def _chat(chat_id: str, c: dict[str, Any]) -> dict[str, Any]:
+    msgs = []
+    for m in [m for m in c.get("messages") or [] if isinstance(m, dict) and m.get("id")][-CHAT_MESSAGES_MAX:]:
+        out = {"id": m["id"], "asked": m.get("asked"), "question": m.get("question") or "", "answer": m.get("answer") or None,
+               "deep": bool(m.get("deep")), "source": m.get("source") or "pc"}  # fmt: skip
+        if not out["answer"]:
+            out["status"] = m.get("status") or "waiting"
+            if m.get("error"):
+                out["error"] = m["error"]
+        decks = {s: (v or {}).get("name") or s for s, v in (m.get("decks") or {}).items()} if isinstance(m.get("decks"), dict) else {}
+        if decks:
+            out["decks"] = decks
+        msgs.append(out)
+    return {"id": chat_id, "title": c.get("title") or "", "created": c.get("created"), "updated": c.get("updated"), "messages": msgs}
+
+
 def snapshot(docs: dict[str, Any]) -> dict[str, Any]:
     decks_raw = {m.group(1): v for p, v in docs.items() if (m := DECK_RE.fullmatch(p)) and isinstance(v, dict)}
     games: list[dict[str, Any]] = []
@@ -87,8 +107,11 @@ def snapshot(docs: dict[str, Any]) -> dict[str, Any]:
         })  # fmt: skip
     opponents.sort(key=lambda o: (o["record"]["last"] or "", o["updated"] or ""), reverse=True)
 
+    chats = [_chat(m.group(1), v) for p, v in docs.items() if (m := CHATS_RE.fullmatch(p)) and isinstance(v, dict)]
+    chats = sorted((c for c in chats if c["messages"]), key=lambda c: c["updated"] or "", reverse=True)[:CHATS_MAX]
+
     return {
-        "version": VERSION, "decks": decks, "opponents": opponents, "games": games[:GAMES_MAX],
+        "version": VERSION, "decks": decks, "opponents": opponents, "games": games[:GAMES_MAX], "chats": chats,
         "players": sorted({o["player"] for o in opponents if o["player"]}, key=str.lower),
         "options": {
             "results": RESULTS, "issues": [[k, v[0]] for k, v in ISSUES.items()],

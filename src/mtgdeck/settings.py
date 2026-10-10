@@ -40,6 +40,8 @@ DEFAULTS: dict[str, Any] = {
     "ai_enabled": True,
     # Sync with the own sync server: minutes between automatic syncs (also at start and after changes); 0 = by button only
     "sync_interval": 5,
+    # questions for Claude from the phone app: this PC answers them while the app runs (uses Claude on this PC)
+    "phone_questions": True,
 }
 _ENV = {
     "autofill_path": "MTG_AUTOFILL_PATH",

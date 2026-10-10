@@ -141,7 +141,8 @@ class SyncStore:
 
     def put_many(self, items: list[dict[str, Any]], device: str = "") -> list[int]:
         """Write several documents at once – all or none: ``SyncConflict`` when any ``base_seq`` is outdated.
-        ``items`` = ``[{"path", "kind", "data", "base_seq"}]``; returns the new sequence numbers."""
+        ``items`` = ``[{"path", "kind", "data", "base_seq", "deleted"?}]`` (``deleted`` = tombstone, no data);
+        returns the new sequence numbers."""
         for it in items:
             if kind_of(it["path"]) != it["kind"]:
                 raise ValueError(f"Pfad und Art passen nicht: {it['path']} ({it['kind']})")
@@ -155,12 +156,14 @@ class SyncStore:
             seq = db.execute("SELECT MAX(seq) AS s FROM docs").fetchone()["s"] or 0
             for it in items:
                 seq += 1
+                gone = bool(it.get("deleted"))
                 db.execute(
-                    "INSERT INTO docs(path, seq, kind, hash, data, deleted, updated, device) VALUES (?,?,?,?,?,0,?,?) "
+                    "INSERT INTO docs(path, seq, kind, hash, data, deleted, updated, device) VALUES (?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(path) DO UPDATE SET seq=excluded.seq, kind=excluded.kind, hash=excluded.hash, data=excluded.data, "
-                    "deleted=0, updated=excluded.updated, device=excluded.device",
-                    (it["path"], seq, it["kind"], digest(it["data"]), it["data"], time.time(), device),
-                )
+                    "deleted=excluded.deleted, updated=excluded.updated, device=excluded.device",
+                    (it["path"], seq, it["kind"], None if gone else digest(it["data"]), None if gone else it["data"], int(gone),
+                     time.time(), device),
+                )  # fmt: skip
                 out.append(seq)
         return out
 
