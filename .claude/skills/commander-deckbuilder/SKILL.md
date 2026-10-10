@@ -231,7 +231,8 @@ unless asked.
 For questions about a saved deck — strategy, how to pilot or mulligan it, win conditions, whether
 it is too strong for a table, matchups against a commander/deck/archetype, weaknesses, why a card
 is in, rules interactions — follow [references/deck-questions.md](references/deck-questions.md).
-Read-only: never save; suggest swaps as `+ in` / `- out` instead.
+Read-only: never save; suggest swaps as `+ in` / `- out` instead. In the GUI these questions come
+through „Frag Claude“ with the deck named in the prompt („Die Frage bezieht sich auf das Deck …“).
 
 ## Chat mit der ganzen App
 

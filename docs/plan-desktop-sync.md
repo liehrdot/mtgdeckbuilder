@@ -32,11 +32,10 @@ Jede Datei ist ein **Dokument** mit einem logischen Pfad (dieselben Namen wie in
 | `collection.json`, `tablerules.json` | JSON | allgemeine Regel |
 | `blacklist.txt` | Text | Zeilen als Menge |
 | `proxies/.orders/<id>.json`, `proxies/<slug>/selection.json`, `proxies/<slug>/tokens.json`, `proxies/<slug>/uploads/index.json` | JSON | allgemeine Regel |
-| `proxies/<slug>/uploads/*`, `deskmats/<id>/source.*` | Bild | die zuletzt hochgeladene Fassung gewinnt |
-| `deskmats/<id>/meta.json` | JSON | allgemeine Regel |
+| `proxies/<slug>/uploads/*` | Bild | die zuletzt hochgeladene Fassung gewinnt |
 
 **Nicht** synchronisiert: Kartendatenbank, Bild-Caches, Druckdateien (`images/`, XML, PDF, `prepared.json`),
-Deskmat-Renderings, die `.txt`-Exporte der Decks (werden neu erzeugt), Papierkorb, Sicherungen,
+die `.txt`-Exporte der Decks (werden neu erzeugt), Papierkorb, Sicherungen,
 `mtgdeck.settings.json` (Pfade und Programme sind pro Gerät), Sperr- und Temp-Dateien.
 
 ### Allgemeine Regel (Drei-Wege-Zusammenführung)
@@ -77,7 +76,7 @@ fremde Fassung verglichen:
 - **Anwesenheit**: die Desktop-App meldet sich jede Minute („PC online, Claude bereit/nicht bereit“). Das Handy
   zeigt daraus „PC erreichbar“ oder „PC zuletzt vor 3 Std.“.
 - **KI-Aufträge**: Fragen vom Handy werden als Dokumente `requests/<id>.json` gespeichert. Die Desktop-App holt
-  offene Aufträge ab, sobald sie läuft und Claude bereit ist, beantwortet sie (wie „Fragen zum Deck“ bzw.
+  offene Aufträge ab, sobald sie läuft und Claude bereit ist, beantwortet sie (wie
   „Frag Claude“) und schreibt die Antwort zurück; das Handy zeigt den Status (wartet auf PC · in Arbeit · fertig).
 
 ### Betrieb bei Hetzner
@@ -179,5 +178,5 @@ echtem Server und nachgestelltem PC:
 - **Zusammenführen ist der kritische Teil** – deshalb Phase 1 zuerst und mit vielen Tests.
 - Gleichzeitige Schreibzugriffe von GUI, MCP-Server und Sync auf demselben Rechner: der Sync schreibt nur unter
   denselben Dateisperren und überspringt Dateien, die sich während des Abgleichs geändert haben.
-- Bilder können groß werden (Deskmat-Motive); Speicherplatz auf dem Server im Blick behalten.
+- Bilder können groß werden (eigene Druckbilder); Speicherplatz auf dem Server im Blick behalten.
 - Die Desktop-Oberfläche lädt nach einem Abgleich die geänderten Ansichten neu (Hinweis „Neu vom Handy: 1 Partie“).

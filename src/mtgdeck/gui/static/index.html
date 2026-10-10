@@ -65,13 +65,11 @@
 
     <nav class="nav-bottom" aria-label="Weitere Bereiche">
       <a href="#/collection" data-nav="collection"><svg class="icon"><use href="#i-box"/></svg>Meine Sammlung <span id="coll-count" class="count"></span></a>
+      <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
       <p class="nav-group" id="nav-g-round">Meine Runde</p>
       <a href="#/opponents" data-nav="opponents"><svg class="icon"><use href="#i-swords"/></svg>Gegnerdecks <span id="opp-count" class="count"></span></a>
       <a href="#/tables" data-nav="tables"><svg class="icon"><use href="#i-table"/></svg>Tischregeln <span id="tr-count" class="count"></span></a>
       <a href="#/blacklist" data-nav="blacklist"><svg class="icon"><use href="#i-ban"/></svg>Blacklist <span id="bl-count" class="count"></span></a>
-      <p class="nav-group">Werkstatt</p>
-      <a href="#/orders" data-nav="orders"><svg class="icon"><use href="#i-cart"/></svg>Sammelbestellungen <span id="order-count" class="count"></span></a>
-      <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
       <p class="nav-group">Hilfe</p>
       <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
       <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen <span id="sync-dot" class="sync-dot" hidden></span></a>
@@ -368,6 +366,7 @@
           <p id="deck-against" class="muted small" hidden></p>
         </div>
         <div class="page-actions">
+          <button type="button" id="ask-claude-btn" class="btn"><svg class="icon"><use href="#i-chat"/></svg><span>Claude fragen</span></button>
           <button type="button" id="copy-btn" class="btn"><svg class="icon"><use href="#i-copy"/></svg><span>Liste kopieren</span></button>
           <details class="menu" id="deck-menu">
             <summary class="btn icon-only" aria-label="Weitere Aktionen" title="Weitere Aktionen"><svg class="icon"><use href="#i-more"/></svg></summary>
@@ -375,13 +374,10 @@
               <button type="button" id="duplicate-btn" role="menuitem">Als neues Deck kopieren</button>
               <button type="button" id="validate-btn" role="menuitem">Neu prüfen</button>
               <hr>
-              <a id="export-cod" role="menuitem" href="#" download>Export für Cockatrice (.cod)</a>
-              <a id="export-tts" role="menuitem" href="#" download>Export für Tabletop Simulator (.json)</a>
               <a id="export-txt" role="menuitem" href="#" download>Decklist als Textdatei</a>
               <hr>
               <button type="button" id="compare-deck-btn" role="menuitem">Mit anderem Deck vergleichen …</button>
               <button type="button" id="order-from-deck" role="menuitem">Zur Sammelbestellung …</button>
-              <button type="button" id="deskmat-from-deck" role="menuitem">Deskmat aus diesem Deck …</button>
               <hr>
               <button type="button" id="delete-btn" role="menuitem" class="danger">Deck löschen …</button>
             </div>
@@ -394,7 +390,6 @@
         <button type="button" role="tab" id="tab-anleitung" aria-controls="panel-anleitung" data-tab="anleitung">Anleitung</button>
         <button type="button" role="tab" id="tab-testen" aria-controls="panel-testen" data-tab="testen">Testen</button>
         <button type="button" role="tab" id="tab-anpassen" aria-controls="panel-anpassen" data-tab="anpassen">Anpassen</button>
-        <button type="button" role="tab" id="tab-fragen" aria-controls="panel-fragen" data-tab="fragen">Fragen <span class="count" id="qa-count"></span></button>
         <button type="button" role="tab" id="tab-partien" aria-controls="panel-partien" data-tab="partien">Partien <span class="count" id="game-count"></span></button>
         <button type="button" role="tab" id="tab-verlauf" aria-controls="panel-verlauf" data-tab="verlauf">Verlauf <span class="count" id="version-count"></span></button>
         <button type="button" role="tab" id="tab-drucken" aria-controls="panel-drucken" data-tab="drucken">Drucken</button>
@@ -645,43 +640,6 @@
         </section>
       </div>
 
-      <!-- questions -->
-      <div role="tabpanel" id="panel-fragen" aria-labelledby="tab-fragen" class="tabpanel" hidden>
-        <section class="panel" id="qa-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Fragen zum Deck</h2>
-              <p class="muted small">Claude analysiert nur – das Deck bleibt unverändert.</p>
-            </div>
-            <button type="button" class="btn ghost" id="qa-clear" hidden>Verlauf löschen</button>
-          </div>
-          <p class="ai-off" data-ai-note hidden></p>
-          <div id="qa-list" class="qa-list"></div>
-          <div id="qa-live" class="qa-live" aria-live="polite" hidden>
-            <span class="spinner" aria-hidden="true"></span>
-            <span id="qa-question" class="qa-pending"></span>
-            <span id="qa-status" class="muted small"></span>
-            <button type="button" class="btn small" id="qa-cancel">Abbrechen</button>
-          </div>
-          <form id="qa-form" class="qa-form" autocomplete="off">
-            <textarea name="question" rows="2" required aria-label="Deine Frage"
-              placeholder="z. B. Wie gewinnt das Deck? Ist es zu stark für eine Bracket-2-Runde? Wie schlägt es sich gegen Atraxa?"></textarea>
-            <button type="submit" id="qa-btn" class="btn primary">Fragen</button>
-          </form>
-          <div class="chips-row" id="qa-chips">
-            <button type="button" class="chip" data-q="Was ist die Strategie des Decks und wie gewinnt es?">Strategie</button>
-            <button type="button" class="chip" data-q="Wie spiele ich das Deck: worauf achte ich beim Mulligan, in den ersten Zügen, im Mid- und Late-Game?">So spielt man es</button>
-            <button type="button" class="chip" data-q="Ist das Deck zu stark oder zu schwach für sein Bracket? Welche Karten treiben die Power?">Zu stark?</button>
-            <button type="button" class="chip" data-q="Wie schlägt sich das Deck gegen " data-open="1">Gegen …</button>
-            <button type="button" class="chip" data-q="Was sind die größten Schwächen des Decks und wie gleiche ich sie aus?">Schwächen</button>
-            <button type="button" class="chip" data-q="Welche Karten sind die wichtigsten, und welche sind leicht austauschbar?">Schlüsselkarten</button>
-          </div>
-          <p class="muted small">Enter schickt ab, Umschalt+Enter macht eine neue Zeile. Anschlussfragen („und gegen Kinnan?“) kennen den bisherigen Verlauf.</p>
-        </section>
-      </div>
-
-      <!-- history -->
-      <!-- game log -->
       <div role="tabpanel" id="panel-partien" aria-labelledby="tab-partien" class="tabpanel" hidden>
         <div class="games-layout">
           <section class="panel">
@@ -1008,164 +966,6 @@
       </div>
     </section>
 
-    <!-- ============ deskmat studio ============ -->
-    <section id="view-deskmat" class="view" data-view="deskmat" hidden>
-      <header class="page-head">
-        <div>
-          <h1>Deskmat-Studio</h1>
-          <p class="lead">Aus einem Kartenartwork, einem beschriebenen Setting oder einem eigenen Bild wird eine Druckdatei für
-            deine Deskmat oder Playmat – zugeschnitten aufs Format und mit Real-ESRGAN auf 300 oder 600 DPI hochskaliert.</p>
-        </div>
-      </header>
-
-      <section class="panel" id="dm-source-panel">
-        <h2><span class="step-num" aria-hidden="true">1</span> Motiv</h2>
-        <div class="segmented" role="radiogroup" aria-label="Woher kommt das Motiv?" id="dm-kind">
-          <label><input type="radio" name="dmkind" value="card" checked><span>Kartenartwork</span></label>
-          <label><input type="radio" name="dmkind" value="gen"><span><svg class="icon"><use href="#i-spark"/></svg>Setting beschreiben</span></label>
-          <label><input type="radio" name="dmkind" value="upload"><span>Eigenes Bild</span></label>
-        </div>
-
-        <form id="dm-card-form" class="dm-block" data-kind="card" autocomplete="off">
-          <p class="muted small">Das reine Artwork der Karte (ohne Rahmen und Text) von Scryfall – in jedem Druck. Hochaufgelöste
-            Scans gibt es über MPC Autofill, wenn in den Einstellungen ein Server eingetragen ist.</p>
-          <div class="dm-card-row">
-            <label class="field"><span>Karte</span>
-              <input id="dm-card" list="ac-dm-card" placeholder="z. B. Meren of Clan Nel Toth" required><datalist id="ac-dm-card"></datalist></label>
-            <label class="field"><span>Seite</span><select id="dm-face"><option value="front">Vorderseite</option><option value="back">Rückseite</option></select></label>
-          </div>
-          <p id="dm-art-choice" class="muted small">Artwork: Standard-Druck</p>
-          <div class="btn-group">
-            <button type="button" class="btn" id="dm-art-btn">Anderes Artwork wählen …</button>
-            <button type="button" class="btn" id="dm-mpc-btn" hidden>Hochaufgelöster Scan (MPC) …</button>
-            <button type="submit" class="btn primary">Artwork laden</button>
-          </div>
-          <div id="dm-mpc-grid" class="similar-grid dm-mpc" hidden></div>
-        </form>
-
-        <form id="dm-gen-form" class="dm-block" data-kind="gen" autocomplete="off" hidden>
-          <label class="field"><span>Beschreibe das Setting</span>
-            <textarea name="setting" rows="3" required minlength="3" placeholder="z. B. Eine verfallene Burg im Nebel über einem Drachenfriedhof, Sonnenuntergang, Raben am Himmel"></textarea></label>
-          <div class="dm-gen-row">
-            <label class="field"><span>Stil</span><select name="style" id="dm-style"></select></label>
-            <label class="field"><span>Stimmung aus Deck <span class="muted">(optional)</span></span><select name="deck" id="dm-deck"><option value="">–</option></select></label>
-            <label class="field"><span>Varianten</span><select name="variants"><option>1</option><option>2</option><option selected>3</option><option>4</option></select></label>
-          </div>
-          <p class="muted small" id="dm-gen-note">Claude schreibt daraus einen Bild-Prompt; das Bild erzeugt der kostenlose Generator
-            <b id="dm-gen-host">pollinations.ai</b> (der Prompt wird dorthin geschickt). Danach wählst du eine Variante.</p>
-          <p class="ai-off" data-ai-note="deskmat" hidden></p>
-          <button type="submit" class="btn primary" id="dm-gen-btn"><svg class="icon"><use href="#i-spark"/></svg>Bild erzeugen lassen</button>
-          <div id="dm-job-slot"></div>
-        </form>
-
-        <div class="dm-block" data-kind="upload" hidden>
-          <p class="muted small">Ein eigenes Bild (PNG, JPG, WebP) – je größer, desto schärfer die Deskmat.</p>
-          <label class="btn" for="dm-file">Bild auswählen …</label>
-          <input id="dm-file" type="file" accept="image/*" class="sr-only">
-        </div>
-
-        <div id="dm-candidates" hidden>
-          <h3 class="small muted">Varianten – wähle eine aus</h3>
-          <div id="dm-cand-grid" class="dm-cands"></div>
-        </div>
-      </section>
-
-      <section class="panel" id="dm-edit-panel" hidden>
-        <div class="panel-head">
-          <h2><span class="step-num" aria-hidden="true">2</span> Format &amp; Zuschnitt</h2>
-          <span id="dm-title" class="muted small"></span>
-        </div>
-        <div class="dm-controls">
-          <label class="field"><span>Format</span><select id="dm-format"></select></label>
-          <div class="field-block">
-            <span class="field-label">Druckauflösung</span>
-            <div class="segmented small" role="radiogroup" aria-label="Druckauflösung" id="dm-dpi">
-              <label><input type="radio" name="dmdpi" value="300" checked><span>300 DPI</span></label>
-              <label><input type="radio" name="dmdpi" value="600"><span>600 DPI (beste)</span></label>
-            </div>
-          </div>
-          <label class="field"><span>Beschnitt (Bleed)</span><select id="dm-bleed">
-            <option value="0">ohne</option><option value="3">3 mm je Seite</option><option value="5">5 mm je Seite</option></select></label>
-          <label class="field"><span>Datei</span><select id="dm-filetype">
-            <option value="png">PNG (verlustfrei)</option><option value="jpg">JPEG 95 % (kleiner)</option></select></label>
-          <div class="field-block">
-            <span class="field-label">Anpassen</span>
-            <div class="segmented small" role="radiogroup" aria-label="Anpassen">
-              <label><input type="radio" name="dmfit" value="fill" checked><span>Füllen (zuschneiden)</span></label>
-              <label><input type="radio" name="dmfit" value="fit"><span>Einpassen</span></label>
-            </div>
-          </div>
-        </div>
-        <div id="dm-frame" class="dm-frame" tabindex="0" aria-label="Zuschnitt – ziehen zum Verschieben, Pfeiltasten und +/− zum Zoomen">
-          <img id="dm-bg" class="dm-bg" alt="">
-          <img id="dm-img" class="dm-img" alt="Motiv" draggable="false">
-          <div id="dm-trim" class="dm-trim" hidden title="Schnittkante – außerhalb ist Beschnitt"></div>
-        </div>
-        <div class="dm-zoom">
-          <label for="dm-zoom" class="small">Zoom</label>
-          <input id="dm-zoom" type="range" min="1" max="4" step="0.01" value="1">
-          <button type="button" class="btn small ghost" id="dm-reset">Zurücksetzen</button>
-        </div>
-        <p id="dm-info" class="small muted"></p>
-        <div class="dm-ai-row">
-          <label class="check small" id="dm-upscale-row"><input type="checkbox" id="dm-upscale" checked> KI-Hochskalierung (Real-ESRGAN ×4)</label>
-          <div class="segmented small" role="radiogroup" aria-label="KI-Durchgänge" id="dm-passes">
-            <label><input type="radio" name="dmpasses" value="1" checked><span>1 Durchgang (natürlicher)</span></label>
-            <label><input type="radio" name="dmpasses" value="2"><span>2 Durchgänge (schärfer)</span></label>
-          </div>
-        </div>
-        <p id="dm-upscale-hint" class="small warn" hidden>Real-ESRGAN ist nicht eingerichtet – das Bild wird ohne KI vergrößert und wirkt weicher.
-          Einrichten unter <a href="#/settings">Einstellungen → Proxy-Druck</a>.</p>
-        <div class="form-actions">
-          <button type="button" class="btn primary lg" id="dm-render-btn">Deskmat erstellen</button>
-        </div>
-        <div id="dm-render-slot"></div>
-      </section>
-
-      <section class="panel" id="dm-result-panel" hidden>
-        <div class="panel-head">
-          <h2><span class="step-num" aria-hidden="true">3</span> Ergebnis</h2>
-          <div class="btn-group">
-            <button type="button" class="btn" id="dm-open">Ordner öffnen</button>
-            <a class="btn primary" id="dm-download" href="#" download>Druckdatei herunterladen</a>
-          </div>
-        </div>
-        <div class="dm-result-wrap" id="dm-result-wrap" title="Klick wählt die Stelle für Vergleich und Probedruck">
-          <img id="dm-result" class="dm-result" alt="Fertige Deskmat">
-          <div id="dm-mark" class="dm-mark" aria-hidden="true"></div>
-        </div>
-        <p id="dm-result-info" class="small muted"></p>
-        <ul id="dm-result-warn" class="small warn"></ul>
-
-        <div class="dm-check">
-          <h3>Vor dem Bestellen prüfen</h3>
-          <p class="small muted">Klick ins Bild wählt eine Stelle mit vielen Details (Gesichter, Türme, Reiter) – dort sieht man
-            Artefakte am ehesten. Der Rahmen zeigt den Probedruck-Ausschnitt.</p>
-          <div class="btn-group">
-            <button type="button" class="btn" id="dm-compare-btn">Details vergleichen (ohne / 1× / 2× KI)</button>
-            <a class="btn" id="dm-testprint" href="#" download>Probedruck als PDF (Originalgröße)</a>
-          </div>
-          <div id="dm-compare-slot"></div>
-          <div id="dm-compare" hidden>
-            <div class="dm-compare-head">
-              <p class="small muted" id="dm-compare-info"></p>
-              <label class="check small"><input type="checkbox" id="dm-compare-real"> Originalpixel (1:1)</label>
-            </div>
-            <div id="dm-compare-grid" class="dm-compare-grid"></div>
-          </div>
-          <p class="small dm-tip"><b>So prüfst du:</b> Probedruck mit 100 % („Tatsächliche Größe“, nicht „An Seite anpassen“)
-            drucken, auf den Tisch legen und aus Spielabstand (50–60 cm) ansehen. Sieht es da gut aus, bestellen – leichte
-            Unschärfe aus der Nähe passt zum malerischen Stil und fällt unter den Karten kaum auf.</p>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Meine Deskmats <span class="count" id="dm-count"></span></h2>
-        <div id="dm-list" class="dm-list"></div>
-        <p id="dm-empty" class="empty-inline">Noch keine Deskmat erstellt.</p>
-      </section>
-    </section>
-
     <!-- ============ glossary ============ -->
     <!-- ============ chat with the whole app ============ -->
     <section id="view-chat" class="view" data-view="chat" hidden>
@@ -1210,6 +1010,8 @@
             <span id="chat-status" class="muted small"></span>
             <button type="button" class="btn small" id="chat-cancel">Abbrechen</button>
           </div>
+          <div id="chat-focus" class="chat-focus" hidden><span>Zu <b id="chat-focus-name"></b></span>
+            <button type="button" class="btn ghost small" id="chat-focus-x" aria-label="Deckbezug entfernen" title="Deckbezug entfernen">✕</button></div>
           <form id="chat-form" class="qa-form chat-form" autocomplete="off">
             <textarea name="question" rows="2" required aria-label="Deine Frage an Claude"
               placeholder="z. B. Was ist mein stärkstes Deck und warum?"></textarea>
@@ -1540,7 +1342,7 @@
           <div>
             <h2>Daten &amp; Sicherung</h2>
             <p class="muted small">Eine Sicherung enthält alles, was du angelegt hast: Decks mit Versionen, Partien und Fragen,
-              Sammlung, Gegnerdecks, Tischregeln, Blacklist, Sammelbestellungen, Bildauswahl, Deskmat-Motive und Einstellungen.</p>
+              Sammlung, Gegnerdecks, Tischregeln, Blacklist, Sammelbestellungen, Bildauswahl und Einstellungen.</p>
           </div>
         </div>
         <p id="backup-auto" class="small"></p>
@@ -1615,15 +1417,6 @@
           </div>
           <p class="muted small">Scryfall-Bilder sind Scans gedruckter Karten – ohne Entrastern macht die KI das Druckraster als Linien sichtbar.</p>
           <label class="check"><input type="checkbox" name="upscale"> im Druckstudio standardmäßig aktivieren</label>
-        </section>
-
-        <section class="panel">
-          <h2>Deskmat-Studio</h2>
-          <label class="field">Bildgenerator <span class="muted">(leer = pollinations.ai, kostenlos)</span>
-            <input name="image_generator_url" placeholder="https://image.pollinations.ai/prompt/{prompt}?width={width}&amp;height={height}&amp;seed={seed}&amp;nologo=true&amp;model=flux">
-          </label>
-          <p class="muted small">Adresse, die ein Bild zurückgibt; <code>{prompt}</code> wird durch den Bild-Prompt ersetzt, optional
-            <code>{width}</code>, <code>{height}</code>, <code>{seed}</code>. Die KI-Hochskalierung nutzt das Real-ESRGAN von oben.</p>
         </section>
 
         <div class="form-actions">

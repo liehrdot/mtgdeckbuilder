@@ -51,7 +51,7 @@ Dann z. B.:
 - „Setz Cyclonic Rift und Smothering Tithe auf meine Blacklist.“
 - „Mach mein Deck `meren-aristocrats` billiger, max. 80 €.“
 - „Welches Bracket hat dieses Deck? https://archidekt.com/decks/123456“
-- „Wie spiele ich `meren-aristocrats`, und wie schlägt es sich gegen Atraxa?“ – Fragen zum Deck
+- „Wie spiele ich `meren-aristocrats`, und wie schlägt es sich gegen Atraxa?“ – Fragen zu einem Deck
   beantwortet Claude nur lesend, das Deck bleibt unverändert.
 - „Was ist mein stärkstes Deck und warum?“, „Welches Deck hat das meiste Potential?“, „Wie würdest du
   welches Deck umbauen?“ – Fragen über alle Decks; Claude startet mit `app_overview` (alle Decks mit
@@ -218,7 +218,7 @@ werden überall mit beiden Seiten behandelt:
 
 - **Sicherung:** Unter *Einstellungen → Daten & Sicherung* sicherst du mit einem Klick alles, was du angelegt hast –
   Decks mit Versionen, Partien und Fragen, Sammlung, Gegnerdecks, Tischregeln, Blacklist, Sammelbestellungen,
-  Bildauswahl fürs Drucken, Deskmat-Motive und Einstellungen – als eine ZIP-Datei zum Herunterladen. Beim Start der
+  Bildauswahl fürs Drucken und Einstellungen – als eine ZIP-Datei zum Herunterladen. Beim Start der
   GUI entsteht einmal am Tag automatisch eine Sicherung (die letzten 10 bleiben), gespeichert in `backups/`
   (`MTG_BACKUP_DIR`, gitignored). „Sicherung einspielen“ lädt eine ZIP hoch und stellt sie wieder her; vorher wird
   der aktuelle Stand automatisch gesichert, du kannst also zurück. Ein Lauf von Claude muss dafür beendet sein.
@@ -245,7 +245,7 @@ ein Befehl auf dem Server.
 
 - **Lokal zuerst:** Jedes Gerät hat alle Daten und funktioniert ohne Netz. Der Server ist nur die Drehscheibe.
 - **Was abgeglichen wird:** Decks samt Versionen, Partien, Fragen, Chats, Gegnerdecks, Sammlung, Tischregeln,
-  Blacklist, Sammelbestellungen, Druckauswahl, Token-Anzahlen, eigene Bilder und Deskmat-Motive.
+  Blacklist, Sammelbestellungen, Druckauswahl, Token-Anzahlen und eigene Bilder.
   Einstellungen, Caches und Druckdateien bleiben pro Gerät.
 - **Verbinden:** *Einstellungen → Sync zwischen Geräten* → Kopplungslink einfügen. Den Link zeigt der Server nach
   der Einrichtung, später jedes verbundene Gerät über „Weiteres Gerät koppeln“ (mit QR-Code; 15 Minuten gültig,
@@ -290,15 +290,14 @@ Commander vorschlagen, Gegen meine Runde bauen, Anpassen, Upgrade-Vorschläge/-P
 Claude“). Alles andere läuft ohne: Deck importieren (Link, Liste, Starterdeck) oder unter „Ich habe schon ein Deck“
 → **„Selbst zusammenstellen“** ein leeres Deck mit Commander anlegen und Karten im Bearbeiten-Modus hinzufügen,
 Deck-Check mit Kartenvorschlägen, Testhand, Rule-0-Text, Drucken samt eigener Bilder und Tokens, Sammlung,
-Sammelbestellungen, Partien, Gegnerdecks, Tischregeln, Blacklist, Glossar, Sicherung. Das Deskmat-Studio
-schickt ohne KI deine Beschreibung direkt an den Bildgenerator. Die App erkennt, ob Claude Code installiert
+Sammelbestellungen, Partien, Gegnerdecks, Tischregeln, Blacklist, Glossar, Sicherung. Die App erkennt, ob Claude Code installiert
 ist (und merkt sich, wenn ein Lauf an fehlender Anmeldung scheitert); unter Einstellungen → „KI-Funktionen“ lassen
 sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis sagt, was stattdessen geht.
 
 
 - **Seitenleiste:** „+ Neues Deck“, **Frag Claude** (Chat mit der ganzen App, siehe unten), deine Decks (ab 8 Decks mit Filter; ein roter Punkt markiert nicht
-  legale), unten Meine Sammlung und drei Gruppen: **Meine Runde** (Gegnerdecks, Tischregeln, Blacklist),
-  **Werkstatt** (Sammelbestellungen, Deskmat-Studio) und **Hilfe** (Glossar, Einstellungen). Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
+  legale), unten Meine Sammlung und Sammelbestellungen sowie zwei Gruppen: **Meine Runde** (Gegnerdecks, Tischregeln, Blacklist)
+  und **Hilfe** (Glossar, Einstellungen). Läuft ein Auftrag, zeigt ein Hinweis mit Spinner oben
   in der Leiste, woran Claude gerade arbeitet – ein Klick führt zurück. Auf dem Handy klappt die Leiste
   hinter ☰ weg.
 - **Neues Deck** – vier Einstiege:
@@ -332,7 +331,10 @@ sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis
     dem gewählten Commander und denselben Optionen, „Direkt ein Deck bauen“ überspringt die Vorschläge.
 - **Frag Claude** – ein Chat mit der ganzen App: „Was ist mein stärkstes Deck und warum?“, „Welches Deck
   hat das meiste Potential?“, „Wie würdest du welches Deck umbauen?“, „Welches Deck passt zu meiner
-  Runde?“, „Welche Karten fehlen mir in mehreren Decks?“ – als Freitext oder per Vorschlag. Claude bekommt
+  Runde?“, „Welche Karten fehlen mir in mehreren Decks?“ – als Freitext oder per Vorschlag. Fragen zu
+  **einem** Deck (Strategie, Mulligan, „zu stark für die Runde?“, Matchup gegen Atraxa, Regelfragen) stellst
+  du im Deck über **„Claude fragen“**: Das Gespräch bekommt einen Deckbezug (Chip über dem Eingabefeld, auch
+  für Nachfragen), Claude lädt das Deck zuerst und kennt seine Tischregel und Gegner. Claude bekommt
   eine Übersicht über alle Decks (Stufe, Power, legal, Preis/Budget, Tischregel, Deck-Check, Bilanz mit
   häufigen Problemen und Gegnern, fehlende Sammlungskarten, offene Upgrade-Plan-Stufen), deine Gegnerdecks,
   Tischregeln und die Sammlung und holt sich Details bei Bedarf selbst. Er **ändert nichts** – Vorschläge
@@ -346,7 +348,7 @@ sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis
   endet immer sichtbar – auch wenn sein letzter Schritt scheitert oder die App inzwischen neu gestartet wurde
   („Die Verbindung zum Auftrag ist weg …“); kein Lade-Kreisel dreht ewig. Ist Scryfall, EDHREC & Co. nicht
   erreichbar, steht da, welcher Dienst und was zu tun ist (statt „Internal Server Error“).
-- **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version) und acht Tabs –
+- **Deck-Ansicht** mit Kopfzeile (Commander, Stufe, legal/nicht legal, Preis, Version, Knopf „Claude fragen“) und sieben Tabs –
   die Adresse merkt sich den Tab, der Zurück-Button des Browsers funktioniert:
   - **Karten:** gruppiert nach Kategorie, Typ, Manawert, Farbe oder Besitz, sortiert nach Name, Manawert
     oder Preis, als Liste (Bild beim Hovern) oder Bildraster; daneben der **Deck-Check** (Prüfung und
@@ -354,7 +356,7 @@ sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis
     Sammlungs-Abgleich und „Tokens & Marker“. Klick auf eine Karte zeigt sie groß – bei doppelseitigen Karten
     beide Seiten – mit dem **Kartentext auf Deutsch** (gedruckter Text der neuesten deutschen Ausgabe,
     umschaltbar auf den englischen Oracle-Text), Manasymbolen und markierten Schlüsselwörtern samt Erklärung;
-    „Erklär mir die Karte“ fragt Claude im Tab „Fragen“, was sie tut und wann du sie spielst.
+    „Erklär mir die Karte“ fragt Claude unter „Frag Claude“, was sie tut und wann du sie spielst.
     **Deck-Check (Ampel):** Länder (Richtwert abhängig von Kurve und Ramp), Ramp, Kartenzug, Removal, Board
     Wipes, Manakurve und Siegbedingungen – je grün/gelb/rot mit „Warum wichtig?“. „Karten vorschlagen“ zeigt
     beliebte Karten dieser Rolle in deinen Farben (ohne KI) und merkt sie im Bearbeiten-Modus vor;
@@ -409,7 +411,7 @@ sie sich auch bewusst ausschalten. KI-Knöpfe sind dann gesperrt und ein Hinweis
     gleich aus; bei zu niedriger Auflösung gibt es eine Warnung. Eigene Bilder stehen danach oben im Bildwähler
     (mit ✕ zum Löschen), liegen in `proxies/<deck>/uploads/` und sind Teil der Sicherung.
   - „Liste kopieren“ steht oben rechts; im ⋯-Menü: „Als neues Deck kopieren“, „Neu prüfen“, Export für
-    Cockatrice (.cod) und Tabletop Simulator (.json), Decklist als Textdatei, „Löschen“.
+    Decklist als Textdatei, „Löschen“.
 - **Meine Sammlung** (eigene Seite, siehe unten), **Glossar** (Schlüsselwörter, Aktionen und
   Commander-Begriffe in einem Satz, mit Suche), **Blacklist** und **Einstellungen** (Kartendatenbank,
   Proxy-Druck, KI-Hochskalierung) als eigene Seiten.
@@ -449,47 +451,6 @@ anderen Deck und 50 Treasure-Tokens, zusammen in **einer** MakePlayingCards-Best
   Karte), KI-Hochskalierung, Druckdateien, PDF, MakePlayingCards und „In die Sammlung übernehmen“. Tokens ohne
   gewähltes Bild bekommen das neueste passende Scryfall-Token.
 
-## Deskmat-Studio
-
-Eine **Druckdatei** für Deskmat oder Playmat in echter Druckauflösung: **300 DPI** (Minimum) oder **600 DPI**
-(beste Qualität), bezogen auf die Mattengröße – z. B. Playmat 61 × 35,5 cm = 7205 × 4193 px bei 300 DPI bzw.
-14409 × 8386 px bei 600 DPI. Die DPI stehen in der Datei.
-
-1. **Motiv** – drei Wege:
-   - **Kartenartwork:** das reine Artwork (Scryfall „art crop“, ohne Rahmen und Text) in jedem Druck, auch Rückseiten;
-     mit eingetragenem MPC-Autofill-Server auch hochaufgelöste Scans (automatisch auf die Artwork-Box zugeschnitten).
-   - **Setting beschreiben:** Claude schreibt aus deiner Beschreibung (plus Stil und optional der Stimmung eines
-     Decks) einen Bild-Prompt; der kostenlose Generator pollinations.ai malt 1–4 Varianten, du wählst eine.
-     Der Prompt wird dorthin geschickt. In den Einstellungen lässt sich ein anderer Generator eintragen (URL mit
-     `{prompt}`, `{width}`, `{height}`, `{seed}`), etwa ein eigener lokaler.
-   - **Eigenes Bild** hochladen.
-2. **Format & Zuschnitt:** Playmat 61 × 35,5 cm, Deskmat 80 × 30 / 90 × 40 / 120 × 60 cm; 300 oder 600 DPI;
-   optional **Beschnitt (Bleed)** 3 oder 5 mm je Seite – die Schnittkante ist in der Vorschau gestrichelt;
-   PNG (verlustfrei) oder JPEG 95 % (viel kleiner bei 600 DPI). Den Ausschnitt ziehst du mit Maus oder Finger
-   zurecht, Zoom per Regler, Mausrad oder +/−. „Einpassen“ zeigt das ganze Bild und füllt die Ränder mit einer
-   unscharfen, abgedunkelten Erweiterung. Angezeigt werden Pixel, Megapixel und der Vergrößerungsfaktor.
-   Über 250 Megapixel (120 × 60 cm bei 600 DPI) ist gesperrt – das passt nicht sinnvoll in den Speicher.
-3. **Deskmat erstellen:** Karten-Scans werden entrastert, dann skaliert **Real-ESRGAN ×4** hoch (dasselbe
-   Programm wie im Druckstudio, siehe Einstellungen). Wahlweise folgt bei großen Faktoren (über ~4,5) ein
-   **zweiter KI-Durchgang**: das Zwischenbild wird exakt auf ein Viertel der Zielgröße gebracht und nochmals ×4
-   gerechnet – so landet es genau auf der Druckgröße. Den Rest erledigt Lanczos mit leichtem Nachschärfen.
-   Ohne Real-ESRGAN wird ohne KI vergrößert (mit Hinweis). Alles liegt in `deskmats/<id>/`.
-
-4. **Vor dem Bestellen prüfen:** Klick ins fertige Bild wählt eine Stelle mit vielen Details (Gesichter, Türme,
-   Reiter).
-   - **Details vergleichen** rechnet dort einen Ausschnitt in Druckauflösung ohne KI, mit einem und mit zwei
-     KI-Durchgängen – nebeneinander, auf Wunsch in Originalpixeln; „Damit erstellen“ übernimmt die Variante.
-     Standard ist **ein** Durchgang (wirkt oft natürlicher), zwei sind schärfer, können aber künstlich wirken.
-   - **Probedruck als PDF:** der gewählte Ausschnitt in Originalgröße (27 × 19 cm auf A4 quer, Letter
-     entsprechend) mit Schnittmarken. Mit 100 % („Tatsächliche Größe“) drucken, auf den Tisch legen und aus
-     Spielabstand (50–60 cm) ansehen – sieht es da gut aus, bestellen.
-
-Erreichbar über die Seitenleiste, Strg+K oder im Deck über ⋯ → „Deskmat aus diesem Deck“ (Commander vorausgefüllt).
-Hinweis: Die Datei hat immer die gewählten DPI – wie viel echtes Detail drinsteckt, hängt vom Motiv ab.
-Scryfall-Artworks sind klein (oft ~600 px breit), für 300 DPI auf 61 cm ist das ein Faktor um 12. Deutlich
-schärfer werden MPC-Scans, generierte oder eigene große Bilder; bei zu kleinen Motiven warnt die Seite.
-Die zwei KI-Durchgänge bei 600 DPI brauchen eine Weile und eine Grafikkarte mit genug Speicher.
-
 ## Meine Sammlung
 
 Die Seite „Meine Sammlung“ merkt sich, welche Karten du hast (`collection.json`, lokal):
@@ -521,7 +482,6 @@ Für keine der Quellen ist ein API-Key oder Account nötig.
 | **Archidekt** | öffentliche Deck-API, kein Key | Decks importieren (inkl. Kategorien) |
 | **Moxfield** | *keine* öffentliche API (Cloudflare, User-Agent-Whitelist) | Import nur „best effort“ – sonst Text-Export einfügen |
 | **MTGGoldfish / TappedOut / Deckstats** | öffentliche Text-Exporte der Deckseiten | Decks importieren |
-| **pollinations.ai** | kostenloser Bildgenerator, kein Key (austauschbar in den Einstellungen) | Deskmat-Motive aus einem Setting |
 | **MTGJSON** | öffentliche JSON-Dateien (`DeckList.json`, `decks/<Datei>.json`), kein Key | Starterdecks (Precons) |
 
 Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
@@ -557,7 +517,6 @@ Alle Anfragen werden 24 h auf der Platte gecacht (`~/.cache/mtgdeck`).
 | `import_deck` | Deck-Link importieren (Archidekt, Moxfield, MTGGoldfish, TappedOut, Deckstats, EDHREC) |
 | `search_precons` / `import_precon` | Starterdecks (Precons) von MTGJSON suchen / als Deck speichern |
 | `print_orders` / `update_print_order` | Sammelbestellungen lesen / Karten, Tokens oder ein Deck hinzufügen |
-| `create_deskmat` | Deskmat/Playmat-Druckdatei (300/600 DPI, optional Beschnitt) aus einem Kartenartwork oder einem Bild-Prompt |
 | `compare_decks` | zwei Decks vergleichen (z. B. Umbau gegen altes Deck): neue, frei werdende und gemeinsame Karten, mit Sammlungs-Abgleich; `update_print_order(from_deck=, compare_with=)` bestellt den Unterschied |
 | `deck_games` | festgehaltene Partien eines Decks mit Bilanz und häufigsten Problemen |
 | `app_overview` | alles auf einen Blick: alle Decks mit Stufe, Power, Legalität, Preis, Deck-Check, Bilanz, fehlenden Karten, dazu Gegnerdecks, Tischregeln, Sammlung |
@@ -587,7 +546,6 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_BACKUP_DIR` | `./backups` | Sicherungen (ZIP) |
 | `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
-| `MTG_DESKMAT_DIR` | `./deskmats` | Deskmat-Projekte und fertige Dateien |
 | `MTG_SYNC_DIR` | `./.sync` | Sync-Zustand dieses Geräts (Verbindung, Stand, Basisdateien, Konfliktprotokoll) |
 | `MTG_SYNC_AUTO` | `1` | `0` = kein automatischer Abgleich im Hintergrund (nur per Knopf) |
 | `MTG_SYNC_DATA` / `MTG_SYNC_PUBLIC_URL` / `MTG_SYNC_HOST` / `MTG_SYNC_PORT` | `./sync-data` / – / `0.0.0.0` / `8080` | nur der Sync-Server (`mtg-sync-server`) |

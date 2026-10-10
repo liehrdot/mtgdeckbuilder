@@ -34,8 +34,6 @@ DEFAULTS: dict[str, Any] = {
     "upscale_model": "realesrgan-x4plus",
     # remove the print halftone of scanned cards before upscaling: off | light | normal | strong
     "descreen": "normal",
-    # Deskmat studio: image generator as URL template ({prompt} {width} {height} {seed}); empty = pollinations.ai (free)
-    "image_generator_url": "",
     # AI features (Claude Code). Off = the app works without Claude: printing, collection, import, editing …
     "ai_enabled": True,
     # Sync with the own sync server: minutes between automatic syncs (also at start and after changes); 0 = by button only

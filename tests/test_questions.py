@@ -1,4 +1,5 @@
-"""'Fragen zum Deck': read-only Claude job, Q&A log per deck, card references in answers."""
+"""Questions about one deck go through „Frag Claude“ (the former tab „Fragen zum Deck“): the chat gets a deck focus,
+and the old per-deck question logs are moved into conversations once."""
 
 import time
 
@@ -7,8 +8,9 @@ from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUse
 from conftest import deck_lines
 from fastapi.testclient import TestClient
 
-from mtgdeck import storage
+from mtgdeck import chat, storage
 from mtgdeck.gui import app as gui
+from mtgdeck.jsonstore import write_json
 from mtgdeck.mcp_server import mcp
 
 
@@ -29,82 +31,56 @@ def _wait(job_id, timeout=10):
     raise AssertionError(gui.JOBS[job_id].events)
 
 
-async def test_question_log_roundtrip():
-    slug = await _save_deck()
-    assert storage.questions(slug) == []
-    a = storage.add_question(slug, "Strategie?", "Aristocrats.", version=1)
-    b = storage.add_question(slug, "Gegen Atraxa?", "Eher schlecht.", version=1)
-    assert [q["question"] for q in storage.questions(slug)] == ["Strategie?", "Gegen Atraxa?"]
-    assert storage.delete_questions(slug, a["id"]) == 1
-    assert [q["id"] for q in storage.questions(slug)] == [b["id"]]
-    storage.delete(slug)  # deleting the deck removes its questions too
-    assert storage.questions(slug) == []
-
-
-def test_ask_prompt_is_read_only_and_carries_history():
+def test_chat_prompt_with_a_deck_focus_loads_the_deck_first():
     deck = {"slug": "meren", "name": "Meren", "commanders": ["Meren of Clan Nel Toth"], "bracket": 3,
             "power_profile": {"tier": "high"}, "proxy": True}  # fmt: skip
-    history = [{"question": f"Frage {i}", "answer": "x" * 2000 if i == 5 else f"Antwort {i}"} for i in range(6)]
-    p = gui.ask_prompt("  Und gegen Kinnan? ", deck, history)
-    assert "`meren`" in p and "oberes Bracket 3" in p and "Proxy-Deck" in p
-    assert "Nur lesen" in p and "[[Kartenname]]" in p and "deck-questions.md" in p
-    assert "Frage 1" not in p and "Frage 2" in p and "Frage 5" in p  # only the latest ASK_HISTORY
-    assert "x" * 1200 + " …" in p and "x" * 1201 not in p
-    assert p.endswith("Frage: Und gegen Kinnan?")
+    p = gui.chat_prompt("Und gegen Kinnan?", [], deck=deck)
+    assert "{{meren}}" in p and "„Meren“" in p and "oberes Bracket 3" in p and "Proxy-Deck" in p
+    assert "`load_deck`" in p and "deck-questions.md" in p and "`deck_games`" in p
+    assert p.index("Die Frage bezieht sich") < p.index("Übersicht der App:") and p.endswith("Frage: Und gegen Kinnan?")
+    assert "Die Frage bezieht sich" not in gui.chat_prompt("Welches Deck?", [])
 
 
-async def test_ask_route_runs_read_only_job_and_stores_answer(monkeypatch):
+async def test_asking_about_a_deck_marks_the_message(monkeypatch):
     slug = await _save_deck()
     seen = {}
-    answer = "**Aristocrats**: opfere mit [[Viscera Seer]], ziehe mit [[Sol Ring]] … und [[Nonexistent Card]]."
+    answer = "**Aristocrats**: opfere mit [[Viscera Seer]], ziehe mit [[Sol Ring]]."
 
     async def fake_query(prompt, options):
-        seen.update(prompt=prompt, options=options)
+        seen["prompt"] = prompt
         yield AssistantMessage(content=[ToolUseBlock(id="t1", name="mcp__mtg__load_deck", input={"slug": slug})], model="m")
         yield AssistantMessage(content=[TextBlock(text=answer)], model="m")
-        yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=2,
-                            session_id="s", result=answer)  # fmt: skip
+        yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=2, session_id="s", result=answer)
 
     monkeypatch.setattr(claude_agent_sdk, "query", fake_query)
-    client = TestClient(gui.app)
-    with client:
-        job = client.post(f"/api/decks/{slug}/ask", json={"question": "Was ist die Strategie?"}).json()["job"]
-        j = _wait(job)
-    opts = seen["options"]
-    assert "mcp__mtg__load_deck" in opts.allowed_tools and "mcp__mtg" not in opts.allowed_tools
-    assert "mcp__mtg__save_deck" in opts.disallowed_tools and "Bash" in opts.disallowed_tools
-    assert "Frage: Was ist die Strategie?" in seen["prompt"]
-
-    types = [e["type"] for e in j.events]
-    assert "tool" in types and j.events[-1] == {"type": "done", "ok": True, "deck": None}
-    entry = next(e["entry"] for e in j.events if e["type"] == "answer")
-    assert entry["answer"] == answer and entry["version"] == 1
-    assert entry["cards"]["Sol Ring"]["image"] and "Nonexistent Card" not in entry["cards"]
-
-    listed = client.get(f"/api/decks/{slug}/questions").json()
-    assert [q["id"] for q in listed] == [entry["id"]]
-    assert storage.load(slug)["version"] == 1  # the deck itself is untouched
-
-    # follow-up questions carry the earlier ones
-    with client:
-        job = client.post(f"/api/decks/{slug}/ask", json={"question": "Und gegen Atraxa?"}).json()["job"]
-        _wait(job)
-    assert "Frage: Was ist die Strategie?" in seen["prompt"] and seen["prompt"].endswith("Frage: Und gegen Atraxa?")
-
-    assert client.delete(f"/api/decks/{slug}/questions").json() == {"deleted": 2}
-    assert client.post("/api/decks/nope/ask", json={"question": "Hallo?"}).status_code == 404
+    with TestClient(gui.app) as client:
+        r = client.post("/api/chat", json={"question": "Was ist die Strategie?", "deck": slug}).json()
+        _wait(r["job"])
+        assert f"{{{{{slug}}}}}" in seen["prompt"] and "`load_deck`" in seen["prompt"]
+        m = client.get(f"/api/chats/{r['chat_id']}").json()["messages"][0]
+        assert m["deck"] == slug and m["cards"]["Sol Ring"]["image"]
+        # an unknown deck does not stop the question, it just loses the focus
+        r2 = client.post("/api/chat", json={"question": "Und sonst?", "chat_id": r["chat_id"], "deck": "gibts-nicht"}).json()
+        _wait(r2["job"])
+        assert "Die Frage bezieht sich" not in seen["prompt"]
+        assert "deck" not in client.get(f"/api/chats/{r['chat_id']}").json()["messages"][1]
 
 
-async def test_failed_run_stores_nothing(monkeypatch):
-    slug = await _save_deck()
-
-    async def failing_query(prompt, options):
-        yield ResultMessage(subtype="error_max_turns", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=9,
-                            session_id="s")  # fmt: skip
-
-    monkeypatch.setattr(claude_agent_sdk, "query", failing_query)
-    client = TestClient(gui.app)
-    with client:
-        j = _wait(client.post(f"/api/decks/{slug}/ask", json={"question": "Strategie?"}).json()["job"])
-    assert j.events[-1] == {"type": "done", "ok": False, "deck": None}
-    assert storage.questions(slug) == []
+async def test_old_deck_questions_become_conversations_once():
+    slug = await _save_deck("Alte Fragen")
+    folder = storage.DECKS_DIR / ".questions"
+    write_json(folder / f"{slug}.json", [
+        {"id": "q1", "asked": "2026-09-01T10:00:00+00:00", "question": "Strategie?", "answer": "Aristocrats.", "cards": {"Sol Ring": {"image": "i"}}},
+        {"id": "q2", "asked": "2026-09-02T10:00:00+00:00", "question": "Gegen Atraxa?", "answer": "Eher schlecht."},
+        {"id": "q3", "asked": "2026-09-03T10:00:00+00:00", "question": "Ohne Antwort?", "answer": ""},
+    ])  # fmt: skip
+    write_json(folder / "leer.json", [])
+    assert chat.migrate_questions() == 1
+    conv = [c for c in chat.chats() if c["title"].startswith("Fragen zu")]
+    assert len(conv) == 1 and conv[0]["title"] == "Fragen zu „Alte Fragen“" and conv[0]["count"] == 2
+    msgs = chat.get(conv[0]["id"])["messages"]
+    assert [m["question"] for m in msgs] == ["Strategie?", "Gegen Atraxa?"] and msgs[0]["deck"] == slug and msgs[0]["cards"]["Sol Ring"]["image"] == "i"
+    assert chat.get(conv[0]["id"])["created"] == "2026-09-01T10:00:00+00:00"
+    assert not (folder / f"{slug}.json").exists() and (folder / f"{slug}.json.migriert").exists()
+    assert chat.migrate_questions() == 0  # nothing left to move
+    assert len([c for c in chat.chats() if c["title"].startswith("Fragen zu")]) == 1

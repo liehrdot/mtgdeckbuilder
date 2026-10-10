@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import storage
-from .jsonstore import locked, read_json, update_json
+from .jsonstore import locked, read_json, update_json, write_json
 
 DIRNAME = ".chats"
 TITLE_LEN = 70
@@ -87,6 +87,33 @@ def rename(chat_id: str, title: str) -> dict[str, Any]:
             raise FileNotFoundError(f"Kein Gespräch „{chat_id}“")
         c["title"] = _title(title) or c.get("title", "")
     return c
+
+
+def migrate_questions() -> int:
+    """One-time: the former per-deck question logs (``decks/.questions/<slug>.json``, tab „Fragen zum Deck“) become
+    conversations „Fragen zu „<Deck>““ here; each old file is renamed to ``.migriert`` (not synced, not read
+    again). Returns how many conversations were created."""
+    base = storage.DECKS_DIR / ".questions"
+    if not base.is_dir():
+        return 0
+    names = {d["slug"]: d["name"] for d in storage.list_decks()}
+    made = 0
+    for p in sorted(base.glob("*.json")):
+        try:
+            items = read_json(p, [])
+        except Exception:  # damaged: read_json kept a copy aside; leave the file alone
+            continue
+        qa = [q for q in items if isinstance(q, dict) and q.get("question") and q.get("answer")] if isinstance(items, list) else []
+        if qa:
+            chat_id = uuid.uuid4().hex[:12]
+            deck_slug = p.stem
+            messages = [{"id": q.get("id") or uuid.uuid4().hex[:10], "asked": q.get("asked") or _now(), "question": q["question"],
+                         "answer": q["answer"], "cards": q.get("cards") or {}, "decks": {}, "deck": deck_slug} for q in qa]  # fmt: skip
+            write_json(_file(chat_id), {"id": chat_id, "title": _title(f"Fragen zu „{names.get(deck_slug, deck_slug)}“"),
+                                        "created": messages[0]["asked"], "updated": messages[-1]["asked"], "messages": messages})  # fmt: skip
+            made += 1
+        p.rename(p.with_name(p.name + ".migriert"))
+    return made
 
 
 def delete(chat_id: str) -> None:

@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from .. import opponents as opponents_mod
 from .. import overview
 from ..jsonstore import ConflictError, StoreError, write_json
-from .. import backup, blacklist, brackets, chat, carddb, collection, deckedit, deckimport, deskmat, exports, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
+from .. import backup, blacklist, brackets, chat, carddb, collection, deckedit, deckimport, importers, games, glossary, health, opponents, precons, printorders, proxy, rule0, scryfall, storage, tablerules
 from .. import settings as settings_mod
 from ..cards import card_text, deck_tokens, resolve
 from ..deck import DeckEntry, to_text
@@ -48,6 +48,12 @@ PROJECT_ROOT = storage.PROJECT_ROOT
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    try:
+        moved = await asyncio.to_thread(chat.migrate_questions)  # the former „Fragen zum Deck“ become conversations
+        if moved:
+            log.info("%d Frage-Verläufe nach „Frag Claude“ übernommen", moved)
+    except Exception:
+        log.exception("Deck-Fragen übernehmen")
     auto = os.environ.get("MTG_SYNC_AUTO", "1") != "0"
     tasks = [asyncio.create_task(_sync_loop()), asyncio.create_task(_phone_loop())] if auto else []
     try:
@@ -201,7 +207,7 @@ READ_ONLY_TOOLS = ["app_overview", "search_cards", "local_card_search", "get_car
                    "similar_cards", "collection_search", "collection_status"]  # fmt: skip
 WRITE_TOOLS = ["save_deck", "update_blacklist", "update_table_rule", "update_opponent_deck", "restore_deck_version", "copy_deck", "update_card_database",
                "create_proxy_order", "export_proxy_pdf", "launch_proxy_tool", "proxy_settings",
-               "edit_deck", "update_collection", "import_precon", "create_deskmat", "update_print_order"]  # fmt: skip
+               "edit_deck", "update_collection", "import_precon", "update_print_order"]  # fmt: skip
 Finish = Callable[[Job, bool, str, Any], Awaitable[None]]
 
 
@@ -789,45 +795,22 @@ async def _card_refs(text: str) -> dict[str, dict[str, Any]]:
     return out
 
 
-class AskRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=4000)
-    model: str | None = None
-
-
-ASK_HISTORY = 4  # earlier questions passed along for follow-ups ("und gegen Kinnan?")
-
-
-def ask_prompt(question: str, deck: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
+def _deck_focus_lines(deck: dict[str, Any] | None) -> list[str]:
+    """The question is about one saved deck: load it first, follow the deck-question guidance, mind its table rule
+    and opponents (what the former „Fragen zum Deck“ tab told Claude)."""
+    if not deck:
+        return []
     about = [f"„{deck.get('name', deck['slug'])}“", "Commander: " + (" + ".join(deck.get("commanders") or []) or "?"),
              storage.level_text(deck)] + (["Proxy-Deck"] if deck.get("proxy") else [])  # fmt: skip
-    lines = [
-        f"Beantworte eine Frage zum gespeicherten Commander-Deck `{deck['slug']}` ({', '.join(about)}).",
-        "Lade es mit `load_deck` und nutze den Skill `commander-deckbuilder`, Abschnitt „Fragen zum Deck“ "
-        "(references/deck-questions.md).",
+    return [
         "",
-        "Regeln:",
-        "- Nur lesen: Das Deck wird nicht verändert oder gespeichert. Läuft die Frage auf Änderungen hinaus, "
-        "schlage konkrete Tausche vor (+ rein / − raus, jeweils mit Grund); umsetzen kann man sie über „Anpassen“.",
-        "- Du läufst im GUI-Modus: keine Rückfragen. Triff sinnvolle Annahmen und nenne sie kurz.",
-        "- Stütze Aussagen auf die Tools (Oracle-Text über `get_cards`, Combos über `find_combos`, "
-        "Gegner-Commander über `edhrec_average_deck`/`edhrec_recommendations`) statt auf dein Gedächtnis.",
-        "- Festgehaltene Partien (Ergebnisse, Probleme, Gegner) liefert `deck_games` – nutze sie bei Fragen zu "
-        "Schwächen, Matchups oder Verbesserungen.",
+        f"Die Frage bezieht sich auf das Deck {{{{{deck['slug']}}}}} ({', '.join(about)}): lade es zuerst mit `load_deck` und "
+        "folge dem Skill-Abschnitt „Fragen zum Deck“ (references/deck-questions.md). Festgehaltene Partien (Ergebnisse, "
+        "Probleme, Gegner) liefert `deck_games`. Läuft die Frage auf Änderungen hinaus, schlage konkrete Tausche vor "
+        "(+ rein / − raus, jeweils mit Grund); umsetzen kann man sie im Deck unter „Anpassen“.",
         *[ln.replace("gilt für dieses Deck", "gilt für dieses Deck – beachte sie bei Tausch-Vorschlägen") for ln in _deck_table_lines(deck)[:-1]],
         *opponents_mod.prompt_lines(deck),
-        "- Schreibe Kartennamen als [[Kartenname]] (englischer Oracle-Name).",
-        "- Antworte auf Deutsch in Markdown: Kernaussage zuerst, dann kurze Absätze oder Listen. "
-        "Keine Vorrede über deine Arbeitsschritte.",
     ]
-    earlier = (history or [])[-ASK_HISTORY:]
-    if earlier:
-        lines += ["", "Bisherige Fragen zu diesem Deck (nur zur Einordnung von Anschlussfragen):"]
-        for h in earlier:
-            answer = h.get("answer", "")
-            answer = answer if len(answer) <= 1200 else answer[:1200] + " …"
-            lines += [f"Frage: {h.get('question', '')}", f"Antwort: {answer}", ""]
-    lines += ["", f"Frage: {question.strip()}"]
-    return "\n".join(lines)
 
 
 DECK_REF = re.compile(r"\{\{([a-z0-9][a-z0-9-]{0,80})\}\}")
@@ -846,13 +829,15 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=2, max_length=4000)
     chat_id: str | None = None
     deep: bool = False  # „Gründlich“: Opus 5.5 at extra-high effort
+    deck: str | None = None  # the question is about this saved deck („Claude fragen“ in the deck)
     model: str | None = None
 
 
 CHAT_HISTORY = 6  # earlier exchanges passed along for follow-ups
 
 
-def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data: dict[str, Any] | None = None, *, phone: bool = False) -> str:
+def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data: dict[str, Any] | None = None, *, phone: bool = False,
+                deck: dict[str, Any] | None = None) -> str:  # fmt: skip
     lines = [
         "Du bist der Assistent der ganzen Commander-Deckbuilder-App. Beantworte die Frage des Nutzers über seine "
         "Decks, Partien, Gegnerdecks, Tischregeln und Sammlung. Nutze den Skill `commander-deckbuilder`, Abschnitt "
@@ -873,6 +858,7 @@ def chat_prompt(question: str, history: list[dict[str, Any]] | None = None, data
         "Keine Vorrede über deine Arbeitsschritte.",
         *(["- Die Frage kommt aus der Handy-App, oft mitten am Spieltisch: antworte knapp (meist unter 200 Wörtern), "
            "kurze Listen statt langer Absätze, eine Tabelle nur, wenn sie wirklich hilft."] if phone else []),
+        *_deck_focus_lines(deck),
         "",
         "Übersicht der App:",
         *overview.prompt_lines(data),
@@ -1534,264 +1520,6 @@ async def api_import(req: ImportRequest) -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
 
 
-# --- deskmat studio -------------------------------------------------------------------------------
-
-DESKMAT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "title": {"type": "string", "description": "Short German title for the motif (2-5 words)"},
-        "prompt": {"type": "string", "description": "English text-to-image prompt, max. 550 characters"},
-    },
-    "required": ["title", "prompt"],
-}
-
-
-class DeskmatGenerateRequest(BaseModel):
-    setting: str = Field(min_length=3, max_length=1500)
-    style: str = "painting"
-    deck: str | None = None
-    format: str = "playmat"
-    variants: int = Field(3, ge=1, le=4)
-    model: str | None = None
-
-
-def deskmat_prompt(req: DeskmatGenerateRequest, deck: dict[str, Any] | None) -> str:
-    style = deskmat.STYLES.get(req.style, deskmat.STYLES["painting"])[1]
-    label, w_mm, h_mm = deskmat.FORMATS[req.format]
-    lines = [
-        "Schreibe einen Bild-Prompt für einen Text-zu-Bild-Generator (Flux). Daraus wird eine Deskmat/Playmat "
-        f"für Magic: The Gathering ({label}, Querformat {w_mm}:{h_mm}), gedruckt mit 300–600 DPI.",
-        "",
-        f"- Setting des Nutzers: {req.setting.strip()}",
-        f"- Stil: {style}",
-    ]
-    if deck:
-        lines.append(f"- Stimmung aus dem Deck „{deck.get('name')}“ (Commander: {' + '.join(deck.get('commanders') or [])}"
-                     + (f"; {deck.get('description')}" if deck.get("description") else "") + "). Lies das Aussehen des "
-                     "Commanders bei Bedarf mit `get_cards` nach, nenne im Prompt aber keine Kartennamen, sondern beschreibe.")
-    lines += [
-        "",
-        "Regeln für den Prompt (Englisch, höchstens 550 Zeichen, ein Absatz):",
-        "- breite Panorama-Komposition; das Hauptmotiv eher seitlich, ruhigere Flächen dort, wo Karten liegen;",
-        "- sehr detailliert, klare Formen und saubere Kanten (wird stark vergrößert), stimmiges Licht, hohe Qualität;",
-        "- ausdrücklich: no text, no letters, no logos, no card frame, no border, no watermark.",
-        "",
-        "Du läufst im GUI-Modus: keine Rückfragen, nichts speichern. Gib Titel (deutsch) und Prompt strukturiert zurück.",
-    ]
-    return "\n".join(lines)
-
-
-@app.get("/api/deskmat/options")
-async def api_deskmat_options() -> dict[str, Any]:
-    return deskmat.formats()
-
-
-@app.get("/api/deskmats")
-async def api_deskmats() -> list[dict[str, Any]]:
-    return deskmat.projects()
-
-
-@app.get("/api/deskmat/mpc")
-async def api_deskmat_mpc(name: str) -> list[dict[str, Any]]:
-    try:
-        return await deskmat.mpc_options(name)
-    except Exception as exc:
-        raise HTTPException(502, f"MPC Autofill nicht erreichbar: {exc}") from exc
-
-
-class DeskmatCardRequest(BaseModel):
-    name: str = Field(min_length=1)
-    scryfall_id: str | None = Field(None, pattern="^[0-9a-f-]{36}$")
-    face: str = Field("front", pattern="^(front|back)$")
-    mpc_id: str | None = Field(None, pattern="^[A-Za-z0-9_-]{5,120}$")
-
-
-@app.post("/api/deskmat/card")
-async def api_deskmat_card(req: DeskmatCardRequest) -> dict[str, Any]:
-    try:
-        return await deskmat.from_card(req.name, scryfall_id=req.scryfall_id, face=req.face, mpc_id=req.mpc_id)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except HttpError as exc:
-        raise HTTPException(502, exc.friendly) from exc
-
-
-@app.post("/api/deskmat/upload")
-async def api_deskmat_upload(request: Request, filename: str = "") -> dict[str, Any]:
-    try:
-        return deskmat.from_upload(await request.body(), filename)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/api/deskmat/generate")
-async def api_deskmat_generate(req: DeskmatGenerateRequest) -> dict[str, str]:
-    if req.format not in deskmat.FORMATS:
-        raise HTTPException(400, "Unbekanntes Format")
-    deck = None
-    if req.deck:
-        deck = _not_found(storage.load, req.deck)
-
-    if not ai_status()["available"]:  # without Claude: the user's description is the image prompt
-        if not req.setting.strip():
-            raise HTTPException(400, "Beschreibe das Motiv – ohne KI wird deine Beschreibung direkt als Bild-Prompt genutzt.")
-        style = deskmat.STYLES.get(req.style, deskmat.STYLES["painting"])[1]
-        prompt = ", ".join(p for p in (req.setting.strip(), style, "wide panorama, highly detailed, no text") if p)
-
-        async def runner(job: Job) -> None:
-            job.emit(type="status", text="Ohne KI: deine Beschreibung geht direkt an den Bildgenerator …")
-            project = await deskmat.generate(req.setting.strip()[:40], prompt[:900], req.format, variants=req.variants,
-                                             setting=req.setting, style=req.style, progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
-            for e in project.get("errors") or []:
-                job.emit(type="status", text=f"Eine Variante fehlte: {e}")
-            job.emit(type="deskmat", project=project)
-            job.emit(type="done", ok=True, deck=None)
-
-        return _start_runner(runner)
-
-    async def finish(job: Job, ok: bool, _text: str, structured: Any) -> None:
-        prompt = str((structured or {}).get("prompt") or "").strip() if isinstance(structured, dict) else ""
-        if not ok or not prompt:
-            if ok:
-                job.emit(type="error", text="Claude hat keinen Bild-Prompt geliefert.")
-            job.emit(type="done", ok=False, deck=None)
-            return
-        job.emit(type="status", text=f"Prompt: {prompt[:160]}{'…' if len(prompt) > 160 else ''}")
-        try:
-            project = await deskmat.generate(
-                str(structured.get("title") or req.setting[:40]), prompt[:900], req.format, variants=req.variants,
-                setting=req.setting, style=req.style, progress=lambda t: job.emit(type="status", text=t),
-            )  # fmt: skip
-        except Exception as exc:
-            job.emit(type="error", text=str(exc))
-            job.emit(type="done", ok=False, deck=None)
-            return
-        for e in project.get("errors") or []:
-            job.emit(type="status", text=f"Eine Variante fehlte: {e}")
-        job.emit(type="deskmat", project=project)
-        job.emit(type="done", ok=True, deck=None)
-
-    output_format = {"type": "json_schema", "schema": DESKMAT_SCHEMA}
-    return _start(deskmat_prompt(req, deck), req.model, output_format, read_only=True, finish=finish)
-
-
-@app.get("/api/deskmat/{pid}")
-async def api_deskmat(pid: str) -> dict[str, Any]:
-    return _not_found(deskmat.load, pid)
-
-
-@app.delete("/api/deskmat/{pid}")
-async def api_deskmat_delete(pid: str) -> dict[str, bool]:
-    _not_found(deskmat.load, pid)
-    deskmat.delete(pid)
-    return {"deleted": True}
-
-
-class ChooseVariant(BaseModel):
-    n: int = Field(ge=0, le=3)
-
-
-@app.post("/api/deskmat/{pid}/choose")
-async def api_deskmat_choose(pid: str, req: ChooseVariant) -> dict[str, Any]:
-    _not_found(deskmat.load, pid)
-    try:
-        return deskmat.choose(pid, req.n)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-class DeskmatRender(BaseModel):
-    format: str = "playmat"
-    dpi: int = 300
-    bleed_mm: float = 0
-    fit: str = Field("fill", pattern="^(fill|fit)$")
-    crop: dict[str, float] | None = None
-    upscale: bool = True
-    filetype: str = Field("png", pattern="^(png|jpg)$")
-    passes: int = Field(1, ge=1, le=2)
-
-
-@app.post("/api/deskmat/{pid}/render")
-async def api_deskmat_render(pid: str, req: DeskmatRender) -> dict[str, str]:
-    _not_found(deskmat.load, pid)
-    try:
-        deskmat.check_size(req.format, req.dpi, req.bleed_mm)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    async def runner(job: Job) -> None:
-        job.emit(type="status", text="Bereite das Motiv vor …")
-        project = await deskmat.render(pid, fmt=req.format, dpi=req.dpi, bleed_mm=req.bleed_mm, fit=req.fit, crop=req.crop,
-                                       upscale=req.upscale, filetype=req.filetype, passes=req.passes,
-                                       progress=lambda t: job.emit(type="status", text=t))  # fmt: skip
-        res = project["result"]
-        for w in res["warnings"]:
-            job.emit(type="status", text=w)
-        job.emit(type="result", text=f"Fertig: {res['size'][0]} × {res['size'][1]} px mit {res['dpi']} DPI"
-                 + (f" · {res['ai_passes']}× KI-hochskaliert" if res["ai_passes"] else ""))  # fmt: skip
-        job.emit(type="deskmat", project=project)
-        job.emit(type="done", ok=True)
-
-    return _start_runner(runner)
-
-
-class DeskmatPoint(BaseModel):
-    x: float = Field(0.5, ge=0, le=1)
-    y: float = Field(0.5, ge=0, le=1)
-
-
-@app.post("/api/deskmat/{pid}/compare")
-async def api_deskmat_compare(pid: str, req: DeskmatPoint) -> dict[str, str]:
-    meta = _not_found(deskmat.load, pid)
-    if not meta.get("render"):
-        raise HTTPException(400, "Erst die Deskmat erstellen.")
-
-    async def runner(job: Job) -> None:
-        project = await deskmat.compare(pid, x=req.x, y=req.y, progress=lambda t: job.emit(type="status", text=t))
-        job.emit(type="deskmat", project=project, what="compare")
-        job.emit(type="done", ok=bool(project["compare"]["tiles"]))
-
-    return _start_runner(runner)
-
-
-@app.get("/api/deskmat/{pid}/compare/{passes}")
-async def api_deskmat_compare_tile(pid: str, passes: int) -> FileResponse:
-    return FileResponse(_not_found(deskmat.compare_file, pid, passes), headers={"Cache-Control": "no-cache"})
-
-
-@app.get("/api/deskmat/{pid}/testprint")
-async def api_deskmat_testprint(pid: str, x: float = 0.5, y: float = 0.5) -> FileResponse:
-    _not_found(deskmat.load, pid)
-    try:
-        path = await asyncio.to_thread(deskmat.testprint, pid, x=min(max(x, 0), 1), y=min(max(y, 0), 1),
-                                       paper=settings_mod.load().get("paper", "A4"))  # fmt: skip
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    title = re.sub(r"[^\w\- ]+", "", deskmat.load(pid).get("title") or "deskmat").strip().replace(" ", "-") or "deskmat"
-    return FileResponse(path, filename=f"Probedruck-{title}.pdf", media_type="application/pdf")
-
-
-@app.api_route("/api/deskmat/{pid}/image", methods=["GET", "HEAD"])
-async def api_deskmat_image(pid: str, kind: str = "source", n: int | None = None, download: bool = False) -> FileResponse:
-    path = _not_found(deskmat.file, pid, kind, n)
-    if download:
-        meta = deskmat.load(pid)
-        safe = re.sub(r"[^\w\- ]+", "", meta.get("title") or "deskmat").strip().replace(" ", "-") or "deskmat"
-        return FileResponse(path, filename=f"{safe}-{path.stem.removeprefix('deskmat-')}{path.suffix}")
-    return FileResponse(path, headers={"Cache-Control": "no-cache"})
-
-
-@app.post("/api/deskmat/{pid}/open-folder")
-async def api_deskmat_open_folder(pid: str) -> dict[str, Any]:
-    _not_found(deskmat.load, pid)
-    folder = deskmat._dir(pid)
-    try:
-        open_in_file_manager(folder)
-    except Exception as exc:
-        return {"opened": False, "path": str(folder), "error": str(exc)}
-    return {"opened": True, "path": str(folder)}
-
-
 # --- collective print orders (Sammelbestellung) ------------------------------------------------------
 
 
@@ -2015,32 +1743,6 @@ async def api_precon_import(req: PreconImport) -> dict[str, Any]:
         raise HTTPException(502, f"MTGJSON nicht erreichbar: {_error_text(exc)}") from exc
 
 
-@app.get("/api/decks/{slug}/questions")
-async def api_questions(slug: str) -> list[dict[str, Any]]:
-    return storage.questions(slug)
-
-
-@app.post("/api/decks/{slug}/ask")
-async def api_ask(slug: str, req: AskRequest) -> dict[str, str]:
-    try:
-        deck = storage.load(slug)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    question = req.question.strip()
-
-    async def finish(job: Job, ok: bool, answer: str, _structured: Any = None) -> None:
-        if ok and answer:
-            cards = await _card_refs(answer)
-            entry = storage.add_question(slug, question, answer, version=deck.get("version"), cards=cards)
-            job.emit(type="answer", entry=entry)
-        elif ok:
-            job.emit(type="error", text="Keine Antwort erhalten.")
-        job.emit(type="done", ok=bool(ok and answer), deck=None)
-
-    prompt = ask_prompt(question, deck, storage.questions(slug))
-    return _start(prompt, req.model, read_only=True, finish=finish)
-
-
 @app.get("/api/chats")
 async def api_chats() -> list[dict[str, Any]]:
     return chat.chats()
@@ -2088,11 +1790,17 @@ async def api_chat(req: ChatRequest) -> dict[str, Any]:
     else:
         conv = chat.create(question)
     chat_id = conv["id"]
+    deck = None
+    if req.deck:
+        try:
+            deck = storage.load(req.deck)
+        except (FileNotFoundError, ValueError):
+            deck = None  # deleted meanwhile: the question still goes out, just without the focus
 
     async def finish(job: Job, ok: bool, answer: str, _structured: Any = None) -> None:
         if ok and answer:
             entry = chat.add(chat_id, question, answer, cards=await _card_refs(answer), decks=_deck_refs(answer),
-                             deep=req.deep)  # fmt: skip
+                             deep=req.deep, **({"deck": deck["slug"]} if deck else {}))  # fmt: skip
             job.emit(type="answer", entry=entry, chat_id=chat_id)
         elif ok:
             job.emit(type="error", text="Keine Antwort erhalten.")
@@ -2104,17 +1812,12 @@ async def api_chat(req: ChatRequest) -> dict[str, Any]:
                 pass
         job.emit(type="done", ok=bool(ok and answer), deck=None)
 
-    prompt = chat_prompt(question, conv.get("messages") or [])
+    prompt = chat_prompt(question, conv.get("messages") or [], deck=deck)
     if req.deep:
         started = _start(prompt, META_MODEL, read_only=True, finish=finish, effort=META_EFFORT)
     else:
         started = _start(prompt, req.model, read_only=True, finish=finish)
     return {**started, "chat_id": chat_id, "title": conv["title"]}
-
-
-@app.delete("/api/decks/{slug}/questions")
-async def api_questions_delete(slug: str, id: str | None = None) -> dict[str, int]:
-    return {"deleted": storage.delete_questions(slug, id)}
 
 
 @app.post("/api/find-commander")
@@ -2408,29 +2111,16 @@ async def api_role_candidates(slug: str, role: str, limit: int = 18) -> list[dic
         raise HTTPException(502, exc.friendly) from exc
 
 
-@app.get("/api/decks/{slug}/export/{fmt}")
-async def api_export(slug: str, fmt: str) -> Response:
-    """Download the deck: text (Moxfield/Archidekt), cockatrice (.cod) or tts (Tabletop Simulator)."""
+@app.get("/api/decks/{slug}/export/text")
+async def api_export(slug: str) -> Response:
+    """Download the decklist as a text file (Moxfield/Archidekt format)."""
     try:
         deck = storage.load(slug)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
-    names = deck.get("commanders", []) + [c["name"] for c in deck.get("cards", [])]
-    if fmt == "text":
-        entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
-        body, media, ext = to_text(deck.get("commanders", []), entries), "text/plain; charset=utf-8", "txt"
-    elif fmt in ("cockatrice", "tts"):
-        try:
-            card_data, _, _ = await resolve(names)
-        except Exception as exc:
-            raise HTTPException(502, f"Kartendaten nicht erreichbar: {_error_text(exc)}") from exc
-        if fmt == "cockatrice":
-            body, media, ext = exports.to_cockatrice(deck, card_data), "application/xml", "cod"
-        else:
-            body, media, ext = json.dumps(exports.to_tts(deck, card_data), ensure_ascii=False, indent=1), "application/json", "json"
-    else:
-        raise HTTPException(404, "Format: text, cockatrice oder tts")
-    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{deck["slug"]}.{ext}"'})
+    entries = [DeckEntry(c["name"], c.get("qty", 1)) for c in deck.get("cards", [])]
+    body = to_text(deck.get("commanders", []), entries)
+    return Response(body, media_type="text/plain; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{deck["slug"]}.txt"'})
 
 
 @app.get("/api/decks/{slug}/tokens")
@@ -2668,7 +2358,6 @@ class SettingsUpdate(BaseModel):
     upscaler_path: str | None = None
     upscale_model: str | None = None
     descreen: str | None = None
-    image_generator_url: str | None = None
     ai_enabled: bool | None = None
     sync_interval: int | None = Field(default=None, ge=0, le=240)
     phone_questions: bool | None = None
@@ -2693,9 +2382,6 @@ async def api_settings() -> dict[str, Any]:
 
 @app.post("/api/settings")
 async def api_settings_update(req: SettingsUpdate) -> dict[str, Any]:
-    url = (req.image_generator_url or "").strip()
-    if url and ("{prompt}" not in url or not url.startswith(("http://", "https://"))):
-        raise HTTPException(400, "Bildgenerator: eine http(s)-Adresse mit {prompt} angeben (optional {width} {height} {seed}).")
     return _settings_view(settings_mod.update(req.model_dump(exclude_none=True)))
 
 

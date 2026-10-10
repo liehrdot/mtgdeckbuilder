@@ -187,14 +187,13 @@ def test_trash_restore_and_purge():
 
     slug = _deck()
     games.add(slug, result="win", opponents=["Krenko, Mob Boss"])
-    storage.add_question(slug, "Wie?", "So.")
     tid = storage.delete(slug)
     assert all(d["slug"] != slug for d in storage.list_decks())
     assert storage.trash()[0]["id"] == tid and storage.trash()[0]["name"] == "Safe Deck"
     _deck()  # a new deck took the name meanwhile
     back = storage.restore_deleted(tid)
     assert back["slug"] == "safe-deck-2"
-    assert len(games.games("safe-deck-2")) == 1 and storage.questions("safe-deck-2")[0]["answer"] == "So."
+    assert len(games.games("safe-deck-2")) == 1
     assert storage.versions("safe-deck-2") and storage.trash() == []
     t2 = storage.delete("safe-deck")
     assert storage.purge_deleted(t2) == 1 and storage.trash() == []

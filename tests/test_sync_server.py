@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from mtgdeck import blacklist, collection, deskmat, proxy, storage, tablerules
+from mtgdeck import blacklist, collection, proxy, storage, tablerules
 from mtgdeck.jsonstore import write_json
 from mtgdeck.sync import Roots, service
 from mtgdeck.sync.remote import AuthError, HttpTransport, RemoteError, normalize_url, parse_link
@@ -27,7 +27,6 @@ def net(tmp_path, monkeypatch):
         monkeypatch.setattr(blacklist, "BLACKLIST_FILE", roots.blacklist)
         monkeypatch.setattr(tablerules, "TABLERULES_FILE", roots.tablerules)
         monkeypatch.setattr(proxy, "PROXIES_DIR", roots.proxies)
-        monkeypatch.setattr(deskmat, "DESKMAT_DIR", roots.deskmats)
         return roots
 
     def code():

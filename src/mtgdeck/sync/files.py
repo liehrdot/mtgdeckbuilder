@@ -30,7 +30,7 @@ from ..jsonstore import atomic_write_text, locked, write_json
 RULES: list[tuple[re.Pattern[str], str]] = [(re.compile(p), k) for p, k in [
     (r"decks/[^/.][^/]*\.json", "deck"),
     (r"decks/\.versions/[^/.][^/]*/v\d{4,}\.json", "snapshot"),
-    (r"decks/\.(games|questions)/[^/.][^/]*\.json", "json"),
+    (r"decks/\.games/[^/.][^/]*\.json", "json"),
     (r"decks/\.chats/[0-9a-f]{12}\.json", "json"),
     (r"decks/\.(opponents|meta-suggestions)\.json", "json"),
     (r"collection\.json|tablerules\.json", "json"),
@@ -39,8 +39,6 @@ RULES: list[tuple[re.Pattern[str], str]] = [(re.compile(p), k) for p, k in [
     (r"proxies/[^/.][^/]*/(selection|tokens)\.json", "json"),
     (r"proxies/[^/.][^/]*/uploads/index\.json", "json"),
     (r"proxies/[^/.][^/]*/uploads/[0-9a-f]{16}(-original)?\.(jpg|png|webp|tif|bmp|gif)", "blob"),
-    (r"deskmats/[^/.][^/]*/meta\.json", "json"),
-    (r"deskmats/[^/.][^/]*/source\.[a-z0-9]{2,5}", "blob"),
 ]]  # fmt: skip
 SNAPSHOT_RE = re.compile(r"decks/\.versions/([^/]+)/v(\d+)\.json")
 DECK_RE = re.compile(r"decks/([^/.][^/]*)\.json")
@@ -66,30 +64,29 @@ class Roots:
     blacklist: Path
     tablerules: Path
     proxies: Path
-    deskmats: Path
     state: Path
 
     @classmethod
     def current(cls) -> Roots:
         """The app's configured folders (read at call time, so tests and env overrides apply)."""
-        from .. import blacklist, collection, deskmat, proxy, storage, tablerules
+        from .. import blacklist, collection, proxy, storage, tablerules
 
         state = Path(os.environ.get("MTG_SYNC_DIR", storage.PROJECT_ROOT / ".sync"))
         return cls(storage.DECKS_DIR, collection.COLLECTION_FILE, blacklist.BLACKLIST_FILE, tablerules.TABLERULES_FILE,
-                   proxy.PROXIES_DIR, deskmat.DESKMAT_DIR, state)  # fmt: skip
+                   proxy.PROXIES_DIR, state)  # fmt: skip
 
     @classmethod
     def under(cls, base: Path) -> Roots:
         """Everything below one folder (tests, a second device)."""
         return cls(base / "decks", base / "collection.json", base / "blacklist.txt", base / "tablerules.json",
-                   base / "proxies", base / "deskmats", base / ".sync")  # fmt: skip
+                   base / "proxies", base / ".sync")  # fmt: skip
 
     def physical(self, path: str) -> Path:
         head, _, rest = path.partition("/")
         single = {"collection.json": self.collection, "blacklist.txt": self.blacklist, "tablerules.json": self.tablerules}
         if path in single:
             return single[path]
-        base = {"decks": self.decks, "proxies": self.proxies, "deskmats": self.deskmats}.get(head)
+        base = {"decks": self.decks, "proxies": self.proxies}.get(head)
         if base is None or not rest:
             raise ValueError(f"Kein Sync-Pfad: {path}")
         return base.joinpath(*rest.split("/"))
@@ -100,7 +97,7 @@ class Roots:
         for name, p in (("collection.json", self.collection), ("blacklist.txt", self.blacklist), ("tablerules.json", self.tablerules)):
             if p.is_file():
                 out[name] = p
-        for head, base in (("decks", self.decks), ("proxies", self.proxies), ("deskmats", self.deskmats)):
+        for head, base in (("decks", self.decks), ("proxies", self.proxies)):
             if not base.is_dir():
                 continue
             for p in base.rglob("*"):
@@ -213,8 +210,6 @@ def describe(path: str, names: dict[str, str] | None = None) -> str:
     parts = path.split("/")
     if parts[:2] == ["decks", ".games"]:
         return f"Partien mit {deck(parts[2].removesuffix('.json'))}"
-    if parts[:2] == ["decks", ".questions"]:
-        return f"Fragen zu {deck(parts[2].removesuffix('.json'))}"
     if parts[:2] == ["decks", ".chats"]:
         return "Gespräch mit Claude"
     if parts[:2] == ["proxies", ".orders"]:
@@ -222,6 +217,4 @@ def describe(path: str, names: dict[str, str] | None = None) -> str:
     if parts[0] == "proxies" and len(parts) > 2:
         what = {"selection.json": "Druck-Bildauswahl", "tokens.json": "Token-Anzahlen"}.get(parts[2], "Eigene Bilder")
         return f"{what} von {deck(parts[1])}"
-    if parts[0] == "deskmats":
-        return "Deskmat-Projekt"
     return path

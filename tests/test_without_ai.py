@@ -90,9 +90,3 @@ async def test_without_ai_decks_print_and_collection_work():
         assert client.post("/api/collection", json={"items": [{"name": "Sol Ring", "qty": 2}]}).status_code == 200
         assert collection.summary()["cards"] == 2
 
-        # deskmat motif without AI: the description goes straight to the image generator
-        r = client.post("/api/deskmat/generate", json={"setting": "Burg im Nebel", "style": "dark", "variants": 1})
-        j = _wait(r.json()["job"])
-        project = next(e["project"] for e in j.events if e["type"] == "deskmat")
-        assert len(project["candidates"]) == 1 and "Burg im Nebel" in project["source"]["prompt"]
-        assert j.events[-1]["ok"] is True

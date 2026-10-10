@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from mcp.server.mcpserver import MCPServer
 
-from . import blacklist, brackets, carddb, collection, deckedit, deskmat, edhrec, games, importers, overview, precons, opponents, printorders, proxy, scryfall, spellbook, storage, tablerules
+from . import blacklist, brackets, carddb, collection, deckedit, edhrec, games, importers, overview, precons, opponents, printorders, proxy, scryfall, spellbook, storage, tablerules
 from . import settings as settings_mod
 from .cards import resolve
 from .deck import DeckEntry, parse_decklist, to_sectioned_text, to_text
@@ -772,38 +772,6 @@ async def update_print_order(
         return await printorders.add(target["id"], items)
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
-
-
-@mcp.tool()
-async def create_deskmat(
-    card: Annotated[str | None, Field(description="Card whose artwork becomes the mat (Scryfall art crop)")] = None,
-    image_prompt: Annotated[str | None, Field(description="Or: English text-to-image prompt (wide panorama, no text/frame) for the free generator")] = None,
-    format: Annotated[str, Field(description="playmat (61x35.5 cm) | deskmat-80x30 | deskmat-90x40 | deskmat-120x60")] = "playmat",
-    dpi: Annotated[int, Field(description="Print resolution: 300 (minimum) or 600 (best)")] = 300,
-    bleed_mm: Annotated[float, Field(description="Bleed on every side in mm: 0, 3 or 5 (if the print shop asks for it)")] = 0,
-    fit: Annotated[str, Field(description="fill = crop to the format, fit = whole image with blurred edges")] = "fill",
-    passes: Annotated[int, Field(description="Real-ESRGAN passes: 1 (more natural, default) or 2 (sharper, can look artificial)")] = 1,
-) -> dict[str, Any]:
-    """Create a deskmat/playmat print file at 300 or 600 DPI (Real-ESRGAN upscaling when set up) in deskmats/<id>/.
-    Give either ``card`` or ``image_prompt``. Returns the file path, size and warnings."""
-    if bool(card) == bool(image_prompt):
-        return {"error": "Entweder card oder image_prompt angeben."}
-    try:
-        deskmat.check_size(format, dpi, bleed_mm)
-    except ValueError as exc:
-        return {"error": f"{exc} (format: {', '.join(deskmat.FORMATS)})"}
-    try:
-        if card:
-            project = await deskmat.from_card(card)
-        else:
-            project = await deskmat.generate(image_prompt[:60], image_prompt, format, variants=1)  # type: ignore[index]
-            project = deskmat.choose(project["id"], 0)
-        project = await deskmat.render(project["id"], fmt=format, dpi=dpi, bleed_mm=bleed_mm, fit=fit, passes=min(max(passes, 1), 2))
-    except Exception as exc:
-        return {"error": str(exc)}
-    res = project["result"]
-    return {"id": project["id"], "file": str(deskmat.file(project["id"], "result")), "size": res["size"], "dpi": res["dpi"],
-            "print_mm": res["print_mm"], "ai_passes": res["ai_passes"], "warnings": res["warnings"]}  # fmt: skip
 
 
 @mcp.tool()

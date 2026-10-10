@@ -1,6 +1,5 @@
 """Saved decks live as JSON (+ a plain text export) in the decks/ directory, with a full
-snapshot per version in decks/.versions/<slug>/ (history, diffs, restore, copy) and the questions
-asked about a deck in decks/.questions/<slug>.json. Deleted decks go to decks/.trash/ and can be
+snapshot per version in decks/.versions/<slug>/ (history, diffs, restore, copy). Deleted decks go to decks/.trash/ and can be
 restored.
 
 All writes are atomic and locked (``jsonstore``): the GUI and the MCP server of a running Claude job
@@ -13,7 +12,6 @@ import os
 import re
 import shutil
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -264,12 +262,13 @@ def copy(deck_slug: str, new_name: str | None = None, version: int | None = None
 def _deck_files(s: str) -> dict[str, Path]:
     """Everything that belongs to a deck, by its name inside a trash entry."""
     return {"deck.json": DECKS_DIR / f"{s}.json", "deck.txt": DECKS_DIR / f"{s}.txt",
-            "questions.json": _questions_file(s), "games.json": DECKS_DIR / ".games" / f"{s}.json",  # games.GAMES_DIRNAME
+            "questions.json": DECKS_DIR / ".questions" / f"{s}.json",  # the former „Fragen zum Deck“ (kept for old trash entries)
+            "games.json": DECKS_DIR / ".games" / f"{s}.json",  # games.GAMES_DIRNAME
             "versions": _versions_dir(s)}  # fmt: skip
 
 
 def delete(deck_slug: str) -> str:
-    """Move a deck with its versions, questions and games to the trash; returns the trash id."""
+    """Move a deck with its versions and games to the trash; returns the trash id."""
     s = slug(deck_slug)
     with locked(_path(s)):
         deck = load(s)
@@ -331,41 +330,6 @@ def purge_deleted(trash_id: str | None = None) -> int:
     for d in targets:
         shutil.rmtree(d, ignore_errors=True)
     return len(targets)
-
-
-# --- questions about a deck ("Fragen zum Deck") ---------------------------------------------------
-
-QUESTIONS_DIRNAME = ".questions"  # decks/.questions/<slug>.json – question/answer log per deck
-
-
-def _questions_file(deck_slug: str) -> Path:
-    return DECKS_DIR / QUESTIONS_DIRNAME / f"{slug(deck_slug)}.json"
-
-
-def questions(deck_slug: str) -> list[dict[str, Any]]:
-    """Questions asked about a deck, oldest first: id, asked, question, answer, version."""
-    items = read_json(_questions_file(deck_slug), [])
-    return items if isinstance(items, list) else []
-
-
-def add_question(deck_slug: str, question: str, answer: str, **extra: Any) -> dict[str, Any]:
-    entry = {"id": uuid.uuid4().hex[:10], "asked": _now(), "question": question, "answer": answer, **extra}
-    with update_json(_questions_file(deck_slug), []) as items:
-        items.append(entry)
-    return entry
-
-
-def delete_questions(deck_slug: str, entry_id: str | None = None) -> int:
-    """Delete one question (``entry_id``) or all of them; returns how many were removed."""
-    path = _questions_file(deck_slug)
-    with locked(path):
-        items = questions(deck_slug)
-        keep = [q for q in items if entry_id is not None and q.get("id") != entry_id]
-        if keep:
-            write_json(path, keep)
-        else:
-            path.unlink(missing_ok=True)
-    return len(items) - len(keep)
 
 
 def list_decks() -> list[dict[str, Any]]:

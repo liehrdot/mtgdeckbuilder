@@ -124,8 +124,8 @@ for (const dlg of $$("dialog")) {
 let brackets = [];
 let currentDeck = null;
 let deckIndex = [];
-const VIEWS = ["new", "job", "chat", "deck", "collection", "orders", "deskmat", "glossary", "opponents", "tables", "blacklist", "settings"];
-const TABS = ["karten", "anleitung", "testen", "anpassen", "fragen", "partien", "verlauf", "drucken"];
+const VIEWS = ["new", "job", "chat", "deck", "collection", "orders", "glossary", "opponents", "tables", "blacklist", "settings"];
+const TABS = ["karten", "anleitung", "testen", "anpassen", "partien", "verlauf", "drucken"];
 let lastView = null;
 
 function parseHash() {
@@ -150,7 +150,6 @@ async function route() {
   if (r.view === "settings") { refreshDbStatus(); refreshBackups(); refreshTrash(); refreshSync({ quiet: true }); }
   if (r.view === "collection") loadCollection();
   if (r.view === "glossary") showGlossary(r.slug);
-  if (r.view === "deskmat") showDeskmat(r.slug);
   if (r.view === "orders") showOrders(r.slug);
   if (r.view === "tables") showTables(r.slug);
   if (r.view === "opponents") showOpponents(r.slug);
@@ -166,7 +165,7 @@ async function route() {
     lastView = key;
   }
   document.title = (r.view === "deck" && currentDeck ? currentDeck.name
-    : { new: "Neues Deck", job: "Claude arbeitet", chat: "Frag Claude", collection: "Meine Sammlung", orders: "Sammelbestellungen", deskmat: "Deskmat-Studio", glossary: "Glossar", opponents: "Gegnerdecks", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
+    : { new: "Neues Deck", job: "Claude arbeitet", chat: "Frag Claude", collection: "Meine Sammlung", orders: "Sammelbestellungen", glossary: "Glossar", opponents: "Gegnerdecks", tables: "Tischregeln", blacklist: "Blacklist", settings: "Einstellungen" }[r.view]) + " · Commander Deckbuilder";
 }
 window.addEventListener("hashchange", route);
 
@@ -662,7 +661,7 @@ function tickElapsed() {
 }
 
 function setBusy(busy) {
-  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn", "#plan-btn", "#dm-gen-btn", "#dm-render-btn"]) {
+  for (const sel of ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#prepare-btn", "#mpc-btn", "#upgrade-btn", "#guide-btn", "#plan-btn", "#ask-claude-btn"]) {
     const b = $(sel);
     const noAi = AI_ONLY.includes(sel) && !aiState.available;
     b.disabled = busy || noAi;
@@ -672,7 +671,7 @@ function setBusy(busy) {
 
 // ---------- without Claude: AI features are switched off with a note, everything else works ----------
 let aiState = { enabled: true, available: true, reason: null };
-const AI_ONLY = ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#upgrade-btn", "#guide-btn", "#plan-btn"];
+const AI_ONLY = ["#build-btn", "#refine-form [type=submit]", "#retune-btn", "#upgrade-btn", "#guide-btn", "#plan-btn", "#ask-claude-btn"];
 const AI_OFF_TEXT = "Ohne KI geht weiter: Deck importieren oder selbst zusammenstellen, bearbeiten, drucken, Sammlung, Partien, Gegnerdecks.";
 async function refreshAi(first = false) {
   aiState = await api("/api/ai").catch(() => aiState);
@@ -685,9 +684,7 @@ function applyAi() {
   document.body.classList.toggle("no-ai", off);
   for (const el of $$("[data-ai-note]")) {
     el.hidden = !off;
-    el.textContent = el.dataset.aiNote === "deskmat"
-      ? "Ohne KI geht deine Beschreibung direkt als Bild-Prompt an den Generator – beschreib das Motiv also möglichst genau (gern auf Englisch)."
-      : `${aiState.reason || "Claude ist gerade nicht verfügbar."} ${AI_OFF_TEXT}`;
+    el.textContent = `${aiState.reason || "Claude ist gerade nicht verfügbar."} ${AI_OFF_TEXT}`;
   }
   setBusy(!!currentJob);
   updateQaLive();
@@ -726,7 +723,6 @@ function handleEvent(ev) {
     case "upgrades": renderUpgrades(ev, jobInfo?.slug); break;
     case "guide": onGuide(ev.guide, jobInfo?.slug); break;
     case "plan": onUpgradePlan(ev.plan, jobInfo?.slug); break;
-    case "deskmat": onDeskmat(ev.project, ev.what); break;
     case "progress": {
       const bar = $("#progress");
       bar.hidden = false;
@@ -781,7 +777,6 @@ async function finishJob(ev) {
     case "upgrade":
     case "guide":
     case "plan":
-    case "deskmat":
       info.dismissed = true;
       break;
     case "print":
@@ -838,7 +833,6 @@ async function openDeck(slug) {
   $("#upgrade-cur").textContent = `(${CURRENCY_SIGNS[d.currency || "eur"]})`;
   if (upgrades?.slug !== d.slug) $("#upgrade-result").hidden = true;
   renderHistory(d);
-  renderQuestions(d);
   renderGuide(d);
   renderUpgradePlan(d);
   loadGames(d);
@@ -877,7 +871,7 @@ function renderDeckHead(d) {
   const against = d.built_against_info || [];
   $("#deck-against").hidden = !against.length;
   $("#deck-against").innerHTML = against.length ? `${icon("swords")} Gebaut gegen ${against.map((o) => `<a href="#/opponents/${enc(o.id)}">${esc(o.title)}</a>`).join(", ")}` : "";
-  for (const [id, fmt] of [["#export-cod", "cockatrice"], ["#export-tts", "tts"], ["#export-txt", "text"]]) $(id).href = `/api/decks/${enc(d.slug)}/export/${fmt}`;
+  $("#export-txt").href = `/api/decks/${enc(d.slug)}/export/text`;
 }
 
 // tabs (WAI-ARIA APG pattern: arrow keys move between tabs)
@@ -1627,12 +1621,9 @@ $("#card-view-rules").addEventListener("click", (e) => {
 $("#card-view-explain").addEventListener("click", () => {
   const name = $("#card-view-explain").dataset.name;
   $("#card-view").close();
-  selectTab("fragen");
-  const box = $("#qa-form textarea");
-  box.value = `Erkläre mir die Karte [[${name}]]: Was macht sie genau, wofür ist sie in diesem Deck und wann spiele ich sie am besten?`;
-  if (qaRun && !qaRun.finished) { toast("Claude beantwortet gerade eine andere Frage – deine Frage steht bereit."); box.focus(); return; }
-  $("#qa-form").requestSubmit();
+  askClaudeAbout(currentDeck, `Erkläre mir die Karte [[${name}]]: Was macht sie genau, ${currentDeck ? "wofür ist sie in diesem Deck " : ""}und wann spiele ich sie am besten?`, { send: true });
 });
+$("#ask-claude-btn").addEventListener("click", () => askClaudeAbout(currentDeck));
 
 // ---------- deck actions ----------
 $("#copy-btn").addEventListener("click", async () => {
@@ -2082,10 +2073,8 @@ $("#game-learn").addEventListener("click", () => {
 });
 
 // ============================================================================================
-// tab "Fragen": read-only questions about the deck
+// answers from Claude: a small Markdown subset with card and deck references (shared by „Frag Claude“)
 // ============================================================================================
-let qaRun = null;  // { job, slug, question, source, error, finished }
-
 function cardRef(name, refs) {
   const r = refs[name] || currentDeck?.card_data?.[name] || {};
   return `<span class="card card-ref" data-img="${esc(r.image || "")}" data-img-back="${esc(r.image_back || "")}"
@@ -2142,114 +2131,6 @@ function deckRef(slug, decks = {}) {
   const d = decks[slug] || deckIndex.find((x) => x.slug === slug);
   return d ? `<a class="deck-ref" href="#/deck/${enc(slug)}">${esc(d.name)}</a>` : esc(slug);
 }
-
-function qaItem(q) {
-  const older = q.version && currentDeck?.version && q.version !== currentDeck.version;
-  const ver = q.version ? ` · v${q.version}${older ? " (ältere Version)" : ""}` : "";
-  return `<article class="qa-item" data-id="${esc(q.id)}">
-    <div class="qa-q"><span>${esc(q.question)}</span>
-      <span class="meta">${esc(fmtDate(q.asked))}${esc(ver)}<button type="button" class="qa-del" title="Frage löschen" aria-label="Frage löschen">✕</button></span></div>
-    <div class="qa-a" tabindex="0" role="region" aria-label="Antwort">${md(q.answer, q.cards || {})}</div></article>`;
-}
-
-function updateQaCount() {
-  const n = $("#qa-list").children.length;
-  $("#qa-count").textContent = n || "";
-  $("#qa-clear").hidden = !n;
-}
-
-async function renderQuestions(d) {
-  const items = await api(`/api/decks/${enc(d.slug)}/questions`).catch(() => []);
-  if (currentDeck?.slug !== d.slug) return;
-  $("#qa-list").innerHTML = items.map(qaItem).join("");
-  updateQaCount();
-  updateQaLive();
-}
-
-function updateQaLive() {
-  const run = qaRun && currentDeck && qaRun.slug === currentDeck.slug ? qaRun : null;
-  $("#qa-live").hidden = !run;
-  $("#qa-btn").disabled = !!(qaRun && !qaRun.finished) || !aiState.available;
-  if (!run) return;
-  $("#qa-question").textContent = run.question;
-  $("#qa-live .spinner").hidden = !!run.finished;
-  $("#qa-status").textContent = run.error ? "Fehler: " + run.error : run.status || "Claude denkt nach …";
-  $("#qa-status").classList.toggle("bad", !!run.error);
-  $("#qa-cancel").textContent = run.finished ? "Schließen" : "Abbrechen";
-}
-
-function onQaEvent(run, ev) {
-  switch (ev.type) {
-    case "tool": run.status = toolText(ev.name); break;
-    case "status": run.status = ev.text; break;
-    case "error": run.error = ev.text; break;
-    case "answer":
-      if (currentDeck?.slug === run.slug) {
-        $("#qa-list").insertAdjacentHTML("beforeend", qaItem(ev.entry));
-        updateQaCount();
-        $("#qa-list").lastElementChild.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      } else toast(`Antwort zu „${run.question}“ ist da.`);
-      break;
-    case "done":
-      run.source.close();
-      run.finished = true;
-      if (ev.ok) qaRun = null;
-      else run.error ||= "Keine Antwort erhalten.";
-      break;
-  }
-  updateQaLive();
-}
-
-$("#qa-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!currentDeck || (qaRun && !qaRun.finished)) return;
-  const question = e.target.elements.question.value.trim();
-  if (!question) return;
-  try {
-    const slug = currentDeck.slug;
-    const { job } = await api(`/api/decks/${enc(slug)}/ask`, { method: "POST", body: { question } });
-    const run = { job, slug, question };
-    run.source = jobStream(job, (ev) => onQaEvent(run, ev), (lost) => {
-      if (lost && !run.finished) { onQaEvent(run, { type: "error", text: lost }); onQaEvent(run, { type: "done", ok: false }); }
-    });
-    qaRun = run;
-    e.target.reset();
-    updateQaLive();
-  } catch (err) { fail(err); }
-});
-$("#qa-form textarea").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#qa-form").requestSubmit(); }
-});
-$("#qa-chips").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if (!chip) return;
-  const box = $("#qa-form textarea");
-  box.value = chip.dataset.q;
-  box.focus();
-  box.setSelectionRange(box.value.length, box.value.length);
-});
-$("#qa-cancel").addEventListener("click", async () => {
-  if (!qaRun) return;
-  if (!qaRun.finished) await api(`/api/jobs/${qaRun.job}/cancel`, { method: "POST" }).catch(() => {});
-  else { qaRun = null; updateQaLive(); }
-});
-$("#qa-list").addEventListener("click", async (e) => {
-  const ref = e.target.closest(".card-ref");
-  if (ref) { showCardView(ref.dataset.name, { image: ref.dataset.img, image_back: ref.dataset.imgBack, scryfall_uri: ref.dataset.uri }); return; }
-  const del = e.target.closest(".qa-del");
-  if (!del || !currentDeck) return;
-  const item = del.closest(".qa-item");
-  await api(`/api/decks/${enc(currentDeck.slug)}/questions?id=${enc(item.dataset.id)}`, { method: "DELETE" }).catch(fail);
-  item.remove();
-  updateQaCount();
-});
-$("#qa-clear").addEventListener("click", async () => {
-  if (!currentDeck) return;
-  const ok = await ask({ title: "Alle Fragen löschen?", text: "Alle Fragen und Antworten zu diesem Deck werden entfernt.", ok: "Löschen", danger: true });
-  if (!ok) return;
-  await api(`/api/decks/${enc(currentDeck.slug)}/questions`, { method: "DELETE" }).catch(fail);
-  renderQuestions(currentDeck);
-});
 
 // ============================================================================================
 // tab "Verlauf": versions, diffs, restore, copy
@@ -3458,17 +3339,13 @@ $("#opp-delete").addEventListener("click", async () => {
     go("#/opponents");
   } catch (err) { fail(err); }
 });
-$("#opp-ask").addEventListener("click", async () => {
+$("#opp-ask").addEventListener("click", () => {
   const slug = $("#opp-my-deck").value;
   if (!slug) return;
   const o = currentOpp;
-  go(`#/deck/${enc(slug)}/fragen`);
-  await new Promise((r) => setTimeout(r, 50));
-  if (currentDeck?.slug !== slug && !(await openDeck(slug))) return;
-  const q = $("#qa-form").elements.question;
-  q.value = `Wie spiele ich mit diesem Deck gegen ${o.title}? Worauf muss ich achten, welche Karten halte ich zurück, was ist ihre Schwachstelle?`
-    + (o.notes.length ? ` Mir ist aufgefallen: ${o.notes.slice(-3).map((n) => n.text).join("; ")}.` : "");
-  q.focus();
+  askClaudeAbout(deckIndex.find((d) => d.slug === slug) || { slug, name: slug },
+    `Wie spiele ich mit diesem Deck gegen ${o.title}? Worauf muss ich achten, welche Karten halte ich zurück, was ist ihre Schwachstelle?`
+    + (o.notes.length ? ` Mir ist aufgefallen: ${o.notes.slice(-3).map((n) => n.text).join("; ")}.` : ""));
   toast("Frage vorbereitet – „Fragen“ schickt sie an Claude.");
 });
 $("#opp-upgrade").addEventListener("click", async () => {
@@ -4087,7 +3964,6 @@ $("#settings-form").addEventListener("submit", async (e) => {
   try {
     await api("/api/settings", { method: "POST", body });
     await loadSettings();
-    dm.opts = null;  // the deskmat studio re-reads generator and upscaler
     toast("Einstellungen gespeichert.");
   } catch (err) { $("#settings-msg").textContent = err.message; }
 });
@@ -4505,406 +4381,6 @@ $("#upgrade-order").addEventListener("click", () => {
 refreshOrders();
 
 // ============================================================================================
-// deskmat studio: motif (card art, generated, upload) -> crop to the mat format -> print file at 300 or 600 DPI
-// ============================================================================================
-const dm = { opts: null, project: null, crop: { cx: 0.5, cy: 0.5, zoom: 1 }, printing: null, prefill: null, point: [0.5, 0.5] };
-const dmPasses = () => Number($("#view-deskmat [name=dmpasses]:checked").value);
-
-async function deskmatOptions() {
-  if (dm.opts) return dm.opts;
-  const o = await api("/api/deskmat/options");
-  dm.opts = o;
-  $("#dm-format").innerHTML = o.formats.map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("");
-  $("#dm-style").innerHTML = o.styles.map((st) => `<option value="${esc(st.key)}">${esc(st.label)}</option>`).join("");
-  $("#dm-gen-host").textContent = o.generator;
-  $("#dm-mpc-btn").hidden = !o.mpc;
-  $("#dm-upscale").checked = o.upscaler;
-  $("#dm-upscale").disabled = !o.upscaler;
-  $("#dm-upscale-hint").hidden = o.upscaler;
-  return o;
-}
-
-function setDmKind(kind) {
-  $(`#dm-kind [value="${kind}"]`).checked = true;
-  for (const b of $$("#view-deskmat .dm-block")) b.hidden = b.dataset.kind !== kind;
-}
-$("#dm-kind").addEventListener("change", (e) => setDmKind(e.target.value));
-
-async function showDeskmat(id) {
-  try { await deskmatOptions(); } catch (err) { return fail(err); }
-  $("#dm-deck").innerHTML = '<option value="">–</option>' + deckIndex.map((d) => `<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join("");
-  if (dm.prefill) {
-    setDmKind("card");
-    $("#dm-card").value = dm.prefill.card || "";
-    $("#dm-deck").value = dm.prefill.deck || "";
-    dm.printing = null;
-    $("#dm-art-choice").textContent = "Artwork: Standard-Druck";
-    dm.prefill = null;
-  }
-  loadDeskmatList();
-  if (!id) { dm.project = null; renderDeskmat(); return; }
-  if (dm.project?.id !== id) {
-    try { dm.project = await api(`/api/deskmat/${enc(id)}`); dm.crop = null; }
-    catch (err) { fail(err); go("#/deskmat"); return; }
-  }
-  renderDeskmat();
-}
-
-function dmFormat() { return dm.opts.formats.find((f) => f.key === $("#dm-format").value) || dm.opts.formats[0]; }
-const dmDpi = () => Number($("#view-deskmat [name=dmdpi]:checked").value);
-const dmBleed = () => Number($("#dm-bleed").value);
-// same maths as deskmat.target_size: the mat plus bleed on every side at the chosen DPI
-function dmPrintMm() { const [w, h] = dmFormat().mm, b = dmBleed(); return [w + 2 * b, h + 2 * b]; }
-function dmTarget() { return dmPrintMm().map((mm) => Math.round(mm / 25.4 * dmDpi())); }
-const dmAspect = () => { const [w, h] = dmPrintMm(); return w / h; };
-const dmFit = () => $("#view-deskmat [name=dmfit]:checked").value;
-
-// same maths as deskmat.crop_box on the server
-function dmCropBox(w, h, aspect, { cx, cy, zoom }) {
-  let [ww, wh] = w / h > aspect ? [h * aspect, h] : [w, w / aspect];
-  zoom = Math.max(1, Math.min(zoom, 8));
-  ww /= zoom; wh /= zoom;
-  const x0 = Math.min(Math.max(cx * w - ww / 2, 0), w - ww);
-  const y0 = Math.min(Math.max(cy * h - wh / 2, 0), h - wh);
-  return { x0, y0, ww, wh };
-}
-function dmDefaultCrop(p, aspect) {
-  const box = p.source.art_box;
-  if (!box) return { cx: 0.5, cy: 0.5, zoom: 1 };
-  const [w, h] = p.source.size;
-  const full = dmCropBox(w, h, aspect, { cx: 0.5, cy: 0.5, zoom: 1 });
-  const winW = Math.min((box[2] - box[0]) * w, (box[3] - box[1]) * h * aspect);
-  return { cx: (box[0] + box[2]) / 2, cy: (box[1] + box[3]) / 2, zoom: full.ww / winW };
-}
-
-function renderDeskmat() {
-  const p = dm.project;
-  const cands = p?.candidates || [];
-  $("#dm-candidates").hidden = !cands.length;
-  $("#dm-cand-grid").innerHTML = cands.map((c, i) => `<button type="button" data-n="${i}" aria-pressed="${p.source.chosen === i}"
-      title="Variante ${i + 1}"><img src="/api/deskmat/${enc(p.id)}/image?kind=candidate&n=${i}" alt="Variante ${i + 1}" loading="lazy"></button>`).join("");
-  if (cands.length) setDmKind("gen");
-  const ready = !!p?.source?.file;
-  $("#dm-edit-panel").hidden = !ready;
-  $("#dm-result-panel").hidden = !p?.result;
-  if (!ready) return;
-  $("#dm-title").textContent = p.title + (p.source.card && !p.source.card.startsWith(p.title) ? ` · ${p.source.card}` : "")
-    + (p.source.kind === "mpc" ? " · MPC-Scan" : p.source.kind === "card" ? " · Scryfall-Artwork" : "");
-  const r = p.render;
-  if (r && !dm.crop) {
-    $("#dm-format").value = r.format;
-    if (r.dpi) $(`#view-deskmat [name=dmdpi][value="${r.dpi}"]`).checked = true;
-    $("#dm-bleed").value = String(r.bleed_mm ?? 0);
-    $("#dm-filetype").value = r.filetype || "png";
-    $(`#view-deskmat [name=dmpasses][value="${r.passes || 1}"]`).checked = true;
-    $(`#view-deskmat [name=dmfit][value="${r.fit}"]`).checked = true;
-    $("#dm-upscale").checked = r.upscale && dm.opts.upscaler;
-  } else if (!r && p.format) $("#dm-format").value = p.format;
-  if (!dm.crop) dm.crop = r?.crop && r.format === $("#dm-format").value ? { ...r.crop } : dmDefaultCrop(p, dmAspect());
-  const src = `/api/deskmat/${enc(p.id)}/image?kind=source&v=${enc(`${p.source.file}-${p.source.chosen ?? ""}-${p.source.size}`)}`;
-  if ($("#dm-img").dataset.src !== src) { $("#dm-img").src = src; $("#dm-bg").src = src; $("#dm-img").dataset.src = src; }
-  layoutDeskmat();
-  if (p.result) {
-    const res = p.result;
-    $("#dm-result").src = `/api/deskmat/${enc(p.id)}/image?kind=preview&v=${enc(res.created)}`;
-    $("#dm-download").href = `/api/deskmat/${enc(p.id)}/image?kind=result&download=true`;
-    const ext = res.file.split(".").pop().toUpperCase();
-    $("#dm-result-info").textContent = `${res.size[0]} × ${res.size[1]} px · ${res.dpi} DPI · ${res.format_label}`
-      + (res.bleed_mm ? ` + ${res.bleed_mm} mm Beschnitt (${res.print_mm[0] / 10} × ${res.print_mm[1] / 10} cm)` : "")
-      + ` · ${fmtNum(res.bytes / 1048576, "", 1)} MB ${ext} · `
-      + (res.ai_passes ? `${res.ai_passes}× mit Real-ESRGAN hochskaliert` : res.factor > 1.15 ? "ohne KI vergrößert" : "ohne Vergrößerung");
-    $("#dm-result-warn").innerHTML = res.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
-    if (p.compare?.point && dm.point.join() === "0.5,0.5") dm.point = [...p.compare.point];
-    placeDmMark();
-    renderDmCompare();
-  }
-}
-
-function layoutDeskmat() {
-  const p = dm.project;
-  if (!p?.source?.file || $("#dm-edit-panel").hidden) return;
-  const f = dmFormat();
-  const [pw, ph] = dmPrintMm();
-  const aspect = pw / ph;
-  const frame = $("#dm-frame");
-  frame.style.aspectRatio = `${pw} / ${ph}`;
-  const F = frame.clientWidth, H = F / aspect;
-  const [w, h] = p.source.size;
-  const fit = dmFit() === "fit";
-  frame.classList.toggle("fit", fit);
-  $("#dm-zoom").disabled = fit;
-  const img = $("#dm-img");
-  let s, left, top, region;
-  if (fit) {
-    s = Math.min(F / w, H / h);
-    left = (F - w * s) / 2; top = (H - h * s) / 2;
-    region = [w, h];
-  } else {
-    const b = dmCropBox(w, h, aspect, dm.crop);
-    dm.crop.cx = (b.x0 + b.ww / 2) / w; dm.crop.cy = (b.y0 + b.wh / 2) / h;  // keep the centre inside
-    s = F / b.ww; left = -b.x0 * s; top = -b.y0 * s;
-    region = [Math.round(b.ww), Math.round(b.wh)];
-  }
-  Object.assign(img.style, { width: `${w * s}px`, height: `${h * s}px`, left: `${left}px`, top: `${top}px` });
-  const bleed = dmBleed();
-  const trim = $("#dm-trim");
-  trim.hidden = !bleed;
-  if (bleed) Object.assign(trim.style, { left: `${bleed / pw * 100}%`, right: `${bleed / pw * 100}%`, top: `${bleed / ph * 100}%`, bottom: `${bleed / ph * 100}%` });
-  $("#dm-zoom").value = dm.crop.zoom;
-  const [tw, th] = dmTarget();
-  const mp = tw * th / 1e6;
-  const tooBig = mp > dm.opts.max_megapixels;
-  const factor = fit ? Math.min(tw / w, th / h) : tw / region[0];
-  const aiOn = $("#dm-upscale").checked && dm.opts.upscaler;
-  const passes = !aiOn || factor <= 1.15 ? 0 : factor > 4.5 && dmPasses() === 2 ? 2 : 1;
-  $("#dm-passes").hidden = !dm.opts.upscaler;
-  const soft = factor > [2.5, 6, 24][passes];
-  const how = factor <= 1.15 ? "" : passes ? ` (KI ×4${passes === 2 ? " zweimal" : ""}${factor > (passes === 2 ? 16 : 4) ? ", Rest per Lanczos" : ""})` : " (ohne KI)";
-  $("#dm-info").innerHTML = `Druckdatei <b>${tw} × ${th} px</b> (${fmtNum(mp, "", 0)} MP) · <b>${dmDpi()} DPI</b> auf ${fmtNum(pw / 10)} × ${fmtNum(ph / 10)} cm`
-    + (bleed ? ` inkl. ${bleed} mm Beschnitt` : "") + ` · Ausschnitt ${region[0]} × ${region[1]} px → Faktor ${fmtNum(factor, "", 1)}${how}`
-    + (tooBig ? ` · <span class="bad">zu groß (max. ${dm.opts.max_megapixels} MP) – 300 DPI oder kleineres Format</span>`
-      : soft ? ' · <span class="warn">wird weich – größeres Motiv oder weniger Zoom</span>' : "")
-    + (mp > 60 && $("#dm-filetype").value === "png" ? ' · <span class="muted">Tipp: JPEG spart hier viel Platz</span>' : "");
-  $("#dm-render-btn").disabled = tooBig || !!currentJob;
-}
-window.addEventListener("resize", debounce(layoutDeskmat, 100));
-$("#dm-format").addEventListener("change", () => { if (dm.project) dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
-$("#dm-bleed").addEventListener("change", () => { if (dm.project && !dm.project.render) dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
-$("#dm-filetype").addEventListener("change", layoutDeskmat);
-$("#dm-upscale").addEventListener("change", layoutDeskmat);
-$("#view-deskmat").addEventListener("change", (e) => { if (["dmfit", "dmdpi", "dmpasses"].includes(e.target.name)) layoutDeskmat(); });
-$("#dm-zoom").addEventListener("input", (e) => { dm.crop.zoom = Number(e.target.value); layoutDeskmat(); });
-$("#dm-reset").addEventListener("click", () => { dm.crop = dmDefaultCrop(dm.project, dmAspect()); layoutDeskmat(); });
-
-// drag (mouse, touch, pen) and keyboard to move the crop window
-let dmDrag = null;
-$("#dm-frame").addEventListener("pointerdown", (e) => {
-  if (dmFit() === "fit" || !dm.project) return;
-  dmDrag = { x: e.clientX, y: e.clientY, crop: { ...dm.crop } };
-  $("#dm-frame").setPointerCapture(e.pointerId);
-  $("#dm-frame").classList.add("dragging");
-});
-$("#dm-frame").addEventListener("pointermove", (e) => {
-  if (!dmDrag) return;
-  const [w, h] = dm.project.source.size;
-  const s = parseFloat($("#dm-img").style.width) / w;
-  dm.crop.cx = dmDrag.crop.cx - (e.clientX - dmDrag.x) / (w * s);
-  dm.crop.cy = dmDrag.crop.cy - (e.clientY - dmDrag.y) / (h * s);
-  layoutDeskmat();
-});
-const dmDragEnd = () => { dmDrag = null; $("#dm-frame").classList.remove("dragging"); };
-$("#dm-frame").addEventListener("pointerup", dmDragEnd);
-$("#dm-frame").addEventListener("pointercancel", dmDragEnd);
-$("#dm-frame").addEventListener("wheel", (e) => {
-  if (dmFit() === "fit" || !dm.project) return;
-  e.preventDefault();
-  dm.crop.zoom = Math.max(1, Math.min(4, dm.crop.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08)));
-  layoutDeskmat();
-}, { passive: false });
-$("#dm-frame").addEventListener("keydown", (e) => {
-  if (dmFit() === "fit" || !dm.project) return;
-  const step = 0.02 / dm.crop.zoom;
-  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-  if (moves[e.key]) { dm.crop.cx += moves[e.key][0]; dm.crop.cy += moves[e.key][1]; }
-  else if (e.key === "+" || e.key === "=") dm.crop.zoom = Math.min(4, dm.crop.zoom * 1.1);
-  else if (e.key === "-") dm.crop.zoom = Math.max(1, dm.crop.zoom / 1.1);
-  else return;
-  e.preventDefault();
-  layoutDeskmat();
-});
-
-function openDeskmat(p) {
-  dm.project = p;
-  dm.crop = null;
-  if (location.hash === `#/deskmat/${p.id}`) renderDeskmat();
-  else go(`#/deskmat/${enc(p.id)}`);
-  loadDeskmatList();
-  setTimeout(() => $(p.source?.file ? "#dm-edit-panel" : "#dm-candidates").scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-}
-function onDeskmat(p, what) {
-  if (what === "compare") {
-    dm.project = p;
-    renderDmCompare();
-    $("#dm-compare").scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
-  if (p.result) {
-    dm.project = p;
-    if (location.hash !== `#/deskmat/${p.id}`) go(`#/deskmat/${enc(p.id)}`); else renderDeskmat();
-    loadDeskmatList();
-    toast("Deine Deskmat ist fertig.");
-    $("#dm-result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-  } else openDeskmat(p);
-}
-
-// 1a card artwork
-wireAutocomplete($("#dm-card"), $("#ac-dm-card"));
-$("#dm-card").addEventListener("input", () => { dm.printing = null; $("#dm-art-choice").textContent = "Artwork: Standard-Druck"; $("#dm-mpc-grid").hidden = true; });
-$("#dm-art-btn").addEventListener("click", async () => {
-  const name = $("#dm-card").value.trim();
-  if (!name) { toast("Gib zuerst eine Karte ein.", "error"); $("#dm-card").focus(); return; }
-  const p = await pickPrinting(name);
-  if (!p) return;
-  dm.printing = p;
-  $("#dm-art-choice").textContent = `Artwork: ${p.set_name || p.set || ""}${p.collector_number ? " #" + p.collector_number : ""}`;
-});
-$("#dm-card-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const body = { name: $("#dm-card").value.trim(), face: $("#dm-face").value, scryfall_id: dm.printing?.scryfall_id || null };
-  const btn = e.submitter || $("#dm-card-form [type=submit]");
-  btn.disabled = true;
-  try { openDeskmat(await api("/api/deskmat/card", { method: "POST", body })); }
-  catch (err) { fail(err); }
-  finally { btn.disabled = false; }
-});
-$("#dm-mpc-btn").addEventListener("click", async () => {
-  const name = $("#dm-card").value.trim();
-  if (!name) { toast("Gib zuerst eine Karte ein.", "error"); return; }
-  const grid = $("#dm-mpc-grid");
-  grid.hidden = false;
-  grid.innerHTML = '<p class="muted small">Suche Scans …</p>';
-  try {
-    const items = await api(`/api/deskmat/mpc?name=${enc(name)}`);
-    grid.innerHTML = items.map((o) => `<button type="button" class="similar" data-mpc="${esc(o.id)}"><img src="${esc(o.thumb)}" alt="" loading="lazy">
-      <span class="muted small">${esc(o.source || "")}${o.dpi ? ` · ${o.dpi} DPI` : ""}</span></button>`).join("") || '<p class="muted small">Keine Scans gefunden.</p>';
-  } catch (err) { grid.innerHTML = `<p class="bad small">${esc(err.message)}</p>`; }
-});
-$("#dm-mpc-grid").addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-mpc]");
-  if (!b) return;
-  try { openDeskmat(await api("/api/deskmat/card", { method: "POST", body: { name: $("#dm-card").value.trim(), mpc_id: b.dataset.mpc } })); }
-  catch (err) { fail(err); }
-});
-
-// 1b generated from a described setting (Claude writes the prompt, a free generator paints)
-$("#dm-gen-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (currentJob) { toast("Es läuft schon ein Auftrag – warte kurz oder brich ihn ab.", "error"); return; }
-  const f = new FormData(e.target);
-  const body = { setting: f.get("setting"), style: f.get("style"), deck: f.get("deck") || null, variants: Number(f.get("variants")), format: $("#dm-format").value || "playmat" };
-  try {
-    const { job } = await api("/api/deskmat/generate", { method: "POST", body });
-    startJob(job, "Claude entwirft dein Motiv", { kind: "deskmat", slot: "#dm-job-slot", route: "#/deskmat" });
-  } catch (err) { fail(err); }
-});
-$("#dm-cand-grid").addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-n]");
-  if (!b || !dm.project) return;
-  try { openDeskmat(await api(`/api/deskmat/${enc(dm.project.id)}/choose`, { method: "POST", body: { n: Number(b.dataset.n) } })); }
-  catch (err) { fail(err); }
-});
-
-// 1c upload
-$("#dm-file").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  try {
-    const res = await fetch(`/api/deskmat/upload?filename=${enc(file.name)}`, { method: "POST", body: file });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || res.statusText);
-    openDeskmat(data);
-  } catch (err) { fail(err); }
-  e.target.value = "";
-});
-
-// 3 render
-$("#dm-render-btn").addEventListener("click", async () => {
-  if (!dm.project || currentJob) return;
-  const body = { format: $("#dm-format").value, dpi: dmDpi(), bleed_mm: dmBleed(), fit: dmFit(), crop: dm.crop,
-    upscale: $("#dm-upscale").checked, filetype: $("#dm-filetype").value, passes: dmPasses() };
-  try {
-    const { job } = await api(`/api/deskmat/${enc(dm.project.id)}/render`, { method: "POST", body });
-    startJob(job, `Deskmat „${dm.project.title}“ wird erstellt`, { kind: "deskmat", slot: "#dm-render-slot", route: `#/deskmat/${enc(dm.project.id)}` });
-  } catch (err) { fail(err); }
-});
-$("#dm-open").addEventListener("click", async () => {
-  try {
-    const r = await api(`/api/deskmat/${enc(dm.project.id)}/open-folder`, { method: "POST" });
-    toast(r.opened ? "Ordner geöffnet." : `Ordner: ${r.path}`);
-  } catch (err) { fail(err); }
-});
-
-// checking before ordering: pick a spot, compare without / 1× / 2× AI, test print at real size
-function placeDmMark() {
-  const res = dm.project?.result;
-  if (!res) return;
-  const paperMm = (appSettings?.paper || "A4") === "Letter" ? [259, 190] : [270, 190];
-  const [pw, ph] = res.print_mm;
-  const fw = Math.min(1, paperMm[0] / pw), fh = Math.min(1, paperMm[1] / ph);
-  const cx = Math.min(Math.max(dm.point[0], fw / 2), 1 - fw / 2), cy = Math.min(Math.max(dm.point[1], fh / 2), 1 - fh / 2);
-  Object.assign($("#dm-mark").style, { left: `${(cx - fw / 2) * 100}%`, top: `${(cy - fh / 2) * 100}%`, width: `${fw * 100}%`, height: `${fh * 100}%` });
-  $("#dm-testprint").href = `/api/deskmat/${enc(dm.project.id)}/testprint?x=${dm.point[0].toFixed(4)}&y=${dm.point[1].toFixed(4)}`;
-}
-$("#dm-result-wrap").addEventListener("click", (e) => {
-  const r = $("#dm-result").getBoundingClientRect();
-  dm.point = [Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1), Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)];
-  placeDmMark();
-});
-$("#dm-compare-btn").addEventListener("click", async () => {
-  if (!dm.project || currentJob) return;
-  try {
-    const { job } = await api(`/api/deskmat/${enc(dm.project.id)}/compare`, { method: "POST", body: { x: dm.point[0], y: dm.point[1] } });
-    startJob(job, "Vergleiche die Hochskalierung", { kind: "deskmat", slot: "#dm-compare-slot", route: `#/deskmat/${enc(dm.project.id)}` });
-  } catch (err) { fail(err); }
-});
-function renderDmCompare() {
-  const c = dm.project?.compare;
-  $("#dm-compare").hidden = !c?.tiles?.length;
-  if (!c?.tiles?.length) return;
-  const labels = { 0: "Ohne KI (nur Lanczos)", 1: "1 KI-Durchgang", 2: "2 KI-Durchgänge" };
-  const current = dm.project.render?.passes || 1;
-  $("#dm-compare-info").textContent = `Ausschnitt ${c.tile_mm} × ${c.tile_mm} mm in Druckauflösung (Faktor ${String(c.factor).replace(".", ",")}).`
-    + (c.tiles.some((t) => t.passes === 2) ? "" : " Ein zweiter Durchgang lohnt sich bei diesem Faktor nicht.");
-  const v = enc(c.created);
-  $("#dm-compare-grid").innerHTML = c.tiles.map((t) => `<figure>
-      <div class="tile"><img src="/api/deskmat/${enc(dm.project.id)}/compare/${t.passes}?v=${v}" alt="${esc(labels[t.passes])}"></div>
-      <figcaption><span>${esc(labels[t.passes])}${t.passes && t.passes === current && dm.project.result?.ai_passes ? " · aktuell" : ""}</span>
-        ${t.passes ? `<button type="button" class="btn small" data-passes="${t.passes}">Damit erstellen</button>` : ""}</figcaption></figure>`).join("");
-}
-$("#dm-compare-real").addEventListener("change", (e) => $("#dm-compare-grid").classList.toggle("real", e.target.checked));
-$("#dm-compare-grid").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-passes]");
-  if (!b) return;
-  $(`#view-deskmat [name=dmpasses][value="${b.dataset.passes}"]`).checked = true;
-  $("#dm-upscale").checked = true;
-  layoutDeskmat();
-  $("#dm-render-btn").click();
-});
-
-async function loadDeskmatList() {
-  let items = [];
-  try { items = await api("/api/deskmats"); } catch { /* empty state */ }
-  $("#dm-count").textContent = items.length || "";
-  $("#dm-empty").hidden = !!items.length;
-  $("#dm-list").innerHTML = items.map((p) => {
-    const kind = p.result ? "preview" : p.source?.file ? "source" : p.candidates?.length ? "candidate&n=0" : "";
-    const v = enc(p.updated || "");
-    return `<div class="dm-item" data-id="${esc(p.id)}">
-      <a class="thumb" href="#/deskmat/${enc(p.id)}">${kind ? `<img src="/api/deskmat/${enc(p.id)}/image?kind=${kind}&v=${v}" alt="" loading="lazy">` : ""}</a>
-      <div class="meta"><span title="${esc(p.title)}">${esc(p.title)}<br><span class="muted">${p.result ? `${p.result.size[0]} × ${p.result.size[1]}` : "noch nicht erstellt"}</span></span>
-        <button type="button" class="icon-btn dm-del" aria-label="Deskmat löschen" title="Löschen">${icon("x")}</button></div></div>`;
-  }).join("");
-}
-$("#dm-list").addEventListener("click", async (e) => {
-  const b = e.target.closest(".dm-del");
-  if (!b) return;
-  const id = b.closest(".dm-item").dataset.id;
-  if (!(await ask({ title: "Deskmat löschen?", text: "Motiv und Druckdatei werden gelöscht.", ok: "Löschen", danger: true }))) return;
-  try {
-    await api(`/api/deskmat/${enc(id)}`, { method: "DELETE" });
-    if (dm.project?.id === id) { dm.project = null; go("#/deskmat"); }
-    loadDeskmatList();
-  } catch (err) { fail(err); }
-});
-$("#deskmat-from-deck").addEventListener("click", () => {
-  if (!currentDeck) return;
-  $("#deck-menu").open = false;
-  dm.prefill = { card: currentDeck.commanders[0], deck: currentDeck.slug };
-  dm.project = null;
-  go("#/deskmat");
-});
-
-// ============================================================================================
 // glossary: keywords, actions and Commander terms
 // ============================================================================================
 let glossaryItems = null;
@@ -4948,6 +4424,28 @@ let paletteSel = 0;
 let chatIndex = [];
 let currentChat = null;  // { id, title, messages } – null = a new, not yet started conversation
 let chatRun = null;      // { job, chatId, question, source, status, error, answered, finished }
+let chatFocus = null;    // { slug, name } – the deck the questions are about („Claude fragen“ in a deck)
+
+function setChatFocus(deck) {
+  chatFocus = deck?.slug ? { slug: deck.slug, name: deck.name || deck.slug } : null;
+  $("#chat-focus").hidden = !chatFocus;
+  $("#chat-focus-name").textContent = chatFocus?.name || "";
+  $("#chat-form textarea").placeholder = chatFocus ? `z. B. Wie gewinnt ${chatFocus.name}? Wie spiele ich es gegen Atraxa?` : "z. B. Was ist mein stärkstes Deck und warum?";
+}
+const deckNameOf = (slug) => deckIndex.find((d) => d.slug === slug)?.name || slug;
+
+/** „Claude fragen“ from a deck, a card or an opponent: a new conversation about ``deck`` (optionally with a
+ *  question, sent right away). The chat prompt then loads the deck first and minds its table rule and opponents. */
+function askClaudeAbout(deck, question = "", { send = false } = {}) {
+  if (location.hash !== "#/chat") go("#/chat");
+  currentChat = null;
+  setChatFocus(deck);
+  renderChat();
+  const box = $("#chat-form textarea");
+  box.value = question;
+  if (send && question && !(chatRun && !chatRun.finished)) $("#chat-form").requestSubmit();
+  else setTimeout(() => box.focus({ preventScroll: true }), 150);  // after the route change moved the focus to the page
+}
 
 async function refreshChats() {
   chatIndex = await api("/api/chats").catch(() => chatIndex);
@@ -4961,7 +4459,7 @@ function renderChatList() {
   $("#chat-list-empty").hidden = chatIndex.length > 0;
 }
 
-const chatQuestion = (q, id = "", phone = false) => `<div class="chat-msg user"${id ? ` id="${id}"` : ""}>${esc(q)}${phone ? '<span class="chat-from">vom Handy</span>' : ""}</div>`;
+const chatQuestion = (q, id = "", phone = false, deck = null) => `<div class="chat-msg user"${id ? ` id="${id}"` : ""}>${esc(q)}${phone ? '<span class="chat-from">vom Handy</span>' : ""}${deck ? `<span class="chat-from">zu „${esc(deckNameOf(deck))}“</span>` : ""}</div>`;
 function chatAnswer(m) {
   if (!m.answer) {  // a question from the phone that this or another PC has not answered (yet)
     const text = m.status === "failed" ? `Hat nicht geklappt: ${m.error || "keine Antwort"}`
@@ -4979,7 +4477,7 @@ function renderChat() {
   const c = currentChat;
   $("#chat-title").textContent = c ? c.title : "Neues Gespräch";
   $("#chat-menu").hidden = !c?.messages?.length;
-  $("#chat-log").innerHTML = (c?.messages || []).map((m) => chatQuestion(m.question, "", m.source === "phone") + chatAnswer(m)).join("");
+  $("#chat-log").innerHTML = (c?.messages || []).map((m) => chatQuestion(m.question, "", m.source === "phone", m.deck) + chatAnswer(m)).join("");
   renderChatList();
   updateChatLive();
 }
@@ -4988,7 +4486,7 @@ function updateChatLive() {
   const run = chatRun;
   const here = !!(run && currentChat && currentChat.id === run.chatId);
   $("#chat-pending")?.remove();
-  if (here && !run.answered) $("#chat-log").insertAdjacentHTML("beforeend", chatQuestion(run.question, "chat-pending"));
+  if (here && !run.answered) $("#chat-log").insertAdjacentHTML("beforeend", chatQuestion(run.question, "chat-pending", false, run.deck));
   $("#chat-live").hidden = !here;
   $("#chat-live .spinner").hidden = !!run?.finished;
   $("#chat-status").textContent = run?.error ? "Fehler: " + run.error : run?.status || "Claude sieht sich deine Decks an …";
@@ -5049,6 +4547,8 @@ async function showChat(id) {
   else if (currentChat?.id !== id) {
     try { currentChat = await api(`/api/chats/${enc(id)}`); }
     catch (err) { fail(err); currentChat = null; history.replaceState(null, "", "#/chat"); }
+    const last = currentChat?.messages?.[currentChat.messages.length - 1];  // follow-ups keep the deck focus
+    setChatFocus(last?.deck ? { slug: last.deck, name: deckNameOf(last.deck) } : null);
   }
   renderChat();
   refreshChats();
@@ -5062,13 +4562,13 @@ $("#chat-form").addEventListener("submit", async (e) => {
   const question = box.value.trim();
   if (question.length < 2) return;
   try {
-    const r = await api("/api/chat", { method: "POST", body: { question, chat_id: currentChat?.id || null, deep: $("#chat-deep").checked } });
+    const r = await api("/api/chat", { method: "POST", body: { question, chat_id: currentChat?.id || null, deep: $("#chat-deep").checked, deck: chatFocus?.slug || null } });
     if (!currentChat) {
       currentChat = { id: r.chat_id, title: r.title, messages: [] };
       history.replaceState(null, "", `#/chat/${enc(r.chat_id)}`);
       lastView = "chat" + r.chat_id;
     }
-    const run = { job: r.job, chatId: r.chat_id, question };
+    const run = { job: r.job, chatId: r.chat_id, question, deck: chatFocus?.slug || null };
     run.source = jobStream(r.job, (ev) => onChatEvent(run, ev), (lost) => {
       if (lost && !run.finished) { onChatEvent(run, { type: "error", text: lost }); onChatEvent(run, { type: "done", ok: false }); }
     });
@@ -5094,9 +4594,11 @@ $("#chat-cancel").addEventListener("click", async () => {
   else { chatRun = null; updateChatLive(); }
 });
 $("#chat-new").addEventListener("click", () => {
+  setChatFocus(null);
   if (location.hash === "#/chat") { currentChat = null; renderChat(); } else go("#/chat");
   $("#chat-form textarea").focus();
 });
+$("#chat-focus-x").addEventListener("click", () => { setChatFocus(null); $("#chat-form textarea").focus(); });
 $("#chat-log").addEventListener("click", (e) => {
   const ref = e.target.closest(".card-ref");
   if (ref) showCardView(ref.dataset.name, { image: ref.dataset.img, image_back: ref.dataset.imgBack, scryfall_uri: ref.dataset.uri });
@@ -5150,7 +4652,6 @@ function paletteItems() {
     { label: "Sammlung importieren", hint: "Sammlung", run: () => { go("#/collection"); $("#coll-import-btn").click(); } },
     { label: "Sammelbestellungen", hint: "Seite", run: () => go("#/orders") },
     { label: "Neue Sammelbestellung", hint: "Sammelbestellungen", run: () => { go("#/orders"); $("#order-new").click(); } },
-    { label: "Deskmat-Studio", hint: "Seite", run: () => go("#/deskmat") },
     { label: "Glossar", hint: "Seite", run: () => go("#/glossary") },
     { label: "Gegnerdecks", hint: "Seite", run: () => go("#/opponents") },
     ...oppIndex.map((o) => ({ label: o.title, hint: "Gegnerdeck", run: () => go(`#/opponents/${enc(o.id)}`) })),
@@ -5161,12 +4662,12 @@ function paletteItems() {
   ];
   if (currentDeck && parseHash().view === "deck") {
     const d = currentDeck;
-    const tabNames = { karten: "Karten", anleitung: "Anleitung & Rule 0", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", fragen: "Fragen zum Deck", partien: "Partien & Bilanz", verlauf: "Verlauf", drucken: "Drucken" };
+    const tabNames = { karten: "Karten", anleitung: "Anleitung & Rule 0", testen: "Testhand & Wahrscheinlichkeiten", anpassen: "Anpassen & Upgrades", partien: "Partien & Bilanz", verlauf: "Verlauf", drucken: "Drucken" };
     for (const [tab, label] of Object.entries(tabNames)) items.push({ label, hint: d.name, run: () => selectTab(tab) });
+    items.push({ label: "Claude zu diesem Deck fragen", hint: d.name, run: () => askClaudeAbout(d) });
     items.push({ label: "Karten bearbeiten", hint: d.name, run: () => { selectTab("karten"); if (!edit) setEditing(true); } });
     items.push({ label: "Liste kopieren", hint: d.name, run: () => $("#copy-btn").click() });
     items.push({ label: "Mit anderem Deck vergleichen", hint: d.name, run: () => openDeckCompare() });
-    items.push({ label: "Deskmat aus diesem Deck", hint: d.name, run: () => $("#deskmat-from-deck").click() });
     items.push({ label: "Partie festhalten", hint: d.name, run: () => { selectTab("partien"); $("#game-form input[name=result]").focus(); } });
   }
   for (const d of deckIndex) items.push({ label: d.name, hint: `Deck · ${d.commanders.join(" + ")} · ${d.level || ""}`, run: () => go(`#/deck/${enc(d.slug)}`) });
