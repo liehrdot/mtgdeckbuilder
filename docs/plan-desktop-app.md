@@ -158,7 +158,11 @@ desktop/                      Tauri-2-Projekt (Rust-Hülle, rund 450 Zeilen)
 - **Selbsttest:** `--selftest` startet das Backend, liest `/api/health` und beendet sich mit Exit-Code – so prüft
   der Workflow die gebaute Exe auf einem frischen Windows-Runner.
 - **Updates:** GitHub Actions baut bei einem Tag `v*` den NSIS-Installer, signiert die Updater-Artefakte und schreibt
-  `latest.json` ins Release. Die App prüft beim Start und einmal täglich.
+  `latest.json` ins Release (`.github/workflows/release.yml`, `tauri-apps/tauri-action`). Die App prüft 45 s nach dem
+  Start und einmal täglich (`updates.rs`); der Zustand läuft über die Brücke in die Oberfläche (Hinweis einmal pro
+  gemeldeter Version, Einstellungen → Desktop-App mit „Update installieren“ und „Nach Updates suchen“). Installiert
+  wird mit dem NSIS-Updater im Modus `passive`, danach startet die App neu. Der Push-Workflow baut ohne
+  Updater-Artefakte (`tauri.nosign.conf.json`), weil nur der Release-Workflow den Signierschlüssel hat.
 - **Fenster:** Plugin `window-state` merkt Größe und Position. Systemtitelleiste (einfach, Snap-Layouts frei Haus),
   Mica-Hintergrund, Design folgt dem System.
 - **Kürzel:** in der Oberfläche: Strg+K Palette, Strg+N neues Deck, Strg+F Kartensuche im Deck, Strg+, Einstellungen,
@@ -174,7 +178,7 @@ desktop/                      Tauri-2-Projekt (Rust-Hülle, rund 450 Zeilen)
 | **5b – Backend als Programm** ✅ | `mtg-gui --data … --port 0 --token auto` (Launcher `mtgdeck.launch`, Datenordner `paths.home()`, Token-Schutz, `/api/health`, `mcp`-Modus), PyInstaller-Ordner-Build (`desktop/sidecar/backend.spec`), Workflow „Desktop“ baut und prüft die Windows-Exe | `mtgdeck-backend.exe` startet ohne Python |
 | **5c – Tauri-Hülle** ✅ | Fenster, Sidecar-Aufsicht mit Neustart und Protokoll, Single Instance, Fensterzustand, Tray, Autostart-Option, Hinweis beim Schließen, `--selftest`; der Workflow baut Backend und Hülle, prüft beide und lädt den NSIS-Installer hoch | Installer aus GitHub Actions läuft auf einem frischen Windows |
 | **5d – Desktop-Feinschliff** ✅ | Anmelden bei Claude aus der App (Terminal), Tastenkürzel (Strg+K/N/J/,/S, `?` Übersicht), Tray-Tooltip mit Zustand, Benachrichtigungen bei verstecktem Fenster, Einstellungen „Desktop-App“ (Autostart, Benachrichtigungen, Ordner, Protokoll) | die zehn Regeln oben erfüllt |
-| **5e – Updates** | Signaturschlüssel, `latest.json`, Release-Workflow bei Tag, Update-Hinweis in der App | ein Update von v0.1 auf v0.2 läuft durch |
+| **5e – Updates** ✅ | Signaturschlüssel (öffentlicher Teil in `tauri.conf.json`), `latest.json`, Release-Workflow bei Tag mit Versionsprüfung, `scripts/bump_version.py`, Update-Prüfung und -Installation aus der App | ein Update von v0.1 auf v0.2 läuft durch – steht noch aus: braucht die Secrets im Repository und zwei Tags |
 
 **Stand 5b.** Gemessen am Linux-Build (Ordner, 302 MB, davon 230 MB die Claude-CLI des Agent-SDK): die Adresse
 steht nach 0,98 s auf stdout, `/api/health` antwortet nach 1,05 s. Ohne Token antwortet die Oberfläche mit 401, der
@@ -194,6 +198,21 @@ Selbsttest meldet `ok`, `frozen`, `skills`, `claude_cli`.
 und Befehle gehen über die lokale API. Anmelden läuft über `claude auth login` im Terminal der App, der Zustand kommt
 von `claude auth status --json`. Der KI-Status in den Einstellungen war seit dem Aufräumen (5a) leer geblieben
 (verwaister Aufruf nach dem entfernten Fragen-Panel) – beim Prüfen im Browser gefunden und behoben.
+
+**Stand 5e.** Alles für Releases ist im Repository; was fehlt, kann nur der Besitzer tun: die beiden Secrets anlegen
+und den ersten Tag setzen (siehe „Veröffentlichen“). Der eigentliche Nachweis „v0.1.0 installiert, v0.1.1 kommt von
+selbst“ ist damit der nächste Schritt auf einem echten Windows.
+
+## Veröffentlichen
+
+1. Einmalig: im Repository unter Settings → Secrets and variables → Actions die Secrets `TAURI_SIGNING_PRIVATE_KEY`
+   (Inhalt der Datei `mtgdeck-updater.key`, eine Zeile) und `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (leer, der Schlüssel
+   hat kein Passwort) anlegen. Den privaten Schlüssel sicher aufbewahren: ohne ihn lassen sich keine Updates mehr
+   signieren, und installierte Apps nehmen nur Pakete an, die zum öffentlichen Schlüssel in `tauri.conf.json` passen.
+2. Pro Version: `uv run python scripts/bump_version.py 0.2.0`, committen, `git tag v0.2.0`, `git push && git push --tags`.
+3. Der Workflow „Release“ läuft etwa 12 Minuten und legt das Release mit `MTG Deckbuilder_0.2.0_x64-setup.exe`,
+   `.sig` und `latest.json` an. Installierte Apps melden die Version beim nächsten Start oder spätestens am nächsten
+   Tag; Einstellungen → Desktop-App → „Nach Updates suchen“ geht sofort.
 
 ## Bewusst nicht
 

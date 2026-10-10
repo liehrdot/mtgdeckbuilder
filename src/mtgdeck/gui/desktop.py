@@ -1,7 +1,7 @@
 """The bridge between the backend and the desktop shell (Tauri, ``desktop/src-tauri``).
 
 The shell polls ``POST /api/desktop/poll`` every few seconds with what it knows (its version, whether the window is
-visible, whether autostart is on) and gets back the tray tooltip, new notices (it shows them as system
+visible, whether autostart is on, the update state) and gets back the tray tooltip, new notices (it shows them as system
 notifications while the window is hidden) and the commands the web app queued for it (autostart on/off, open the
 data folder or the log). Everything lives in memory. When no shell polls (the app runs in a browser),
 ``present()`` is False, ``shell()`` is None and ``notify()`` does nothing.
@@ -43,13 +43,13 @@ def shell() -> dict[str, Any] | None:
     if not present():
         return None
     with _lock:
-        return {k: _shell.get(k) for k in ("version", "autostart", "visible", "seen")}
+        return {k: _shell.get(k) for k in ("version", "autostart", "visible", "update", "seen")}
 
 
 def poll(info: dict[str, Any], since: int) -> dict[str, Any]:
     """The shell reports its state and fetches the notices newer than ``since`` plus the queued commands (once)."""
     with _lock:
-        _shell.update({k: info[k] for k in ("version", "autostart", "visible") if k in info}, seen=time.time())
+        _shell.update({k: info[k] for k in ("version", "autostart", "visible", "update") if k in info}, seen=time.time())
         notices = [n for n in _notices if n["id"] > since]
         commands, _commands[:] = list(_commands), []
         last = _notices[-1]["id"] if _notices else since

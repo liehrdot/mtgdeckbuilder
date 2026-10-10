@@ -1015,10 +1015,11 @@ class DesktopPoll(BaseModel):
     visible: bool = True
     autostart: bool | None = None
     version: str | None = None
+    update: dict[str, Any] | None = None  # the shell's update state: state, current, version, notes, progress, error
 
 
 class DesktopCommand(BaseModel):
-    type: Literal["autostart", "open_data", "open_log"]
+    type: Literal["autostart", "open_data", "open_log", "check_update", "install_update"]
     value: bool | None = None
 
 

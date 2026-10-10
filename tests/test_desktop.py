@@ -113,6 +113,11 @@ def test_shell_poll_reports_state_and_fetches_notices_and_commands_once():
     r = client.post("/api/desktop/poll", json={"since": r["since"]}).json()
     assert r["notices"] == [] and r["commands"] == []
     assert client.post("/api/desktop/command", json={"type": "reboot"}).status_code == 422
+    # the update state travels with the poll and reaches the web app; the install command is queued like any other
+    client.post("/api/desktop/poll", json={"update": {"state": "available", "current": "0.1.0", "version": "0.2.0"}})
+    assert client.get("/api/desktop").json()["shell"]["update"]["version"] == "0.2.0"
+    client.post("/api/desktop/command", json={"type": "install_update"})
+    assert client.post("/api/desktop/poll", json={}).json()["commands"] == [{"type": "install_update"}]
 
 
 def test_notices_follow_the_setting_and_the_tooltip_shows_the_state(monkeypatch):

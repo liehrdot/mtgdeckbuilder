@@ -279,9 +279,10 @@ ein Befehl auf dem Server.
 
 ## Desktop-App (Windows)
 
-Dieselbe Oberfläche als eigenes Programm – ohne Python, uv oder Claude Code installieren zu müssen. Der Installer
-(`MTG Deckbuilder_<Version>_x64-setup.exe`, pro Benutzer, ohne Adminrechte) kommt aus dem Workflow „Desktop“
-(GitHub Actions → Artefakt `mtgdeck-desktop-windows-setup`); Veröffentlichungen mit automatischen Updates folgen.
+Dieselbe Oberfläche als eigenes Programm – ohne Python, uv oder Claude Code installieren zu müssen. Fertige Versionen
+liegen unter [Releases](https://github.com/liehrdot/mtgdeckbuilder/releases) (`MTG Deckbuilder_<Version>_x64-setup.exe`,
+pro Benutzer, ohne Adminrechte); jeder Push baut außerdem einen Test-Installer als Artefakt `mtgdeck-desktop-windows-setup`
+des Workflows „Desktop“.
 
 - **Aufbau:** Eine kleine Tauri-2-Hülle (Rust, WebView2) startet das mitgelieferte Backend (`mtgdeck-backend.exe`,
   ein PyInstaller-Ordner mit der Claude-CLI des Agent-SDK, den Skills und den statischen Dateien) auf einem freien
@@ -299,10 +300,18 @@ Dieselbe Oberfläche als eigenes Programm – ohne Python, uv oder Claude Code i
 - **Claude:** Die CLI steckt im Paket. Einstellungen → KI-Funktionen zeigt, ob sie angemeldet ist; **„Bei Claude
   anmelden“** startet die Anmeldung im Terminal der App (der Browser öffnet sich zum Bestätigen). Eine bestehende
   Anmeldung von Claude Code auf demselben Rechner (`%USERPROFILE%\.claude`) gilt auch.
+- **Updates:** Die App prüft kurz nach dem Start und einmal täglich die Releases. Eine neue Version meldet sie mit
+  einem Hinweis; Einstellungen → Desktop-App zeigt sie und installiert sie auf Knopfdruck (der Installer läuft im
+  Hintergrund durch, die App startet neu). Updates sind signiert – der öffentliche Schlüssel steckt in
+  `desktop/src-tauri/tauri.conf.json`, nur damit signierte Pakete werden angenommen.
 - **Entwicklung:** `uv run pyinstaller desktop/sidecar/backend.spec` baut das Backend nach `dist/mtgdeck-backend/`;
   `cd desktop && npx @tauri-apps/cli@^2 dev` startet die Hülle damit (oder mit `MTGDECK_BACKEND=<Pfad zur Exe>`).
   `cargo check --target x86_64-pc-windows-msvc` prüft den Rust-Teil auch unter Linux. Die fertige Exe kennt
   `--selftest` (startet das Backend, liest `/api/health`, Exit-Code 0 = in Ordnung) und `--hidden` (nur in den Tray).
+- **Veröffentlichen:** `uv run python scripts/bump_version.py 0.2.0`, committen, `git tag v0.2.0 && git push --tags`.
+  Der Workflow „Release“ prüft, dass die Version überall gleich ist, baut Backend und Hülle, signiert die
+  Update-Pakete (Secrets `TAURI_SIGNING_PRIVATE_KEY` und `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` im Repository) und legt
+  das GitHub-Release mit Installer, Signatur und `latest.json` an.
 
 ## Web-GUI
 

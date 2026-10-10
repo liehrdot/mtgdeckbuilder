@@ -12,11 +12,12 @@ use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_notification::NotificationExt;
 
 use crate::backend::{self, Backend};
+use crate::updates::{self, Updates};
 
 const FIRST_AFTER: Duration = Duration::from_secs(3);
 const EVERY: Duration = Duration::from_secs(10);
 
-pub fn start(app: AppHandle, backend: Backend, autostart_item: CheckMenuItem<Wry>) {
+pub fn start(app: AppHandle, backend: Backend, autostart_item: CheckMenuItem<Wry>, updates: Updates) {
     thread::spawn(move || {
         let mut since: u64 = 0;
         let mut wait = FIRST_AFTER;
@@ -31,6 +32,7 @@ pub fn start(app: AppHandle, backend: Backend, autostart_item: CheckMenuItem<Wry
             let body = serde_json::json!({
                 "since": since, "visible": visible, "autostart": autostart,
                 "version": app.package_info().version.to_string(),
+                "update": serde_json::to_value(updates::snapshot(&updates)).unwrap_or(serde_json::Value::Null),
             })
             .to_string();
             let Ok(text) = backend::http_request(&url, "POST", "/api/desktop/poll", token.as_deref(), Some(&body)) else { continue };
@@ -64,6 +66,8 @@ pub fn start(app: AppHandle, backend: Backend, autostart_item: CheckMenuItem<Wry
                             crate::open_folder(folder);
                         }
                     }
+                    "check_update" => updates::check(app.clone(), updates.clone()),
+                    "install_update" => updates::install(app.clone(), updates.clone()),
                     _ => {}
                 }
             }

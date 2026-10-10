@@ -4752,15 +4752,61 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- desktop app (Tauri shell): the panel appears only while the shell polls the backend ----------
+let desktopShell = null, desktopAnnounced = null, desktopTimer = null;
 async function refreshDesktop() {
   let d;
   try { d = await api("/api/desktop"); } catch { return; }
+  desktopShell = d.shell;
   $("#desktop-panel").hidden = !d.shell;
   if (!d.shell) return;
   $("#desktop-version").textContent = d.shell.version || "–";
   $("#desktop-autostart").checked = !!d.shell.autostart;
   $("#desktop-notify").checked = !!d.notify;
+  renderDesktopUpdate(d.shell.update);
+  const u = d.shell.update;
+  if (u?.state === "available" && desktopAnnounced !== u.version) {  // once per announced version
+    desktopAnnounced = u.version;
+    toast(`Version ${u.version} der Desktop-App ist da.`, "info", 9000, { label: "Ansehen", run: () => go("#/settings") });
+  }
+  const busy = u && (u.state === "downloading" || u.state === "installing");
+  clearTimeout(desktopTimer);
+  desktopTimer = setTimeout(refreshDesktop, busy ? 2000 : 5 * 60 * 1000);
 }
+function renderDesktopUpdate(u) {
+  const el = $("#desktop-update");
+  $("#desktop-install").hidden = u?.state !== "available";
+  $("#desktop-check").disabled = !!u && (u.state === "downloading" || u.state === "installing");
+  if (!u) { el.textContent = ""; return; }
+  const at = u.checked ? ` (geprüft ${new Date(u.checked * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })})` : "";
+  const first = (u.notes || "").split("\n").find((l) => l.trim()) || "";
+  const text = {
+    unknown: "Noch nicht nach Updates gesucht.",
+    none: `Auf dem neuesten Stand${at}.`,
+    available: `Version ${u.version} ist da${first ? ` – ${first.slice(0, 140).replace(/[.!]$/, "")}` : ""}.`,
+    downloading: `Lädt Version ${u.version} … ${u.progress ?? 0} %`,
+    installing: "Installiert – die App startet gleich neu.",
+    error: `Update-Prüfung fehlgeschlagen: ${u.error || "unbekannter Fehler"}`,
+    unconfigured: "Updates sind in diesem Build nicht eingerichtet.",
+  }[u.state] || "";
+  el.textContent = text;
+  el.className = `small ${u.state === "error" ? "warn" : u.state === "available" ? "ok" : "muted"}`;
+}
+$("#desktop-check").addEventListener("click", async () => {
+  try {
+    await api("/api/desktop/command", { method: "POST", body: { type: "check_update" } });
+    $("#desktop-update").textContent = "Suche nach Updates …";
+    clearTimeout(desktopTimer);
+    desktopTimer = setTimeout(refreshDesktop, 15000);
+  } catch (err) { fail(err); }
+});
+$("#desktop-install").addEventListener("click", async () => {
+  try {
+    await api("/api/desktop/command", { method: "POST", body: { type: "install_update" } });
+    toast("Das Update wird geladen – danach startet die App neu.", "info", 8000);
+    clearTimeout(desktopTimer);
+    desktopTimer = setTimeout(refreshDesktop, 3000);
+  } catch (err) { fail(err); }
+});
 $("#desktop-autostart").addEventListener("change", async (e) => {
   try {
     await api("/api/desktop/command", { method: "POST", body: { type: "autostart", value: e.target.checked } });
@@ -4790,3 +4836,4 @@ refreshBlacklist();
 loadSettings().catch((err) => console.error(err));
 Promise.all([initBrackets(), refreshDeckList(), refreshCollectionSummary(), refreshTableRules(), refreshOpponents(), refreshAi(true)]).then(route, (err) => { fail(err); route(); });
 refreshSync({ quiet: true });
+setTimeout(refreshDesktop, 20000);  // the desktop shell polls the backend a few seconds after the start

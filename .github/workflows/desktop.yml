@@ -56,7 +56,7 @@ jobs:
           node-version: 22
       - name: Build desktop app
         working-directory: desktop
-        run: npx --yes @tauri-apps/cli@^2 build
+        run: npx --yes @tauri-apps/cli@^2 build --config tauri.nosign.conf.json  # no updater artifacts: the signing key lives only in the release workflow
       - name: Self-test desktop app
         shell: pwsh
         run: |

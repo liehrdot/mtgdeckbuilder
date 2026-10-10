@@ -1,0 +1,74 @@
+# A release of the Windows desktop app: on a tag v<version> (set with scripts/bump_version.py), build the backend,
+# smoke-test it, build the Tauri shell with the NSIS installer plus the signed updater artifacts, and publish a
+# GitHub Release with the installer, its signature and latest.json – which installed apps read to update themselves.
+# Secrets: TAURI_SIGNING_PRIVATE_KEY (the key whose public part is in desktop/src-tauri/tauri.conf.json),
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD (empty if the key has none).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versions must match the tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $conf = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path desktop/src-tauri/Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          $py = (Select-String -Path pyproject.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          $gui = (Select-String -Path src/mtgdeck/gui/app.py -Pattern '^VERSION = "(.*)"').Matches[0].Groups[1].Value
+          $all = @($conf, $cargo, $py, $gui)
+          if ($all -ne $tag) { throw "tag $tag, but tauri.conf.json $conf, Cargo.toml $cargo, pyproject.toml $py, gui/app.py $gui - run scripts/bump_version.py $tag first" }
+          Write-Host "version $tag"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --all-extras
+      - name: Build backend
+        run: uv run pyinstaller --noconfirm --clean desktop/sidecar/backend.spec
+      - name: Smoke test backend
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "mtgdata"
+          $p = Start-Process -FilePath "dist/mtgdeck-backend/mtgdeck-backend.exe" -ArgumentList "--data", $data, "--port", "0", "--token", "auto" -RedirectStandardOutput out.txt -RedirectStandardError err.txt -PassThru -NoNewWindow
+          $url = $null
+          for ($i = 0; $i -lt 120 -and -not $url; $i++) {
+            Start-Sleep -Milliseconds 500
+            if (Test-Path out.txt) { $m = Select-String -Path out.txt -Pattern '^MTGDECK_URL=(.*)$' | Select-Object -First 1; if ($m) { $url = $m.Matches[0].Groups[1].Value } }
+          }
+          Get-Content out.txt, err.txt -ErrorAction SilentlyContinue
+          if (-not $url) { throw "backend printed no MTGDECK_URL" }
+          $health = Invoke-RestMethod "$($url.Split('?')[0])api/health"
+          Stop-Process -Id $p.Id -Force
+          if (-not $health.ok -or -not $health.frozen -or -not $health.skills -or -not $health.claude_cli) { throw "health: $($health | ConvertTo-Json)" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "MTG Deckbuilder ${{ github.ref_name }}"
+          releaseBody: "Windows-Installer (pro Benutzer, ohne Adminrechte). Eine installierte App holt sich diese Version von selbst: Einstellungen → Desktop-App."
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true

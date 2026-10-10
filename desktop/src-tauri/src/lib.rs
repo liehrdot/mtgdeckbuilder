@@ -5,11 +5,13 @@
 
 mod backend;
 mod bridge;
+mod updates;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use backend::Backend;
+use updates::Updates;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
@@ -131,20 +133,24 @@ pub fn run() {
     let hidden = args.iter().any(|a| a == "--hidden");
     let is_selftest = args.iter().any(|a| a == "--selftest");
     let backend = Backend::default();
+    let updates = Updates::default();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_window_state::Builder::default().with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED).build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(backend.clone())
+        .manage(updates.clone())
         .invoke_handler(tauri::generate_handler![backend_status, restart_backend, open_log])
         .setup(move |app| {
             let handle = app.handle().clone();
             let autostart_item = build_tray(&handle)?;
             backend::start(handle.clone(), backend.clone());
             if !is_selftest {
-                bridge::start(handle.clone(), backend.clone(), autostart_item);
+                bridge::start(handle.clone(), backend.clone(), autostart_item, updates.clone());
+                updates::start(handle.clone(), updates.clone());
             }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.restore_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED);
