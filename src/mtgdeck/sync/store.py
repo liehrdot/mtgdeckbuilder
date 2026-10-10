@@ -14,6 +14,7 @@ import base64
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,51 @@ class SyncStore:
         if with_data:
             doc["data"] = None if row["deleted"] else bytes(row["data"])
         return doc
+
+    def _meta(self, key: str, *, renew: bool = False) -> str:
+        with self._lock, self._db() as db:
+            row = db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            if row and not renew:
+                return row["value"]
+            value = uuid.uuid4().hex[:16]
+            db.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                       (key, value))  # fmt: skip
+        return value
+
+    def server_id(self) -> str:
+        """A random id of this store, so a device notices when it talks to a different server."""
+        return self._meta("server_id")
+
+    def epoch(self) -> str:
+        """Changes when the store is restored from a backup: devices then merge everything afresh (their cursor
+        and bases refer to a history the server no longer has)."""
+        return self._meta("epoch")
+
+    def restore_from(self, backup: Path) -> Path:
+        """Replace the store with a backup (keeping the current state as ``vor-wiederherstellung-….sqlite`` next
+        to the backups) and start a new epoch. Devices stay paired as they were at the time of the backup."""
+        backup = Path(backup)
+        SyncStore(backup).seq()  # a readable sync store, or sqlite3 raises
+        safety = self.backup(self.path.parent / "backups" / f"vor-wiederherstellung-{time.strftime('%Y%m%d-%H%M%S')}.sqlite")
+        tmp = self.path.with_name(self.path.name + ".restore")
+        SyncStore(backup).backup(tmp)
+        SyncStore(tmp)._meta("epoch", renew=True)
+        tmp.replace(self.path)
+        return safety
+
+    def backup(self, dest: Path) -> Path:
+        """A consistent copy of the whole store (SQLite online backup), also while devices sync."""
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        src, dst = self._db(), sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        tmp.replace(dest)
+        return dest
 
     def seq(self) -> int:
         with self._db() as db:

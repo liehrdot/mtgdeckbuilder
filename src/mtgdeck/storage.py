@@ -37,7 +37,7 @@ _CONTENT_KEYS = ("name", "commanders", "cards", "bracket", "power_profile", "pro
                  "description", "strategy", "notes", "table_rule")  # fmt: skip
 # Written on every save; everything else that is not content (guide, upgrade_plan, built_against, precon,
 # copied_from, last_job …) is carried over when a caller saves a deck dict built from scratch.
-_PER_SAVE_KEYS = {"slug", "history", "version", "created", "updated", "validation", "change_note"}
+_PER_SAVE_KEYS = {"slug", "history", "version", "created", "updated", "validation", "change_note", "needs_revalidation"}
 TRASH_DIRNAME = ".trash"
 
 
@@ -394,6 +394,7 @@ def list_decks() -> list[dict[str, Any]]:
                 "valid": (d.get("validation") or {}).get("legal"),
                 "table_rule": d.get("table_rule"),
                 "last_job": d.get("last_job"),
+                "needs_revalidation": bool(d.get("needs_revalidation")),  # merged by the sync, check pending
             }
         )
     return out

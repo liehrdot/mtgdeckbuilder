@@ -287,8 +287,10 @@ def offline(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(proxy, "PROXIES_DIR", tmp_path / "proxies")
     monkeypatch.setattr(deskmat, "DESKMAT_DIR", tmp_path / "deskmats")
-    for env in ("MTG_AUTOFILL_PATH", "MTG_MPCFILL_SERVER", "MTG_CARDBACK"):
+    for env in ("MTG_AUTOFILL_PATH", "MTG_MPCFILL_SERVER", "MTG_CARDBACK", "MTG_SYNC_PUBLIC_URL"):
         monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("MTG_SYNC_DIR", str(tmp_path / ".sync"))  # sync state of "this device"
+    monkeypatch.setenv("MTG_SYNC_DATA", str(tmp_path / "sync-server"))  # data of a sync server started in a test
     http._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), headers={"User-Agent": http.USER_AGENT})
     yield
     http._client = None

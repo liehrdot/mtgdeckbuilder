@@ -233,4 +233,7 @@ def restore(name: str) -> dict[str, Any]:
             dest.mkdir(parents=True, exist_ok=True)
             for f in d.iterdir():
                 shutil.copy2(f, dest / f.name)
+    from .sync import service as sync_service
+
+    sync_service.reset()  # synced devices: the restored data is merged with theirs, nothing is deleted elsewhere
     return {"restored": name, "safety_backup": safety["name"], "decks": len(storage.list_decks())}

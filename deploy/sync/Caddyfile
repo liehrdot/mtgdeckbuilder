@@ -1,0 +1,11 @@
+# HTTPS für den Sync-Server; das Zertifikat holt und verlängert Caddy selbst (Let's Encrypt).
+{$SYNC_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy sync:8080
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

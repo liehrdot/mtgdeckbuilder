@@ -1,0 +1,6 @@
+# only pyproject.toml, README.md and src/ go into the sync server image
+*
+!pyproject.toml
+!README.md
+!src/
+src/**/__pycache__

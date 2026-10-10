@@ -17,6 +17,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ from ..deck import DeckEntry, to_text
 from ..fmt import money as fmt_money
 from ..http import HttpError
 from ..power import TIER_LABELS, PowerProfile, target_value
+from ..sync import service as sync_service
+from ..sync.remote import RemoteError
 from . import terminal
 
 log = logging.getLogger(__name__)
@@ -42,7 +45,18 @@ log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 PROJECT_ROOT = storage.PROJECT_ROOT
 
-app = FastAPI(title="MTG Commander Deckbuilder")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    task = asyncio.create_task(_sync_loop()) if os.environ.get("MTG_SYNC_AUTO", "1") != "0" else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+
+
+app = FastAPI(title="MTG Commander Deckbuilder", lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -68,13 +82,23 @@ async def _guard(request: Request, call_next: Any) -> Any:
         origin = request.headers.get("origin")
         if origin and request.method not in _SAFE_METHODS and (urlsplit(origin).hostname or "") not in _LOCAL_HOSTS:
             return JSONResponse({"detail": "Anfrage von einer fremden Seite abgelehnt"}, status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    path = request.url.path
+    if request.method not in _SAFE_METHODS and path.startswith("/api/") and not path.startswith("/api/sync") and response.status_code < 400:
+        _mark_dirty()
+    return response
 
 
 @app.exception_handler(StoreError)
 async def _store_error(_request: Request, exc: StoreError) -> JSONResponse:
     """Damaged/locked data files and edit conflicts: a clear message instead of a bare 500."""
     return JSONResponse({"detail": str(exc)}, status_code=409 if isinstance(exc, ConflictError) else 503)
+
+
+@app.exception_handler(RemoteError)
+async def _remote_error(_request: Request, exc: RemoteError) -> JSONResponse:
+    """The own sync server: a wrong code is the user's input, anything else the server/connection."""
+    return JSONResponse({"detail": str(exc)}, status_code=400 if exc.status in (400, 403, 429) else 502)
 
 
 @app.exception_handler(HttpError)
@@ -123,6 +147,7 @@ class Job:
         self.done = True
         self.ended = time.time()
         self.changed.set()
+        _mark_dirty()  # a job may have saved something (via its own MCP server): sync soon
 
 
 JOBS: dict[str, Job] = {}
@@ -2555,6 +2580,8 @@ async def api_backup_upload(request: Request) -> dict[str, Any]:
 async def api_backup_restore(name: str) -> dict[str, Any]:
     if any(not j.done for j in JOBS.values()):
         raise HTTPException(409, "Es läuft gerade ein Auftrag – warte, bis er fertig ist, und stell dann wieder her.")
+    if _sync_state["running"]:
+        raise HTTPException(409, "Gerade läuft der Abgleich mit dem Sync-Server – bitte gleich noch einmal versuchen.")
     try:
         return _not_found(backup.restore, name)
     except ValueError as exc:
@@ -2639,6 +2666,7 @@ class SettingsUpdate(BaseModel):
     descreen: str | None = None
     image_generator_url: str | None = None
     ai_enabled: bool | None = None
+    sync_interval: int | None = Field(default=None, ge=0, le=240)
 
 
 def _settings_view(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -2980,6 +3008,155 @@ async def api_carddb_refresh_state() -> dict[str, Any]:
         return {"running": True}
     exc = _db_task.exception()
     return {"running": False, "error": str(exc) if exc else None}
+
+
+# --- sync with the own sync server (sync/service.py) --------------------------------------------
+
+SYNC_TICK = 5  # seconds between two looks at whether a sync is due
+SYNC_DEBOUNCE = 15  # seconds of quiet after a local change before it is synced
+PRESENCE_EVERY = 60  # "this PC is running" for the other devices
+_sync_state: dict[str, Any] = {"dirty": 0.0, "running": False, "last_try": 0.0, "last_presence": 0.0, "online": None}
+_sync_lock: asyncio.Lock | None = None
+
+
+def _mark_dirty() -> None:
+    _sync_state["dirty"] = time.time()
+
+
+def _sync_interval() -> int:
+    try:
+        return max(0, int(settings_mod.load().get("sync_interval") or 0))
+    except (TypeError, ValueError):
+        return 5
+
+
+async def _sync_now(reason: str) -> dict[str, Any]:
+    """One sync at a time (a second caller waits and then syncs again); merged decks are checked afterwards."""
+    global _sync_lock
+    if _sync_lock is None:
+        _sync_lock = asyncio.Lock()
+    async with _sync_lock:
+        _sync_state["running"], _sync_state["last_try"] = True, time.time()
+        try:
+            entry = await asyncio.to_thread(sync_service.run, reason)
+        finally:
+            _sync_state["running"] = False
+    if entry.get("ok"):
+        _sync_state["online"] = True
+        if sync_service.pending_revalidation():
+            entry["revalidated"] = await sync_service.revalidate_pending()
+    return entry
+
+
+def _sync_due(now: float) -> str | None:
+    cfg = sync_service.config()
+    minutes = _sync_interval()
+    if not cfg or cfg.get("revoked") or not minutes:
+        return None
+    last = _sync_state["last_try"]
+    if not last:
+        return "start"
+    if _sync_state["dirty"] > last and now - _sync_state["dirty"] >= SYNC_DEBOUNCE:
+        return "änderung"
+    if now - last >= minutes * 60:
+        return "intervall"
+    return None
+
+
+async def _sync_loop() -> None:
+    """Background sync while the app runs: at the start, after local changes (debounced), every few minutes; plus a
+    presence report every minute (the phone shows whether this PC and Claude are ready)."""
+    while True:
+        await asyncio.sleep(SYNC_TICK)
+        try:
+            now = time.time()
+            reason = _sync_due(now)
+            if reason:
+                await _sync_now(reason)
+            cfg = sync_service.config()
+            if cfg and not cfg.get("revoked") and now - _sync_state["last_presence"] >= PRESENCE_EVERY:
+                _sync_state["last_presence"] = now
+                ai = ai_status()
+                info = {"app": "pc", "ai": {"ready": bool(ai["available"]), "reason": ai.get("reason")}}
+                _sync_state["online"] = await asyncio.to_thread(sync_service.presence, info)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # never let the loop die (a damaged file, a full disk …) – the status shows run errors
+            log.exception("Sync-Schleife")
+
+
+def _sync_view() -> dict[str, Any]:
+    return {**sync_service.status(), "running": _sync_state["running"], "online": _sync_state["online"],
+            "interval": _sync_interval(), "pending_revalidation": sync_service.pending_revalidation()}  # fmt: skip
+
+
+async def _sync_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class SyncConnect(BaseModel):
+    link: str = Field(default="", max_length=500)
+    url: str = Field(default="", max_length=300)
+    code: str = Field(default="", max_length=40)
+    name: str = Field(default="", max_length=60)
+
+
+@app.get("/api/sync")
+async def api_sync() -> dict[str, Any]:
+    return _sync_view()
+
+
+@app.post("/api/sync/connect")
+async def api_sync_connect(req: SyncConnect) -> dict[str, Any]:
+    await _sync_call(sync_service.connect, req.link, url=req.url, code=req.code, name=req.name)
+    _sync_state["last_presence"] = 0.0
+    run = await _sync_now("verbunden")
+    return {**_sync_view(), "run": run}
+
+
+@app.post("/api/sync/run")
+async def api_sync_run() -> dict[str, Any]:
+    if not sync_service.config():
+        raise HTTPException(400, "Dieses Gerät ist mit keinem Sync-Server verbunden.")
+    run = await _sync_now("knopf")
+    return {**_sync_view(), "run": run}
+
+
+@app.post("/api/sync/disconnect")
+async def api_sync_disconnect() -> dict[str, Any]:
+    await _sync_call(sync_service.disconnect)
+    _sync_state["online"] = None
+    return _sync_view()
+
+
+@app.get("/api/sync/devices")
+async def api_sync_devices() -> dict[str, Any]:
+    return {"devices": await _sync_call(sync_service.devices), "now": time.time()}
+
+
+@app.delete("/api/sync/devices/{device_id}")
+async def api_sync_revoke(device_id: str) -> dict[str, Any]:
+    got = await _sync_call(sync_service.revoke, device_id)
+    return {**got, **_sync_view()}
+
+
+@app.post("/api/sync/pair")
+async def api_sync_pair() -> dict[str, Any]:
+    return await _sync_call(sync_service.pair_code)
+
+
+@app.get("/api/sync/conflicts")
+async def api_sync_conflicts() -> list[dict[str, Any]]:
+    return sync_service.conflicts()
+
+
+@app.delete("/api/sync/conflicts")
+async def api_sync_conflicts_clear() -> dict[str, bool]:
+    sync_service.clear_conflicts()
+    return {"ok": True}
 
 
 def main() -> None:

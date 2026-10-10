@@ -193,3 +193,35 @@ def delete_local(roots: Roots, path: str, kind: str) -> None:
 def guarded(roots: Roots, path: str):
     """The lock the app itself uses for this file – the sync never writes without it."""
     return locked(roots.physical(path))
+
+
+def describe(path: str, names: dict[str, str] | None = None) -> str:
+    """A German label for a logical path (``names``: deck slug -> deck name)."""
+    names = names or {}
+
+    def deck(s: str) -> str:
+        return f"„{names.get(s, s)}“"
+
+    fixed = {"collection.json": "Sammlung", "tablerules.json": "Tischregeln", "blacklist.txt": "Blacklist",
+             "decks/.opponents.json": "Gegnerdecks", "decks/.meta-suggestions.json": "Vorschläge gegen deine Runde"}  # fmt: skip
+    if path in fixed:
+        return fixed[path]
+    if m := SNAPSHOT_RE.fullmatch(path):
+        return f"Version {int(m.group(2))} von {deck(m.group(1))}"
+    if m := DECK_RE.fullmatch(path):
+        return f"Deck {deck(m.group(1))}"
+    parts = path.split("/")
+    if parts[:2] == ["decks", ".games"]:
+        return f"Partien mit {deck(parts[2].removesuffix('.json'))}"
+    if parts[:2] == ["decks", ".questions"]:
+        return f"Fragen zu {deck(parts[2].removesuffix('.json'))}"
+    if parts[:2] == ["decks", ".chats"]:
+        return "Gespräch mit Claude"
+    if parts[:2] == ["proxies", ".orders"]:
+        return "Sammelbestellung"
+    if parts[0] == "proxies" and len(parts) > 2:
+        what = {"selection.json": "Druck-Bildauswahl", "tokens.json": "Token-Anzahlen"}.get(parts[2], "Eigene Bilder")
+        return f"{what} von {deck(parts[1])}"
+    if parts[0] == "deskmats":
+        return "Deskmat-Projekt"
+    return path

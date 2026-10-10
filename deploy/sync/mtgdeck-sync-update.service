@@ -1,0 +1,8 @@
+[Unit]
+Description=MTG-Deckbuilder Sync: neue Images holen
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mtgdeck-sync/update.sh

@@ -74,7 +74,7 @@
       <a href="#/deskmat" data-nav="deskmat"><svg class="icon"><use href="#i-image"/></svg>Deskmat-Studio</a>
       <p class="nav-group">Hilfe</p>
       <a href="#/glossary" data-nav="glossary"><svg class="icon"><use href="#i-book"/></svg>Glossar</a>
-      <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen</a>
+      <a href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Einstellungen <span id="sync-dot" class="sync-dot" hidden></span></a>
     </nav>
   </aside>
   <div class="scrim" id="scrim" hidden></div>
@@ -1447,7 +1447,7 @@
       <header class="page-head">
         <div>
           <h1>Einstellungen</h1>
-          <p class="lead">KI-Funktionen, Datensicherung, Papierkorb, Kartendatenbank und Proxy-Druck.</p>
+          <p class="lead">KI-Funktionen, Sync zwischen Geräten, Datensicherung, Papierkorb, Kartendatenbank und Proxy-Druck.</p>
         </div>
       </header>
 
@@ -1458,6 +1458,73 @@
           Tischregeln, Testhand – funktioniert auch ohne.</p>
         <label class="check"><input type="checkbox" id="ai-enabled"> KI-Funktionen nutzen</label>
         <p id="ai-status" class="small"></p>
+      </section>
+
+      <section class="panel" id="sync-panel">
+        <h2>Sync zwischen Geräten</h2>
+        <p class="muted small">Gleicht Decks samt Versionen, Partien, Fragen, Gegnerdecks, Sammlung, Tischregeln, Blacklist, Sammelbestellungen
+          und Druckauswahl über deinen eigenen Sync-Server ab. Jedes Gerät behält alle Daten – ohne Netz arbeitest du einfach weiter.</p>
+        <div id="sync-off">
+          <p id="sync-revoked" class="hint-box" hidden>Dieses Gerät wurde am Server abgemeldet. Mit einem neuen Kopplungscode verbindest du es wieder –
+            deine Daten hier bleiben erhalten.</p>
+          <p class="small">Den Server richtest du einmal ein (<a href="https://github.com/liehrdot/mtgdeckbuilder/blob/HEAD/docs/sync-server-hetzner.md"
+            target="_blank" rel="noopener">Anleitung für Hetzner</a>). Den Kopplungslink zeigt der Server nach der Einrichtung an,
+            später auch jedes schon verbundene Gerät („Weiteres Gerät koppeln“).</p>
+          <form id="sync-connect" autocomplete="off">
+            <label class="field">Kopplungslink oder Code
+              <input name="link" required placeholder="https://sync.deine-domain.de/koppeln#ABCD-EFGH"></label>
+            <label class="field" id="sync-url-row" hidden>Adresse des Sync-Servers
+              <input name="url" placeholder="sync.deine-domain.de"></label>
+            <label class="field">Name dieses Geräts
+              <input name="name" maxlength="60"></label>
+            <div class="btn-row"><button type="submit" class="btn" id="sync-connect-btn">Verbinden</button></div>
+          </form>
+        </div>
+        <div id="sync-on" hidden>
+          <p id="sync-line" class="sync-line"></p>
+          <p id="sync-result" class="small" role="status"></p>
+          <div class="btn-row">
+            <button type="button" class="btn" id="sync-run"><svg class="icon"><use href="#i-check"/></svg>Jetzt abgleichen</button>
+            <button type="button" class="btn" id="sync-pair">Weiteres Gerät koppeln</button>
+            <label class="field inline sync-auto">Automatisch
+              <select id="sync-interval">
+                <option value="1">jede Minute</option>
+                <option value="5">alle 5 Minuten</option>
+                <option value="15">alle 15 Minuten</option>
+                <option value="60">stündlich</option>
+                <option value="0">nur per Knopf</option>
+              </select></label>
+          </div>
+          <div id="sync-pairing" class="sync-pairing" hidden>
+            <div id="sync-qr" class="sync-qr" aria-hidden="true"></div>
+            <div>
+              <p class="small">Mit dem Handy scannen oder den Link auf dem anderen Gerät unter <b>Einstellungen → Sync</b> einfügen.</p>
+              <p class="sync-code" id="sync-code"></p>
+              <p class="small muted" id="sync-code-hint"></p>
+              <div class="btn-row">
+                <button type="button" class="btn small" id="sync-copy">Link kopieren</button>
+                <button type="button" class="btn ghost small" id="sync-pair-close">Schließen</button>
+              </div>
+            </div>
+          </div>
+          <details class="more" id="sync-devices-box">
+            <summary>Geräte <span id="sync-device-count" class="count"></span></summary>
+            <ul id="sync-devices" class="backup-list"></ul>
+          </details>
+          <details class="more" id="sync-conflicts-box">
+            <summary>Konflikte <span id="sync-conflict-count" class="count"></span></summary>
+            <p class="muted small">Haben zwei Geräte dasselbe Feld unterschiedlich geändert, gilt die Fassung, die zuerst auf dem Server war.
+              Hier steht, was dabei nicht übernommen wurde.</p>
+            <ul id="sync-conflicts" class="backup-list"></ul>
+            <p id="sync-conflicts-none" class="empty-inline">Keine Konflikte.</p>
+            <button type="button" class="btn ghost small" id="sync-conflicts-clear" hidden>Liste leeren</button>
+          </details>
+          <details class="more">
+            <summary>Verbindung</summary>
+            <p id="sync-details" class="small muted"></p>
+            <button type="button" class="btn ghost small" id="sync-disconnect">Dieses Gerät trennen …</button>
+          </details>
+        </div>
       </section>
 
       <section class="panel" id="backup-panel">

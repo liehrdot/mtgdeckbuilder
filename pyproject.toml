@@ -18,6 +18,7 @@ gui = [
     # real terminal for the MPC Autofill tool (its menus need a console): ConPTY on Windows, pty elsewhere
     "pywinpty>=2; sys_platform == 'win32'",
     "ptyprocess>=0.7; sys_platform != 'win32'",
+    "segno>=1.6",  # QR code for pairing another device with the sync server
 ]
 dev = [
     "pytest>=8",
@@ -29,6 +30,7 @@ dev = [
 [project.scripts]
 mtg-mcp = "mtgdeck.mcp_server:main"
 mtg-gui = "mtgdeck.gui.app:main"
+mtg-sync-server = "mtgdeck.sync.server:main"
 
 [build-system]
 requires = ["hatchling"]

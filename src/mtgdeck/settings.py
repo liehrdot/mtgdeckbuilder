@@ -38,6 +38,8 @@ DEFAULTS: dict[str, Any] = {
     "image_generator_url": "",
     # AI features (Claude Code). Off = the app works without Claude: printing, collection, import, editing …
     "ai_enabled": True,
+    # Sync with the own sync server: minutes between automatic syncs (also at start and after changes); 0 = by button only
+    "sync_interval": 5,
 }
 _ENV = {
     "autofill_path": "MTG_AUTOFILL_PATH",

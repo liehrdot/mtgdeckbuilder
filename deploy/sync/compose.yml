@@ -1,0 +1,35 @@
+# MTG-Deckbuilder Sync-Server: "sync" (der Server) und "caddy" (HTTPS mit Let's-Encrypt-Zertifikat).
+# Einrichtung und Betrieb: docs/sync-server-hetzner.md · Domain steht in .env (SYNC_DOMAIN=sync.deine-domain.de)
+services:
+  sync:
+    image: ghcr.io/liehrdot/mtgdeck-sync:latest
+    restart: unless-stopped
+    environment:
+      MTG_SYNC_PUBLIC_URL: https://${SYNC_DOMAIN:?SYNC_DOMAIN fehlt in .env}
+    volumes:
+      - ./data:/data  # sync.sqlite + backups/ (täglich, 14 Tage)
+    logging:
+      driver: local
+      options: { max-size: 10m, max-file: "3" }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [sync]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SYNC_DOMAIN: ${SYNC_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: local
+      options: { max-size: 10m, max-file: "3" }
+
+volumes:
+  caddy_data:
+  caddy_config:

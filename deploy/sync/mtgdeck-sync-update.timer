@@ -1,0 +1,10 @@
+[Unit]
+Description=MTG-Deckbuilder Sync: nächtliche Updates
+
+[Timer]
+OnCalendar=*-*-* 04:15
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

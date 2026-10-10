@@ -222,6 +222,8 @@ werden überall mit beiden Seiten behandelt:
   GUI entsteht einmal am Tag automatisch eine Sicherung (die letzten 10 bleiben), gespeichert in `backups/`
   (`MTG_BACKUP_DIR`, gitignored). „Sicherung einspielen“ lädt eine ZIP hoch und stellt sie wieder her; vorher wird
   der aktuelle Stand automatisch gesichert, du kannst also zurück. Ein Lauf von Claude muss dafür beendet sein.
+  Ist der PC mit einem Sync-Server verbunden, wird der Stand der Sicherung mit dem der anderen Geräte zusammengeführt;
+  dort wird dabei nichts gelöscht.
 - **Papierkorb:** Gelöschte Decks landen samt Versionen, Fragen und Partien im Papierkorb (`decks/.trash/`).
   Direkt nach dem Löschen gibt es „Rückgängig“, später *Einstellungen → Papierkorb* (zurückholen oder endgültig löschen).
 - **Sicheres Speichern:** Alle Dateien werden atomar geschrieben (erst eine temporäre Datei, dann ausgetauscht) und
@@ -234,6 +236,27 @@ werden überall mit beiden Seiten behandelt:
   Precon-Herkunft.
 - **Schutz der lokalen Oberfläche:** Die GUI nimmt nur Anfragen an, die an diesen Rechner gerichtet sind, und lehnt
   ändernde Anfragen von fremden Webseiten ab. Mit `MTG_GUI_HOST=0.0.0.0` (im Netzwerk freigegeben) entfällt die Host-Prüfung.
+
+## Sync zwischen Geräten (eigener Server)
+
+PC, Laptop und später die Handy-App gleichen sich über einen **eigenen kleinen Sync-Server** ab, z. B. bei Hetzner
+für rund 6–7 € im Monat. Wie du ihn einrichtest, steht in der [Anleitung](docs/sync-server-hetzner.md); es ist
+ein Befehl auf dem Server.
+
+- **Lokal zuerst:** Jedes Gerät hat alle Daten und funktioniert ohne Netz. Der Server ist nur die Drehscheibe.
+- **Was abgeglichen wird:** Decks samt Versionen, Partien, Fragen, Chats, Gegnerdecks, Sammlung, Tischregeln,
+  Blacklist, Sammelbestellungen, Druckauswahl, Token-Anzahlen, eigene Bilder und Deskmat-Motive.
+  Einstellungen, Caches und Druckdateien bleiben pro Gerät.
+- **Verbinden:** *Einstellungen → Sync zwischen Geräten* → Kopplungslink einfügen. Den Link zeigt der Server nach
+  der Einrichtung, später jedes verbundene Gerät über „Weiteres Gerät koppeln“ (mit QR-Code; 15 Minuten gültig,
+  einmal verwendbar).
+- **Wann abgeglichen wird:** beim Start, kurz nach jeder Änderung, alle 5 Minuten (einstellbar), beim Zurückkehren
+  ins Fenster und per Knopf. Neues von anderen Geräten meldet ein Hinweis.
+- **Zusammenführen:** Einträge beider Geräte bleiben erhalten, also Partien, Gegnerdecks, Sammlung und Notizen. Ein
+  Deck, das auf zwei Geräten umgebaut wurde, wird kartenweise zusammengeführt und behält alle Versionen; danach wird
+  es neu geprüft. Haben beide Geräte dasselbe Feld unterschiedlich geändert, gilt die Fassung vom Server, und die
+  andere steht unter „Konflikte“.
+- **Sicherheit:** nur HTTPS; Geräte-Schlüssel liegen auf dem Server nur als Hash; Geräte lassen sich einzeln abmelden.
 
 ## Web-GUI
 
@@ -546,7 +569,9 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
 | `MTG_DESKMAT_DIR` | `./deskmats` | Deskmat-Projekte und fertige Dateien |
-| `MTG_SYNC_DIR` | `./.sync` | Sync-Zustand dieses Geräts (Stand, Basisdateien, Konfliktprotokoll) |
+| `MTG_SYNC_DIR` | `./.sync` | Sync-Zustand dieses Geräts (Verbindung, Stand, Basisdateien, Konfliktprotokoll) |
+| `MTG_SYNC_AUTO` | `1` | `0` = kein automatischer Abgleich im Hintergrund (nur per Knopf) |
+| `MTG_SYNC_DATA` / `MTG_SYNC_PUBLIC_URL` / `MTG_SYNC_HOST` / `MTG_SYNC_PORT` | `./sync-data` / – / `0.0.0.0` / `8080` | nur der Sync-Server (`mtg-sync-server`) |
 | `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` / `MTG_UPSCALER_PATH` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
 | `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |

@@ -63,11 +63,13 @@ fremde Fassung verglichen:
 
 - Python (FastAPI) + **SQLite**, ein Docker-Image `ghcr.io/liehrdot/mtgdeck-sync` (amd64 + arm64), gebaut von
   GitHub Actions bei jedem Release.
-- Protokoll:
-  - `GET /sync/changes?since=<seq>` – alle Dokumente, die sich seit der Nummer geändert haben;
-  - `PUT /sync/docs` mit der Basis-Nummer – angenommen, oder `409` mit der aktuellen Fassung (der PC führt
+- Protokoll (umgesetzt in `src/mtgdeck/sync/server.py`):
+  - `GET /api/sync/changes?since=<seq>` – alle Dokumente, die sich seit der Nummer geändert haben (seitenweise);
+  - `PUT /api/sync/doc` mit der Basis-Nummer – angenommen, oder `409` mit der aktuellen Fassung (der PC führt
     zusammen und schickt erneut);
-  - Bilder inhaltsadressiert (`/sync/blobs/<sha256>`).
+  - Bilder reisen vorerst als Base64 im selben Aufruf (einzeln bis 64 MB); inhaltsadressierte Blobs folgen, falls nötig.
+  - Wiederherstellen einer Server-Sicherung (`mtg-sync-server restore`) setzt eine neue „Epoche“: Die Geräte führen
+    danach alles neu zusammen, ohne anderswo etwas zu löschen.
 - Für das Handy zusätzlich **fachliche Aufrufe** (Partie eintragen, Gegnerdeck anlegen, Notiz, Frage an den PC);
   der Server führt sie mit derselben Zusammenführ-Logik aus.
 - **Geräte-Anmeldung per QR-Code**: der PC erzeugt einen Kopplungscode, das Handy scannt ihn und bekommt ein
@@ -80,11 +82,13 @@ fremde Fassung verglichen:
 
 ### Betrieb bei Hetzner
 
-- Kleiner Cloud-Server (rund 4–4,50 €/Monat, Preis und Verfügbarkeit beim Bestellen prüfen; ARM/CAX geht auch).
-- `docker-compose.yml` mit drei Diensten:
+- Kleiner Cloud-Server: CX23 (x86) oder CAX11 (ARM), 5,49 € bzw. 5,99 € im Monat plus IPv4 (Preise seit 15.06.2026;
+  Verfügbarkeit beim Bestellen prüfen). Anleitung: [`sync-server-hetzner.md`](sync-server-hetzner.md).
+- `deploy/sync/compose.yml` mit zwei Diensten plus Update-Timer:
   - `sync` (unser Image, Daten auf einem Volume),
   - **Caddy** (automatisches HTTPS über Let's Encrypt; eigene Domain oder ein kostenloser DynDNS-Name),
-  - **Watchtower** (holt neue Images nachts automatisch).
+  - statt Watchtower (seit Dezember 2025 nicht mehr gepflegt) ein **systemd-Timer** mit `update.sh`, der nachts
+    `docker compose pull && up -d` ausführt.
 - Einrichtung einmalig per Anleitung/Skript; Betriebssystem-Updates per `unattended-upgrades`.
 - Sicherung: nächtlicher SQLite-Schnappschuss auf dem Volume, optional zusätzlich in Hetzner Object Storage.
 - `/health` für eine einfache Überwachung; die Desktop-App zeigt den Sync-Status.
@@ -114,7 +118,7 @@ fremde Fassung verglichen:
 | Phase | Inhalt | fertig, wenn |
 |---|---|---|
 | **1 – Sync-Kern** ✅ | logische Pfade, Basis-Speicher, Drei-Wege-Zusammenführung, Deck-Regel mit Neunummerierung, Konfliktprotokoll, Server-Speicher (SQLite) als Bibliothek | zwei Datenordner gleichen sich über den Speicher ab; Tests für alle Konfliktfälle |
-| **2 – Sync-Server** | HTTP-Schicht, Geräte-Token und QR-Kopplung, Anwesenheit, Docker-Image, Compose-Datei, Anleitung Hetzner; Seite „Sync“ in den Einstellungen (Status, jetzt synchronisieren, Konflikte, Geräte) | PC ↔ Server ↔ zweiter PC im Alltag |
+| **2 – Sync-Server** ✅ | HTTP-Schicht, Geräte-Token und QR-Kopplung, Anwesenheit, Docker-Image, Compose-Datei, Anleitung Hetzner; Seite „Sync“ in den Einstellungen (Status, jetzt synchronisieren, Konflikte, Geräte) | PC ↔ Server ↔ zweiter PC im Alltag |
 | **3 – Handy-PWA** | „Am Tisch“: Partie eintragen, Gegnerdeck schnell anlegen, Decks/Rule 0 ansehen, Karten nachschlagen; Offline-Warteschlange | Partie offline am Tisch eingetragen, später am PC sichtbar |
 | **4 – KI-Aufträge** | Aufträge vom Handy, Abarbeitung am PC, Statusanzeige | Frage vom Handy wird vom PC beantwortet |
 | **5 – Desktop-App** | Tauri-Hülle, Sidecar, Infobereich, Installer, Auto-Update | Windows-Installer aus GitHub Actions |

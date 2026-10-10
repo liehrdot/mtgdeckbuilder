@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -68,6 +69,19 @@ class SyncClient:
         self.device_name = device
 
     # --- state -----------------------------------------------------------------------------------
+
+    def reset_state(self) -> None:
+        """Forget what was synced (cursor, bases) but not the local files: the next sync merges everything with the
+        server as if both sides had created it independently (lists are joined, decks find their last common
+        version). Used for a different server and after restoring a backup – so nothing gets deleted elsewhere."""
+        self.roots.state.mkdir(parents=True, exist_ok=True)
+        with locked(self.state_file):
+            device = (read_json(self.state_file, {}) or {}).get("device")
+            shutil.rmtree(self.roots.state / "base", ignore_errors=True)
+            write_json(self.state_file, {"device": device} if device else {}, indent=None)
+
+    def cursor(self) -> int:
+        return int((read_json(self.state_file, {}) or {}).get("cursor") or 0)
 
     def _load_state(self) -> None:
         st = read_json(self.state_file, {}) or {}
@@ -282,6 +296,24 @@ class SyncClient:
                     continue
         return out
 
+    def _common_version(self, slug: str) -> dict[str, Any] | None:
+        """The newest version snapshot this device and the server have identically (a common ancestor for decks
+        without a base, e.g. after ``reset_state``); ``None`` when there is none (really two different decks)."""
+        best: tuple[int, Path] | None = None
+        for path, st in self.state["docs"].items():
+            m = SNAPSHOT_RE.fullmatch(path)
+            if not m or m.group(1) != slug or st.get("deleted") or not st.get("hash"):
+                continue
+            p = self.roots.physical(path)
+            try:
+                if not p.exists() or files.local_hash("snapshot", p) != st["hash"]:
+                    continue
+            except (OSError, ValueError):
+                continue
+            if best is None or int(m.group(2)) > best[0]:
+                best = (int(m.group(2)), p)
+        return json.loads(best[1].read_text("utf-8")) if best else None
+
     def _merge_deck_group(self, slug: str, group: dict[str, Any], local: dict[str, Local], report: Report) -> bool:
         deck_path = f"decks/{slug}.json"
         ddoc = group["deck"]
@@ -297,6 +329,8 @@ class SyncClient:
             remote = None if ddoc["deleted"] else decode("deck", ddoc["data"])
             mine = files.read_local("deck", loc.file) if loc else None
             base = self._base_value(deck_path, "deck")
+            if base is MISSING and mine is not None and remote is not None:
+                base = self._common_version(slug) or MISSING  # after a reset: the last version both still share
             pending = self._unsynced_snapshots(slug)
             if remote is None:  # deleted there, changed here: keep ours, with all its snapshots (pushed again)
                 log.add("(Deck)", "behalten", "behalten", "auf einem anderen Gerät gelöscht, hier geändert – bleibt erhalten")
