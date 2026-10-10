@@ -1,11 +1,11 @@
 // Sheets for input and quick looks: log a game (with the opponent picker as a second page), record an opponent
 // deck, switch tonight's deck, look at a card, a game, the settings.
 
-import { currentDeck, deckBy, gamesOf, op, oppBy, oppName, pendingCount, resetDemo, setPref, shortName, state, undo } from "./data.js";
+import { currentDeck, deckBy, disconnect, dropOp, endDemo, failedOps, gamesOf, isDemo, op, oppBy, oppName, pendingCount, resetDemo, setPref, shortName, state, undo, wake } from "./data.js";
 import * as scry from "./scry.js";
 import { art, paint, rememberCard } from "./screens.js";
 import { closeSheet, openSheet, popPage, pushPage, redraw, toast } from "./ui.js";
-import { $, $$, RESULT_TEXT, dateLong, debounce, esc, genitive, icon, load, mana, pips, plural, save, uid, vibrate } from "./util.js";
+import { $, $$, RESULT_TEXT, ago, dateLong, debounce, esc, genitive, icon, load, mana, pips, plural, save, uid, vibrate } from "./util.js";
 
 const KEY_DRAFT = "amtisch.draft.game";
 const REMATCH_HOURS = 8;  // within this time the last game's opponents are taken over
@@ -138,14 +138,18 @@ function saveGame() {
   const deck = deckBy(g.deck);
   const game = { id: g.id, deck: g.deck, result: g.result, turn: g.turn, issues: g.result === "win" ? [] : g.issues,
     how: g.how, started: g.started === null ? null : g.started === "me" ? "me" : Number(g.started), mvp: g.mvp.trim() || null, note: g.note.trim() };
-  const opponents = g.opps.map((o) => ({ id: o.id || null, commander: o.commander || oppBy(o.id)?.commanders?.[0] || "", colors: o.colors || "", new_id: o.id ? null : uid().slice(0, 8), note: o.note || "" }));
+  const opponents = g.opps.map((o) => {
+    const commander = o.commander || oppBy(o.id)?.commanders?.[0] || "";
+    return { id: o.id || null, commander, colors: o.colors || "", new_id: o.id ? null : uid().slice(0, 8), note: o.note || "",
+      image: o.id ? null : scry.cached(commander)?.image || null };
+  });
   const entry = op("game.add", { game, opponents });
   setPref("deck", g.deck);
   g.saved = true;
   save(KEY_DRAFT, null);
   vibrate(18);
   closeSheet();
-  toast(`${RESULT_TEXT[game.result]} gespeichert`, { ok: true, sub: celebrate(game, deck), action: { label: "Rückgängig", run: () => { undo(entry.id); toast("Partie entfernt"); } } });
+  toast(`${RESULT_TEXT[game.result]} gespeichert`, { ok: true, sub: celebrate(game, deck), action: { label: "Rückgängig", run: () => { undo(entry); toast("Partie entfernt"); } } });
 }
 
 // one quiet line of context instead of confetti
@@ -311,12 +315,13 @@ export function opponentSheet() {
         $("#all-tags", el)?.addEventListener("click", () => { f.allTags = true; redraw(); });
         $("#opp-note", el).addEventListener("input", (e) => { f.note = e.target.value; });
         $("#opp-save", el).addEventListener("click", () => {
-          const opponent = { id: uid().slice(0, 8), commanders: [f.commander.name, ...(f.partner ? [f.partner.name] : [])], colors: f.commander.colors, player: f.player.trim(), tags: f.tags };
-          const entry = op("opponent.add", { opponent, note: f.note });
+          const opponent = { id: uid().slice(0, 8), commanders: [f.commander.name, ...(f.partner ? [f.partner.name] : [])], colors: f.commander.colors,
+            player: f.player.trim(), tags: f.tags, image: scry.cached(f.commander.name)?.image || null };
+          const entry = op("opponent.add", { opponent, note: f.note, note_id: uid().slice(0, 8) });
           vibrate(18);
           closeSheet();
           const name = shortName(f.commander.name);
-          toast(`${f.player.trim() ? `${genitive(f.player.trim())} ` : ""}${name} gespeichert`, { ok: true, action: { label: "Rückgängig", run: () => undo(entry.id) } });
+          toast(`${f.player.trim() ? `${genitive(f.player.trim())} ` : ""}${name} gespeichert`, { ok: true, action: { label: "Rückgängig", run: () => undo(entry) } });
         });
       },
     };
@@ -399,36 +404,91 @@ export function gameDetailSheet(deckSlug, id) {
       scry.hydrate(el);
       for (const a of $$("a[data-sheet-close]", el)) a.addEventListener("click", closeSheet);
       $("#del-game", el).addEventListener("click", () => {
-        const entry = op("game.delete", { deck: deckSlug, id });
+        const restore = { game: { id: game.id, deck: deckSlug, result: game.result, turn: game.turn ?? null, issues: game.issues || [], how: game.how ?? null,
+          started: game.started ?? null, mvp: game.mvp ?? null, note: game.note || "", played: game.played },
+          opponents: (game.opponents || []).map((name, i) => ({ id: game.opponent_ids?.[i] || null, commander: name })) };
+        const entry = op("game.delete", { deck: deckSlug, id, restore });
         closeSheet();
-        toast("Partie gelöscht", { action: { label: "Rückgängig", run: () => undo(entry.id) } });
+        toast("Partie gelöscht", { action: { label: "Rückgängig", run: () => undo(entry) } });
       });
     },
   }));
 }
 
+const OP_LABEL = {
+  "game.add": (p) => `Partie (${RESULT_TEXT[p.game?.result] || "?"}) mit ${deckBy(p.game?.deck)?.name || p.game?.deck || "?"}`,
+  "game.delete": () => "Partie löschen", "opponent.add": (p) => `Gegnerdeck ${shortName(p.opponent?.commanders?.[0])}`,
+  "opponent.update": () => "Merkmale eines Gegners", "opponent.note": () => "Notiz zu einem Gegner",
+  "opponent.note_delete": () => "Notiz löschen", "opponent.delete": () => "Gegnerdeck löschen",
+};
+
 export function settingsSheet() {
-  openSheet(() => {
+  openSheet(({ push }) => {
     const theme = state.prefs.theme || "system";
     const pend = pendingCount();
+    const failed = failedOps();
+    const d = state.device;
+    const status = !state.online ? ["wait", "Offline", pend ? `${plural(pend, "Eintrag wartet", "Einträge warten")} – wird gesendet, sobald Netz da ist.` : "Du siehst den zuletzt geladenen Stand."]
+      : pend ? ["wait", `${plural(pend, "Eintrag wird", "Einträge werden")} gesendet …`, ""]
+      : ["", "Alles abgeglichen", state.lastSync ? `aktualisiert ${ago(new Date(state.lastSync).toISOString())}` : ""];
+    const live = `
+      <div class="group settings">
+        <div class="row"><span class="status-dot ${status[0]}"></span><span class="main"><span class="title wrap">${esc(status[1])}</span>
+          <span class="subtitle wrap">${esc(status[2])}</span></span>
+          <button class="btn" type="button" id="sync-now">Aktualisieren</button></div>
+        <div class="row"><span class="main"><span class="subtitle">Server</span><span class="title">${esc(location.host)}</span></span></div>
+        <div class="row"><span class="main"><span class="subtitle">Dieses Handy</span><span class="title">${esc(d?.name || "Handy")}</span></span>
+          <span class="trail">${d?.paired_at ? `seit ${esc(new Date(d.paired_at).toLocaleDateString("de-DE"))}` : ""}</span></div>
+        ${state.pcs.map((pc) => `<div class="row"><span class="status-dot ${pc.online ? "" : "off"}"></span><span class="main"><span class="title">PC „${esc(pc.name)}“</span>
+          <span class="subtitle">${pc.online ? `online${pc.ai ? " · Claude bereit" : ""}` : `zuletzt ${esc(ago(new Date(pc.last_seen * 1000).toISOString()))}`}</span></span></div>`).join("")}
+      </div>
+      ${failed.length ? `<div class="field-label">Nicht übernommen</div><div class="group settings">${failed.map((o) => `<div class="row"><span class="main">
+          <span class="title">${esc(OP_LABEL[o.type]?.(o.payload) || o.type)}</span><span class="subtitle wrap">${esc(o.error || "")}</span></span>
+          <button class="btn" type="button" data-drop="${esc(o.id)}">Verwerfen</button></div>`).join("")}</div>` : ""}
+      <div class="btn-col"><button class="btn danger" type="button" id="sign-off">Abmelden …</button></div>`;
+    const demo = `
+      <div class="group settings"><div class="row"><span class="status-dot wait"></span><span class="main"><span class="title">Vorschau mit Beispieldaten</span>
+          <span class="subtitle wrap">Nicht mit deinem PC verbunden – Einträge bleiben nur auf diesem Handy.</span></span></div>
+        <div class="row"><span class="main"><span class="title">Beispieleinträge löschen</span></span><button class="btn" type="button" id="demo-reset">Zurücksetzen</button></div></div>
+      <div class="btn-col"><button class="btn primary" type="button" id="demo-end">Mit meinem PC verbinden</button></div>`;
     return {
       title: "Einstellungen", left: "", right: `<button class="btn plain" type="button" data-sheet-close><b>Fertig</b></button>`,
       body: `<div class="field-label">Erscheinungsbild</div>
         <div class="segmented" id="theme">${[["system", "System"], ["light", "Hell"], ["dark", "Dunkel"]].map(([k, l]) => `<button type="button" data-theme="${k}" aria-pressed="${theme === k}">${l}</button>`).join("")}</div>
         <div class="field-label">Verbindung</div>
-        ${state.demo ? `<div class="group settings"><div class="row"><span class="status-dot wait"></span><span class="main"><span class="title">Nicht verbunden – Vorschau</span>
-          <span class="subtitle wrap">Du siehst Beispieldecks; deine Einträge bleiben nur auf diesem Handy. Die Verbindung mit deinem PC kommt mit der Kopplung.</span></span></div>
-          <div class="row"><span class="main"><span class="title">Beispieldaten</span><span class="subtitle">Alle Einträge der Vorschau löschen</span></span>
-          <button class="btn" type="button" id="demo-reset">Zurücksetzen</button></div></div>`
-        : `<div class="group settings"><div class="row"><span class="status-dot${pend ? " wait" : ""}"></span><span class="main"><span class="title">${pend ? `${plural(pend, "Eintrag wartet", "Einträge warten")} auf Netz` : "Alles gesendet"}</span>
-          <span class="subtitle">Wird automatisch gesendet, sobald Netz da ist.</span></span></div></div>`}
+        ${isDemo() ? demo : live}
         <p class="hint-small center">Am Tisch · Begleiter zum Commander Deckbuilder</p>`,
       bind(el) {
         for (const b of $$("[data-theme]", el)) b.addEventListener("click", () => { setPref("theme", b.dataset.theme); applyTheme(); redraw(); });
-        $("#demo-reset", el)?.addEventListener("click", () => { resetDemo(); save(KEY_DRAFT, null); toast("Beispieldaten zurückgesetzt"); redraw(); });
+        $("#demo-reset", el)?.addEventListener("click", () => { resetDemo(); save(KEY_DRAFT, null); toast("Beispieleinträge gelöscht"); redraw(); });
+        $("#demo-end", el)?.addEventListener("click", () => { closeSheet(); endDemo(); });
+        $("#sync-now", el)?.addEventListener("click", () => { wake(); toast("Wird aktualisiert …"); setTimeout(redraw, 1200); });
+        for (const b of $$("[data-drop]", el)) b.addEventListener("click", () => { dropOp(b.dataset.drop); redraw(); });
+        $("#sign-off", el)?.addEventListener("click", () => push(signOffPage));
       },
     };
   }, { onClose: () => window.dispatchEvent(new Event("hashchange")) });
+}
+
+function signOffPage({ pop }) {
+  const pend = pendingCount();
+  return {
+    title: "Abmelden",
+    left: `<button class="back-btn" type="button" data-sheet-back>${icon("chev-l")}<span>Zurück</span></button>`,
+    body: `<div class="empty">${icon("shield")}<h3>Dieses Handy abmelden?</h3>
+      <p>Es verliert den Zugang zu deinen Decks und Gegnern. Deine Daten am PC bleiben, wie sie sind.
+      ${pend ? `<br><b>${plural(pend, "Eintrag ist", "Einträge sind")} noch nicht gesendet und ${pend === 1 ? "geht" : "gehen"} verloren.</b>` : ""}</p></div>`,
+    foot: `<button class="btn danger-fill big" type="button" id="really">Abmelden</button>`,
+    bind(el) {
+      $("#really", el).addEventListener("click", async () => {
+        $("#really", el).disabled = true;
+        await disconnect();
+        save(KEY_DRAFT, null);
+        closeSheet();
+        toast("Abgemeldet", { sub: "Mit einem neuen Code verbindest du das Handy wieder." });
+      });
+    },
+  };
 }
 
 export function applyTheme() {

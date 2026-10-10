@@ -56,7 +56,8 @@ def _write(deck_slug: str, items: list[dict[str, Any]]) -> None:
 
 def add(deck_slug: str, *, result: str, opponents: list[str] | None = None, turn: int | None = None,
         issues: list[str] | None = None, mvp: str | None = None, note: str = "", version: int | None = None,
-        played: str | None = None, entry_id: str | None = None, opponent_ids: list[str | None] | None = None) -> dict[str, Any]:  # fmt: skip
+        played: str | None = None, entry_id: str | None = None, opponent_ids: list[str | None] | None = None,
+        how: str | None = None, started: str | int | None = None) -> dict[str, Any]:  # fmt: skip
     if result not in RESULTS:
         raise ValueError(f"Ergebnis muss eines von {', '.join(RESULTS)} sein")
     unknown = [i for i in issues or [] if i not in ISSUES]
@@ -69,6 +70,12 @@ def add(deck_slug: str, *, result: str, opponents: list[str] | None = None, turn
     }  # fmt: skip
     if opponent_ids and any(opponent_ids):
         entry["opponent_ids"] = list(opponent_ids)[: len(entry["opponents"])]
+    if how:
+        if how not in HOW:
+            raise ValueError(f"Unbekannt, wie die Partie entschieden wurde: {how}")
+        entry["how"] = how
+    if started == "me" or (isinstance(started, int) and 0 <= started < len(entry["opponents"])):
+        entry["started"] = started  # "me" or the index of the opponent who began
     with locked(_file(deck_slug)):
         _write(deck_slug, games(deck_slug) + [entry])
     return entry
@@ -120,4 +127,4 @@ def summary(deck_slug: str) -> dict[str, Any]:
     """Games plus statistics – what the MCP tool and the GUI return."""
     items = games(deck_slug)
     return {"games": items, "stats": stats(items), "learn_focus": learn_focus(items),
-            "issue_labels": {k: v[0] for k, v in ISSUES.items()}, "result_labels": RESULTS}  # fmt: skip
+            "issue_labels": {k: v[0] for k, v in ISSUES.items()}, "result_labels": RESULTS, "how_labels": HOW}  # fmt: skip

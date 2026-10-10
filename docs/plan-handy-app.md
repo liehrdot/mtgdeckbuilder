@@ -225,7 +225,7 @@ transparent, nach iOS 26 nur für Bedienelemente; Inhalte bleiben auf festem Gru
 Auf dem iPhone hat eine installierte Web-App **eigenen Speicher**, getrennt von Safari
 ([WebKit-Bug 181849](https://bugs.webkit.org/show_bug.cgi?id=181849)). Daraus folgt dieser Ablauf:
 
-1. Am PC auf *Einstellungen → Sync → Weiteres Gerät koppeln* tippen; es erscheint ein QR-Code.
+1. Am PC auf *Einstellungen → Sync zwischen Geräten → Weiteres Gerät koppeln* klicken; es erscheint ein QR-Code.
 2. Mit der Handy-Kamera scannen. Die Seite `…/koppeln#CODE` öffnet sich im Browser.
 3. **Auf dem iPhone im Browser** wird der Code **nicht** eingelöst. Die Seite zeigt eine kurze, bebilderte Anleitung
    „Zum Home-Bildschirm hinzufügen“ und den Code groß.
@@ -329,9 +329,9 @@ schneller.
 | Schritt | Inhalt | fertig, wenn |
 |---|---|---|
 | **3a – Prototyp** ✅ | Gestaltung und alle Kern-Bildschirme mit Demodaten, klickbar im Handy-Browser | Screenshots hell/dunkel abgenommen |
-| **3b – Daten** | Lesemodell `/api/app/data`, Operationen (Partie, Gegner, Notiz) mit Kennung, neue Partie-Felder in der Desktop-App | Handy-Eintrag erscheint am PC |
-| **3c – Offline** | Service Worker, Warteschlange, Entwürfe, Scryfall-Cache | Partie im Flugmodus eingetragen, später gesendet |
-| **3d – Kopplung** | Kopplungsseite, Installationsanleitung, QR-Scanner, Code-Eingabe, Einstellungen, Abmelden | iPhone und Android von Null gekoppelt |
+| **3b – Daten** ✅ | Lesemodell `/api/app/data`, Operationen (Partie, Gegner, Notiz) mit Kennung, neue Partie-Felder in der Desktop-App | Handy-Eintrag erscheint am PC |
+| **3c – Offline** ✅ | Service Worker, Warteschlange, Entwürfe, Scryfall-Cache | Partie im Flugmodus eingetragen, später gesendet |
+| **3d – Kopplung** ✅ | Kopplungsseite, Installationsanleitung, QR-Scanner, Code-Eingabe, Einstellungen, Abmelden | iPhone und Android von Null gekoppelt |
 | **3e – Feinschliff** | Tests (Playwright mit iPhone- und Pixel-Emulation, Offline, Tap-Zähler, Tippflächen-Prüfung), Doku | alle Messlatten oben erfüllt |
 
 **Stand 3a:** Der Prototyp läuft unter `/app/` des Sync-Servers mit Beispieldaten. Einträge bleiben vorerst auf dem Gerät.
@@ -341,6 +341,24 @@ Gemessen im Prototyp:
 - Rule 0 vom Start aus: 1 Tap;
 - Gegnerdeck: 6 Taps plus ein paar Buchstaben;
 - alle Tippflächen mindestens 44 px, kein seitliches Scrollen, hell und dunkel.
+
+**Stand 3b–3d:** Die App ist echt verbunden. Sie liest die Daten des Sync-Servers (`/api/app/data`) und schreibt
+Partien, Gegnerdecks und Notizen als Operationen mit Kennung (`/api/app/ops`). Der Server trägt sie so in die Dateien
+ein, wie es die Desktop-App tut, und der PC holt sie beim nächsten Abgleich. Doppelt gesendete Operationen ändern
+nichts.
+
+- **Offline:** Einträge warten in einer Warteschlange und gehen raus, sobald Netz da ist. Der Service Worker startet
+  die App auch ohne Netz.
+- **Rückgängig:** Ist ein Eintrag schon gesendet, schickt die App das Gegenstück.
+- **Kopplung:** Es gibt drei Wege, nämlich QR-Code in der App, Code-Eingabe und Kopplungslink. Auf Android wird nach
+  einer Rückfrage verbunden, auf dem iPhone im Browser kommt zuerst die Anleitung zum Home-Bildschirm.
+- **Einstellungen:** Sie zeigen den Abgleich, den Server, dieses Handy und die PCs (online, „Claude bereit“). Dazu
+  kommen „Abmelden“ und nicht übernommene Einträge mit „Verwerfen“. Wird das Handy am PC abgemeldet, sagt die App das
+  beim Start.
+
+Geprüft mit Playwright gegen einen echten Server, emuliert als iPhone und Pixel: Koppeln per Code, Link,
+iPhone-Anleitung und QR-Code über eine simulierte Kamera, Warteschlange im Flugmodus, Start ohne Netz, Rückgängig nach
+dem Senden, Abmelden, abgemeldet am PC. Offen für 3e ist die Abnahme auf echten Geräten.
 
 **Prüfung der Messlatten:** Ein Playwright-Skript zählt die Taps für den typischen Ablauf (Partie, Gegnerdeck, Rule 0).
 Es prüft außerdem, dass jede Tippfläche mindestens 44 × 44 px groß ist, dass nichts seitlich scrollt und dass die

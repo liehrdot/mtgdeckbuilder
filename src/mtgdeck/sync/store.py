@@ -139,6 +139,38 @@ class SyncStore:
         cursor = out[-1]["seq"] if out else since
         return {"docs": out, "cursor": cursor, "more": more, "head": self.seq()}
 
+    def put_many(self, items: list[dict[str, Any]], device: str = "") -> list[int]:
+        """Write several documents at once – all or none: ``SyncConflict`` when any ``base_seq`` is outdated.
+        ``items`` = ``[{"path", "kind", "data", "base_seq"}]``; returns the new sequence numbers."""
+        for it in items:
+            if kind_of(it["path"]) != it["kind"]:
+                raise ValueError(f"Pfad und Art passen nicht: {it['path']} ({it['kind']})")
+        out = []
+        with self._lock, self._db() as db:
+            for it in items:
+                row = db.execute("SELECT * FROM docs WHERE path = ?", (it["path"],)).fetchone()
+                current = None if row is None or row["deleted"] else row["seq"]
+                if (row["seq"] if row is not None else None) != it["base_seq"] and current != it["base_seq"]:
+                    raise SyncConflict(self._row(row))
+            seq = db.execute("SELECT MAX(seq) AS s FROM docs").fetchone()["s"] or 0
+            for it in items:
+                seq += 1
+                db.execute(
+                    "INSERT INTO docs(path, seq, kind, hash, data, deleted, updated, device) VALUES (?,?,?,?,?,0,?,?) "
+                    "ON CONFLICT(path) DO UPDATE SET seq=excluded.seq, kind=excluded.kind, hash=excluded.hash, data=excluded.data, "
+                    "deleted=0, updated=excluded.updated, device=excluded.device",
+                    (it["path"], seq, it["kind"], digest(it["data"]), it["data"], time.time(), device),
+                )
+                out.append(seq)
+        return out
+
+    def live(self, prefix: str = "") -> dict[str, dict[str, Any]]:
+        """All documents that exist (not deleted), optionally only below ``prefix``: path -> document."""
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM docs WHERE deleted = 0 AND path LIKE ? ESCAPE '\\'",
+                              (prefix.replace("%", "\\%").replace("_", "\\_") + "%",)).fetchall()  # fmt: skip
+        return {r["path"]: self._row(r) for r in rows}
+
     def put(self, path: str, *, kind: str, data: bytes | None, base_seq: int | None, deleted: bool = False,
             device: str = "") -> dict[str, Any]:  # fmt: skip
         """Store a new state of ``path``; returns ``{"seq", "hash", "unchanged"}``."""

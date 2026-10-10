@@ -11,7 +11,9 @@ Routes (JSON; document content as base64):
 - ``POST /api/pair/claim`` – a pairing code becomes a device token (no login, failed attempts are limited);
 - ``POST /api/pair/start`` – a paired device creates a code for the next one;
 - ``GET /api/sync/changes?since=`` / ``PUT /api/sync/doc`` – the protocol of ``SyncStore`` (409 + current document);
-- ``GET /api/devices``, ``DELETE /api/devices/{id}``, ``POST /api/presence``.
+- ``GET /api/devices``, ``DELETE /api/devices/{id}``, ``POST /api/presence``;
+- the phone app ("Am Tisch", ``/app/``): ``GET /api/app/data`` (read model, ETag), ``GET /api/app/status`` (PCs online),
+  ``POST /api/app/ops`` (operations, idempotent by id – see ``appops``); ``/`` and ``/koppeln#CODE`` lead to the app.
 
 Tokens are stored as sha256 only; every request with a token updates the device's ``last_seen``.
 """
@@ -23,6 +25,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -34,11 +37,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .files import kind_of
+from .files import canonical, decode, kind_of
 from .store import SyncConflict, SyncStore, decode_b64, encode
 
 PROTOCOL = 1
@@ -52,7 +55,8 @@ CLAIM_FAILS, CLAIM_WINDOW = 20, 600  # at most 20 wrong codes per 10 minutes
 BACKUP_KEEP = 14
 APP_DIR = Path(__file__).parent / "app"  # the phone app ("Am Tisch"), served under /app/
 APP_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.scryfall.io; "
-           "connect-src 'self' https://api.scryfall.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
+           "connect-src 'self' https://api.scryfall.com; manifest-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; "
+           "base-uri 'none'; "
            "form-action 'self'; frame-ancestors 'none'")  # fmt: skip
 
 
@@ -86,7 +90,21 @@ class Devices:
                     created REAL NOT NULL, last_seen REAL, info TEXT);
                 CREATE TABLE IF NOT EXISTS pairing (
                     code_hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL, created_by TEXT, used REAL);
+                CREATE TABLE IF NOT EXISTS app_ops (
+                    id TEXT PRIMARY KEY, at REAL NOT NULL, device TEXT, ok INTEGER NOT NULL, error TEXT);
             """)
+
+    def op_done(self, op_id: str) -> dict[str, Any] | None:
+        """The outcome of an operation of the phone app that was already applied (sent twice)."""
+        with self._db() as db:
+            row = db.execute("SELECT ok, error FROM app_ops WHERE id = ?", (op_id,)).fetchone()
+        return {"ok": bool(row["ok"]), "error": row["error"]} if row else None
+
+    def op_record(self, op_id: str, device_id: str, ok: bool, error: str | None = None) -> None:
+        with self._lock, self._db() as db:
+            db.execute("INSERT OR REPLACE INTO app_ops(id, at, device, ok, error) VALUES (?,?,?,?,?)",
+                       (op_id, time.time(), device_id, int(ok), error))  # fmt: skip
+            db.execute("DELETE FROM app_ops WHERE at < ?", (time.time() - 90 * 86400,))
 
     def _db(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
@@ -167,6 +185,70 @@ def daily_backup(store: SyncStore, folder: Path, keep: int = BACKUP_KEEP) -> Pat
     return made
 
 
+APP_READ = re.compile(r"decks/[^/.][^/]*\.json|decks/\.games/[^/.][^/]*\.json|decks/\.opponents\.json")
+OP_ATTEMPTS = 8
+
+
+def app_snapshot(store: SyncStore) -> dict[str, Any]:
+    """The phone app's read model from the store (``appdata.snapshot``)."""
+    from . import appdata
+
+    docs: dict[str, Any] = {}
+    for path, d in store.live("decks/").items():
+        if APP_READ.fullmatch(path):
+            try:
+                docs[path] = decode("json", d["data"])
+            except ValueError:
+                continue
+    return appdata.snapshot(docs)
+
+
+def run_op(store: SyncStore, devices: Devices, op: dict[str, Any], device_id: str) -> dict[str, Any]:
+    """Apply one operation of the phone app (idempotent by its id); ``{"id", "ok", "error"?}``."""
+    from . import appops
+
+    op_id = op.get("id")
+    if not isinstance(op_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{6,40}", op_id):
+        return {"id": op_id, "ok": False, "error": "Ungültige Kennung"}
+    done = devices.op_done(op_id)
+    if done is not None:
+        return {"id": op_id, **done}
+    for _ in range(OP_ATTEMPTS):
+        try:
+            paths = appops.paths(op)
+            docs, seqs = {}, {}
+            for path in paths:
+                d = store.get(path)
+                alive = d is not None and not d["deleted"]
+                docs[path] = decode("json", d["data"]) if alive else None
+                seqs[path] = d["seq"] if d is not None else None
+            changed = appops.apply(op, docs)
+            if changed:
+                store.put_many([{"path": p, "kind": "json", "data": canonical("json", v), "base_seq": seqs[p]}
+                                for p, v in changed.items()], device=device_id)  # fmt: skip
+            devices.op_record(op_id, device_id, True)
+            return {"id": op_id, "ok": True}
+        except SyncConflict:  # a PC wrote the same document meanwhile: read again
+            continue
+        except (appops.OpError, ValueError) as exc:
+            devices.op_record(op_id, device_id, False, str(exc))
+            return {"id": op_id, "ok": False, "error": str(exc)}
+        except (TypeError, KeyError, AttributeError):  # malformed payload: fail this one, never block the queue
+            devices.op_record(op_id, device_id, False, "Ungültige Daten")
+            return {"id": op_id, "ok": False, "error": "Ungültige Daten"}
+    return {"id": op_id, "ok": False, "retry": True, "error": "Gerade viel los auf dem Server – wird gleich noch einmal versucht."}
+
+
+def app_version() -> str:
+    """A hash of the app's files: a new one makes the service worker update itself."""
+    h = hashlib.sha256()
+    for p in sorted(APP_DIR.rglob("*")):
+        if p.is_file() and p.name != "sw.js" and "__pycache__" not in p.parts:
+            h.update(p.relative_to(APP_DIR).as_posix().encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
 def _out(doc: dict[str, Any]) -> dict[str, Any]:
     return {**doc, "data": encode(doc.get("data"))}
 
@@ -185,19 +267,12 @@ class DocRequest(BaseModel):
     deleted: bool = False
 
 
+class OpsRequest(BaseModel):
+    ops: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
 class PresenceRequest(BaseModel):
     info: dict[str, Any] = Field(default_factory=dict)
-
-
-_PAGE = """<!doctype html><html lang="de"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>MTG-Deckbuilder Sync</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f;background:#fafafa}
-@media (prefers-color-scheme:dark){body{color:#eee;background:#16161a}} code{font-size:1.4rem;letter-spacing:.1em}</style>
-</head><body><h1>MTG-Deckbuilder Sync</h1>__BODY__</body></html>"""
-
-
-def _page(body: str) -> HTMLResponse:
-    return HTMLResponse(_PAGE.replace("__BODY__", body))
 
 
 def create_app(data: Path | None = None, public_url: str | None = None) -> FastAPI:
@@ -244,6 +319,15 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
     async def app_index() -> FileResponse:
         return FileResponse(APP_DIR / "index.html", media_type="text/html")
 
+    @app.get("/app/sw.js", include_in_schema=False)
+    async def app_sw() -> Response:
+        files = ["/app/"] + sorted(f"/app/{p.relative_to(APP_DIR).as_posix()}" for p in APP_DIR.rglob("*")
+                                   if p.is_file() and p.name not in ("sw.js", "index.html", "README.txt", "LICENSE")
+                                   and p.suffix != ".map" and "__pycache__" not in p.parts)  # fmt: skip
+        text = (APP_DIR / "sw.js").read_text("utf-8").replace("__VERSION__", await asyncio.to_thread(app_version))
+        text = text.replace("__FILES__", json.dumps(files))
+        return Response(text, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
     app.mount("/app", StaticFiles(directory=APP_DIR), name="app")
 
     def base_url(request: Request) -> str:
@@ -256,18 +340,13 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
             raise HTTPException(401, "Dieses Gerät ist nicht (mehr) angemeldet – bitte neu koppeln.")
         return dev
 
-    @app.get("/", response_class=HTMLResponse)
-    async def home() -> HTMLResponse:
-        return _page("<p>Der Sync-Server läuft. Geräte verbindest du in der App unter "
-                     "<b>Einstellungen → Sync</b>.</p><p>Vorschau der Handy-App mit Beispieldaten: "
-                     "<a href=\"/app/\">Am Tisch</a></p>")  # fmt: skip
+    @app.get("/", include_in_schema=False)
+    async def home() -> RedirectResponse:
+        return RedirectResponse("/app/")
 
-    @app.get("/koppeln", response_class=HTMLResponse)
-    async def pair_page() -> HTMLResponse:
-        return _page("<p>Kopplungscode: <code id=c>–</code></p><p>Am PC: <b>Einstellungen → Sync</b> öffnen und "
-                     "diesen Link (oder Server-Adresse und Code) einfügen. Die Handy-App folgt.</p>"
-                     "<script>document.getElementById('c').textContent=decodeURIComponent(location.hash.slice(1))||'–'"
-                     "</script>")  # fmt: skip
+    @app.get("/koppeln", include_in_schema=False)
+    async def pair_page() -> RedirectResponse:
+        return RedirectResponse("/app/")  # the browser keeps "#CODE"; the app takes it from there
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -332,6 +411,40 @@ def create_app(data: Path | None = None, public_url: str | None = None) -> FastA
         except ValueError as exc:
             raise HTTPException(413, str(exc)) from None
         return {"ok": True, "now": time.time()}
+
+    snap_cache: dict[str, Any] = {"seq": None, "body": b""}
+
+    def snapshot_body() -> tuple[bytes, str]:
+        seq = store.seq()
+        if snap_cache["seq"] != seq:
+            snap_cache["body"] = json.dumps(app_snapshot(store), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            snap_cache["seq"] = seq
+        return snap_cache["body"], f'"{store.server_id()}-{store.epoch()}-{seq}"'
+
+    def pcs() -> list[dict[str, Any]]:
+        return [{"name": d["name"], "online": d["online"], "last_seen": d["last_seen"], "ai": bool((d["info"].get("ai") or {}).get("ready"))}
+                for d in devices.list() if d["kind"] == "pc"]  # fmt: skip
+
+    @app.get("/api/app/data")
+    async def app_data(request: Request, me: dict[str, Any] = Depends(device)) -> Response:
+        body, etag = await asyncio.to_thread(snapshot_body)
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
+
+    @app.get("/api/app/status")
+    async def app_status(me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
+        _, etag = await asyncio.to_thread(snapshot_body)
+        return {"etag": etag, "pcs": pcs(), "device": {"id": me["id"], "name": me["name"]}, "now": time.time()}
+
+    @app.post("/api/app/ops")
+    async def app_ops(req: OpsRequest, me: dict[str, Any] = Depends(device)) -> dict[str, Any]:
+        results = []
+        for op in req.ops:
+            results.append(await asyncio.to_thread(run_op, store, devices, op, me["id"]))
+        _, etag = await asyncio.to_thread(snapshot_body)
+        return {"results": results, "etag": etag}
 
     return app
 

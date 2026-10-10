@@ -81,7 +81,13 @@ async function flush() {
 export function hydrate(root) {
   for (const img of root.querySelectorAll("img[data-card]:not([src])")) {
     const kind = img.dataset.kind || "art";
-    const set = (i) => { if (i?.[kind]) { img.src = i[kind]; img.addEventListener("load", () => img.classList.add("loaded"), { once: true }); } };
+    const set = (i) => {
+      if (!i?.[kind]) return;
+      img.crossOrigin = "anonymous";  // a CORS response the service worker can cache (no opaque padding)
+      img.addEventListener("load", () => img.classList.add("loaded"), { once: true });
+      img.addEventListener("error", () => { if (img.crossOrigin) { img.removeAttribute("crossorigin"); img.src = i[kind]; } }, { once: true });
+      img.src = i[kind];
+    };
     const c = cached(img.dataset.card);
     if (c) set(c); else info(img.dataset.card).then(set);
   }

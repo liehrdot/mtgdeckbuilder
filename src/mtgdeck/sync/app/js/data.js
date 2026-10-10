@@ -1,36 +1,73 @@
-// App state: the read model from the sync server (here: demo data) plus the local operations on top of it.
+// App state: the read model from the sync server plus the local operations on top of it (the outbox).
 // Every change is an operation with its own id ("game.add", "opponent.add", …). It is applied locally at once
-// (optimistic) and sent later; the server applies the same operation, so both arrive at the same documents.
+// (optimistic), kept in the outbox until the server confirms it, and the server applies the same operation to
+// the synced documents (sync/appops.py) – sending one twice changes nothing there.
+//
+// Modes: "none" (not paired – the welcome screen), "demo" (example data, nothing leaves the phone), "live".
 
 import { load, nowIso, save, uid } from "./util.js";
 
+const KEY_DEVICE = "amtisch.device";
+const KEY_BASE = "amtisch.base";
 const KEY_OPS = "amtisch.ops";
+const KEY_DEMO_OPS = "amtisch.demo.ops";
+const KEY_MODE = "amtisch.mode";
 const KEY_PREFS = "amtisch.prefs";
 const SEND_DELAY_DEMO = 1500;
+const TIMEOUT_MS = 12000;
+const FLUSH_EVERY = 30000;
+const STATUS_EVERY = 60000;
 
 export const state = {
-  base: null,      // last read model from the server
-  snap: null,      // base + local operations
-  ops: load(KEY_OPS, []),
-  prefs: load(KEY_PREFS, {}),
-  demo: true,
+  mode: "none", device: null, base: null, snap: null, etag: null, ops: [], prefs: load(KEY_PREFS, {}),
+  online: true, revoked: false, lastSync: null, pcs: [], syncing: false,
 };
 const listeners = new Set();
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 const emit = () => listeners.forEach((fn) => fn(state.snap));
+export const isDemo = () => state.mode === "demo";
 
 export function setPref(key, value) {
   state.prefs = { ...state.prefs, [key]: value };
   save(KEY_PREFS, state.prefs);
 }
 
+const opsKey = () => (state.mode === "demo" ? KEY_DEMO_OPS : KEY_OPS);
+const saveOps = () => save(opsKey(), state.ops);
+
+// ---------- start ------------------------------------------------------------------------------
+
 export async function boot() {
-  const res = await fetch("/app/demo.json", { cache: "no-cache" });
-  if (!res.ok) throw new Error("Demodaten fehlen");
-  state.base = shiftDemoDates(await res.json());
-  rebuild();
-  for (const op of state.ops.filter((o) => o.status === "pending")) send(op);
+  state.device = load(KEY_DEVICE, null);
+  if (state.device) { bootLive(); return; }  // show the stored data at once; news come in the background
+  if (load(KEY_MODE, null) === "demo") return bootDemo();
+  state.mode = "none";
+  emit();
 }
+
+function bootLive() {
+  state.mode = "live";
+  state.ops = load(KEY_OPS, []);
+  const cached = load(KEY_BASE, null);
+  state.base = cached?.data || null;
+  state.etag = cached?.etag || null;
+  rebuild();
+  startTimers();
+  return refresh().then(() => flush());
+}
+
+async function bootDemo() {
+  state.mode = "demo";
+  const res = await fetch("/app/demo.json", { cache: "no-cache" });
+  if (!res.ok) throw new Error("Beispieldaten fehlen");
+  state.base = shiftDemoDates(await res.json());
+  state.ops = load(KEY_DEMO_OPS, []);
+  rebuild();
+  for (const o of state.ops.filter((x) => x.status === "pending")) demoSend(o);
+}
+
+export async function startDemo() { save(KEY_MODE, "demo"); await bootDemo(); }
+export function endDemo() { save(KEY_MODE, null); Object.assign(state, { mode: "none", snap: null, base: null, ops: [] }); emit(); }
 
 // demo data were written at a fixed time: move everything so the last game was "just now"
 const DATE_KEYS = new Set(["played", "updated", "created", "at", "last"]);
@@ -50,44 +87,221 @@ function shiftDemoDates(base) {
 }
 
 function rebuild() {
+  if (!state.base) { state.snap = null; emit(); return; }
   const snap = structuredClone(state.base);
-  for (const op of state.ops) apply(snap, op);
+  for (const op of state.ops) if (op.status !== "failed") apply(snap, op);
   recompute(snap);
   state.snap = snap;
   emit();
 }
 
+// ---------- talking to the sync server ---------------------------------------------------------
+
+async function api(path, init = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const headers = { Accept: "application/json", ...(init.body ? { "Content-Type": "application/json" } : {}), ...(init.headers || {}) };
+    if (state.device?.token) headers.Authorization = `Bearer ${state.device.token}`;
+    const res = await fetch(path, { ...init, headers, signal: ctrl.signal, cache: "no-store" });
+    if (res.status === 401 && state.mode === "live") revoked();
+    return res;
+  } finally { clearTimeout(timer); }
+}
+const detail = async (res) => { try { return (await res.json()).detail || `Fehler ${res.status}`; } catch { return `Fehler ${res.status}`; } };
+
+/** Pair this phone with a code from the PC; then load the data. */
+export async function connect(code, name) {
+  let res;
+  try {
+    res = await api("/api/pair/claim", { method: "POST", body: JSON.stringify({ code, name: (name || "Handy").slice(0, 60), kind: "phone" }) });
+  } catch {
+    throw new Error("Der Server ist gerade nicht erreichbar – Internetverbindung prüfen.");
+  }
+  if (!res.ok) throw new Error(await detail(res));
+  const got = await res.json();
+  state.device = { server: location.origin, token: got.token, device_id: got.device_id, name: got.name, paired_at: nowIso() };
+  save(KEY_DEVICE, state.device);
+  save(KEY_MODE, null);
+  state.revoked = false;
+  if (state.mode === "demo") { state.base = null; state.etag = null; }
+  await bootLive();
+  try { await navigator.storage?.persist?.(); } catch { /* not granted – the data is still kept while the app is used */ }
+}
+
+/** Sign this phone off on the server and forget everything that belongs to it here. */
+export async function disconnect() {
+  try { await api(`/api/devices/${encodeURIComponent(state.device?.device_id || "")}`, { method: "DELETE" }); } catch { /* offline: forget locally */ }
+  stopTimers();
+  for (const k of [KEY_DEVICE, KEY_BASE, KEY_OPS]) save(k, null);
+  Object.assign(state, { mode: "none", device: null, base: null, snap: null, etag: null, ops: [], revoked: false, pcs: [] });
+  emit();
+}
+
+function revoked() {
+  stopTimers();
+  state.revoked = true;
+  state.device = null;
+  save(KEY_DEVICE, null);  // the outbox stays: after pairing again it is sent
+  state.mode = "none";
+  emit();
+}
+
+const seqOf = (etag) => Number(String(etag || "").replace(/"/g, "").split("-").pop()) || 0;
+let refreshing = null;
+
+/** Load the read model (only when it changed – ETag). */
+export function refresh() {
+  if (state.mode !== "live") return Promise.resolve();
+  if (refreshing) return refreshing;
+  state.syncing = true;
+  refreshing = (async () => {
+    try {
+      const res = await api("/api/app/data", { headers: state.etag && state.base ? { "If-None-Match": state.etag } : {} });
+      if (res.status === 200) {
+        state.base = await res.json();
+        state.etag = res.headers.get("etag");
+        save(KEY_BASE, { data: state.base, etag: state.etag });
+      } else if (res.status !== 304) throw new Error(await detail(res));
+      const have = seqOf(state.etag);
+      state.ops = state.ops.filter((o) => !(o.status === "sent" && seqOf(o.ack) <= have));  // part of the read model now
+      saveOps();
+      state.online = true;
+      state.lastSync = Date.now();
+    } catch {
+      state.online = false;
+    } finally {
+      state.syncing = false;
+      refreshing = null;
+      rebuild();
+    }
+  })();
+  return refreshing;
+}
+
+let flushing = false, backoff = 0, nextTry = 0;
+/** Send what waits in the outbox (in order). Confirmed operations stay applied until the next read. */
+export async function flush(force = false) {
+  if (state.mode !== "live" || flushing) return;
+  const pending = state.ops.filter((o) => o.status === "pending");
+  if (!pending.length || (!force && Date.now() < nextTry)) return;
+  flushing = true;
+  let more = false, ok = false;
+  try {
+    const batch = pending.slice(0, 50);
+    const res = await api("/api/app/ops", { method: "POST", body: JSON.stringify({ ops: batch.map(({ id, type, payload, at }) => ({ id, type, payload, at })) }) });
+    if (!res.ok) throw new Error(await detail(res));
+    const out = await res.json();
+    for (const r of out.results) {
+      const o = state.ops.find((x) => x.id === r.id);
+      if (!o) continue;
+      if (r.ok) { o.status = "sent"; o.ack = out.etag; }
+      else if (!r.retry) { o.status = "failed"; o.error = r.error; }
+    }
+    saveOps();
+    backoff = 0; nextTry = 0;
+    state.online = true;
+    more = pending.length > batch.length;
+    ok = true;
+  } catch {
+    if (state.mode === "live") {
+      state.online = false;
+      backoff = Math.min(backoff ? backoff * 2 : 5000, 300000);
+      nextTry = Date.now() + backoff;
+    }
+  } finally {
+    flushing = false;
+  }
+  if (ok) await refresh(); else rebuild();
+  if (more) setTimeout(() => flush(true), 50);
+}
+
+async function pollStatus() {
+  if (state.mode !== "live") return;
+  try {
+    const res = await api("/api/app/status");
+    if (!res.ok) return;
+    const st = await res.json();
+    state.pcs = st.pcs || [];
+    state.online = true;
+    if (st.etag !== state.etag) await refresh();
+    else emit();
+  } catch { state.online = false; emit(); }
+}
+
+let timers = [];
+function startTimers() {
+  stopTimers();
+  const visible = () => document.visibilityState === "visible";
+  timers.push(setInterval(() => { if (visible()) flush(); }, FLUSH_EVERY));
+  timers.push(setInterval(() => { if (visible()) pollStatus(); }, STATUS_EVERY));
+  pollStatus();
+}
+function stopTimers() { timers.forEach(clearInterval); timers = []; }
+/** Look for news now (app shown again, network back, "Jetzt aktualisieren"). */
+export function wake() { if (state.mode === "live") { flush(true); pollStatus(); } }
+addEventListener("online", wake);
+addEventListener("offline", () => { state.online = false; emit(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") wake(); });  // iOS: no background sync
+addEventListener("pageshow", (e) => { if (e.persisted) wake(); });
+
+// ---------- operations -------------------------------------------------------------------------
+
 export const pendingCount = () => state.ops.filter((o) => o.status === "pending").length;
+export const failedOps = () => state.ops.filter((o) => o.status === "failed");
 
 export function op(type, payload) {
   const entry = { id: uid(), type, payload, at: nowIso(), status: "pending" };
   state.ops.push(entry);
-  save(KEY_OPS, state.ops);
+  saveOps();
   rebuild();
-  send(entry);
+  if (state.mode === "demo") demoSend(entry); else flush(true);
   return entry;
 }
 
-// demo: the "server" accepts after a moment; the real outbox comes in step 3c
-function send(entry) {
+function demoSend(entry) {  // the demo "server" accepts after a moment
   setTimeout(() => {
     const o = state.ops.find((x) => x.id === entry.id);
-    if (!o || o.status !== "pending" || !navigator.onLine) return;
+    if (!o || o.status !== "pending" || !navigator.onLine || state.mode !== "demo") return;
     o.status = "sent";
-    save(KEY_OPS, state.ops);
+    saveOps();
     rebuild();
   }, SEND_DELAY_DEMO);
 }
 
-export function undo(opId) {
-  state.ops = state.ops.filter((o) => o.id !== opId);
-  save(KEY_OPS, state.ops);
+const INVERSE = {
+  "game.add": (p) => ({ type: "game.delete", payload: { deck: p.game.deck, id: p.game.id } }),
+  "game.delete": (p) => (p.restore ? { type: "game.add", payload: p.restore } : null),
+  "opponent.add": (p) => ({ type: "opponent.delete", payload: { id: p.opponent.id } }),
+  "opponent.note": (p) => ({ type: "opponent.note_delete", payload: { id: p.id, note_id: p.note_id } }),
+  "opponent.update": (p) => (p.prev ? { type: "opponent.update", payload: { id: p.id, ...p.prev } } : null),
+};
+
+/** Take an operation back: not sent yet → it disappears; already sent (or already in the read model) → its
+ *  opposite is sent. ``entry`` is the operation as ``op()`` returned it. */
+export function undo(entry) {
+  const o = state.ops.find((x) => x.id === entry.id);
+  if (o && (o.status !== "sent" || state.mode === "demo")) {
+    state.ops = state.ops.filter((x) => x.id !== entry.id);
+    saveOps();
+    rebuild();
+    return;
+  }
+  if (!o && state.mode === "demo") return;
+  const inv = INVERSE[entry.type]?.(entry.payload);
+  if (inv) op(inv.type, inv.payload);
+}
+export const inverseOf = (type, payload) => INVERSE[type]?.(payload) || null;
+
+export function dropOp(opId) {
+  state.ops = state.ops.filter((x) => x.id !== opId);
+  saveOps();
   rebuild();
 }
 
 export function resetDemo() {
   state.ops = [];
-  save(KEY_OPS, state.ops);
+  saveOps();
   rebuild();
 }
 
@@ -109,9 +323,9 @@ export function currentDeck() {
   return deckBy(state.prefs.deck) || deckBy(s.games[0]?.deck) || s.decks[0];
 }
 export const gamesOf = (slug) => state.snap.games.filter((g) => g.deck === slug);
-export const isPending = (gameId) => state.ops.some((o) => o.status === "pending" && o.payload?.game?.id === gameId);
+export const isPending = (gameId) => state.ops.some((o) => o.status === "pending" && o.type === "game.add" && o.payload?.game?.id === gameId);
 
-// ---------- applying operations (mirrors what the server does) ---------------------------------
+// ---------- applying operations (mirrors sync/appops.py) ---------------------------------------
 
 function findOpponent(snap, slot) {
   if (slot.id) {
@@ -133,11 +347,13 @@ function newOpponent(fields, at) {
 function apply(snap, op) {
   const p = op.payload || {};
   if (op.type === "game.add") {
+    if (snap.games.some((g) => g.id === p.game.id && g.deck === p.game.deck)) return;
     const deck = snap.decks.find((d) => d.slug === p.game.deck);
     const ids = [], names = [];
     for (const slot of p.opponents || []) {
       let o = findOpponent(snap, slot);
       if (!o) {
+        if (!slot.commander) continue;
         o = newOpponent({ id: slot.new_id, commanders: [slot.commander], colors: slot.colors }, op.at);
         snap.opponents.push(o);
       }
@@ -152,18 +368,22 @@ function apply(snap, op) {
   } else if (op.type === "opponent.add") {
     if (!snap.opponents.some((o) => o.id === p.opponent.id)) {
       const o = newOpponent(p.opponent, op.at);
-      if ((p.note || "").trim()) o.notes = [{ id: `${op.id}-n`, text: p.note.trim(), at: op.at }];
+      if ((p.note || "").trim()) o.notes = [{ id: p.note_id || `${op.id}-n`, text: p.note.trim(), at: op.at }];
       snap.opponents.push(o);
     }
-  } else if (op.type === "opponent.update") {
+  } else if (op.type === "opponent.delete") {
+    snap.opponents = snap.opponents.filter((o) => o.id !== p.id);
+  } else {
     const o = snap.opponents.find((x) => x.id === p.id);
-    if (o) {
+    if (!o) return;
+    if (op.type === "opponent.update") {
       for (const k of ["tags", "player", "label"]) if (k in p) o[k] = p[k];
       o.updated = op.at;
+    } else if (op.type === "opponent.note") {
+      if (!(o.notes || []).some((n) => n.id === p.note_id)) o.notes = [{ id: p.note_id, text: p.text, at: op.at }, ...(o.notes || [])];
+    } else if (op.type === "opponent.note_delete") {
+      o.notes = (o.notes || []).filter((n) => n.id !== p.note_id);
     }
-  } else if (op.type === "opponent.note") {
-    const o = snap.opponents.find((x) => x.id === p.id);
-    if (o) o.notes = [{ id: p.note_id, text: p.text, at: op.at }, ...(o.notes || [])];
   }
 }
 

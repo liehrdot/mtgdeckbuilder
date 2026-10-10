@@ -1306,6 +1306,7 @@ class GameIn(BaseModel):
     issues: list[str] = Field(default_factory=list)
     mvp: str | None = None
     note: str = Field(default="", max_length=2000)
+    how: str | None = None  # games.HOW: how the game was decided
 
 
 @app.get("/api/decks/{slug}/games")
@@ -1337,7 +1338,7 @@ async def api_game_add(slug: str, req: GameIn) -> dict[str, Any]:
     ids = await opponents_mod.link_game(slug, game_id, slots, remember=req.remember_opponents) if slots else []
     try:
         entry = games.add(slug, result=req.result, opponents=opponents, turn=req.turn, issues=req.issues, mvp=mvp,
-                          note=req.note, version=deck.get("version"), entry_id=game_id, opponent_ids=ids)  # fmt: skip
+                          note=req.note, version=deck.get("version"), entry_id=game_id, opponent_ids=ids, how=req.how or None)  # fmt: skip
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"game": entry, **games.summary(slug)}

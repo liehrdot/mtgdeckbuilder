@@ -155,7 +155,7 @@ export function toast(msg, { sub = "", action = null, ms = 4500, ok = false } = 
 
 // ---------- full screen (Rule 0 to hand across the table) ----------
 let wake = null;
-export function present(html, { actions = "", bind = null } = {}) {
+export function present(html, { actions = "", bind = null, onClose = null } = {}) {
   const el = $("#present");
   el.innerHTML = `<div class="present" role="dialog" aria-modal="true" aria-label="Rule 0"><div class="inner">${html}</div></div>
     <div class="present-actions">${actions}<button class="btn primary" type="button" data-present-close>Schließen</button></div>`;
@@ -170,6 +170,7 @@ export function present(html, { actions = "", bind = null } = {}) {
     document.documentElement.style.overflow = "";
     wake?.release?.();
     wake = null;
+    onClose?.();
   });
 }
 

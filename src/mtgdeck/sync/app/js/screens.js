@@ -1,6 +1,6 @@
 // The four tabs and their detail screens. Each screen returns {html, fab, bar, bind}; main.js draws it.
 
-import { currentDeck, deckBy, gamesOf, isPending, op, oppBy, oppName, oppSub, pendingCount, setPref, shortName, state } from "./data.js";
+import { currentDeck, deckBy, failedOps, gamesOf, isDemo, isPending, op, oppBy, oppName, oppSub, pendingCount, setPref, shortName, state } from "./data.js";
 import { cardSheet, gameDetailSheet, gameSheet, opponentSheet, settingsSheet, switchDeckSheet } from "./forms.js";
 import * as scry from "./scry.js";
 import { present, toast } from "./ui.js";
@@ -38,7 +38,6 @@ export function tisch() {
   const s = state.snap;
   const d = currentDeck();
   const recent = s.games.slice(0, 8);
-  const pend = pendingCount();
   const html = `
     <div class="large-title"><h1>Am Tisch</h1>
       <button class="icon-btn filled" type="button" id="open-settings" aria-label="Einstellungen">${icon("sliders")}</button></div>
@@ -55,7 +54,8 @@ export function tisch() {
         </div>
       </article>`
       : empty("decks", "Noch keine Decks", "Deine Decks kommen vom PC, sobald er abgeglichen hat.")}
-    ${pend ? `<p class="hint-small">${icon("clock", "xs")} ${plural(pend, "Eintrag wartet", "Einträge warten")} auf Netz – wird automatisch gesendet.</p>` : ""}
+    ${statusLine()}
+    ${installHint()}
     <div class="section-head"><h2>Letzte Partien</h2></div>
     ${recent.length ? `<div class="group">${recent.map((g) => gameRow(g)).join("")}</div>`
       : `<div class="group">${empty("trophy", "Noch keine Partie eingetragen", "Nach der Partie unten auf „Partie eintragen“ – dauert ein paar Sekunden.")}</div>`}
@@ -74,9 +74,41 @@ export function tisch() {
       $("#switch-deck", el)?.addEventListener("click", switchDeckSheet);
       $("#show-r0", el)?.addEventListener("click", () => showRule0(d));
       $("#quick-opp", el).addEventListener("click", () => opponentSheet());
+      $("#status-line", el)?.addEventListener("click", settingsSheet);
+      $("#install-hint .x", el)?.addEventListener("click", () => { setPref("installHintDone", true); window.dispatchEvent(new Event("redraw")); });
+      $("#install-now", el)?.addEventListener("click", async () => {
+        const p = window.installPrompt;
+        if (!p) return;
+        p.prompt();
+        await p.userChoice.catch(() => null);
+        window.installPrompt = null;
+        setPref("installHintDone", true);
+        window.dispatchEvent(new Event("redraw"));
+      });
       bindGames(el);
     },
   };
+}
+
+// what the user should know about the connection – one quiet line, only when there is something to say
+function statusLine() {
+  if (isDemo()) return `<button class="status-line" id="status-line" type="button">${icon("cards", "xs")} Vorschau mit Beispieldaten – <u>mit deinem PC verbinden</u></button>`;
+  const failed = failedOps().length;
+  const pend = pendingCount();
+  if (failed) return `<button class="status-line bad" id="status-line" type="button">${icon("alert", "xs")} ${plural(failed, "Eintrag wurde", "Einträge wurden")} nicht übernommen – ansehen</button>`;
+  if (!state.online) return `<button class="status-line" id="status-line" type="button">${icon("wifi-off", "xs")} Offline${pend ? ` – ${plural(pend, "Eintrag wartet", "Einträge warten")}, wird später gesendet` : " – du siehst den zuletzt geladenen Stand"}</button>`;
+  if (pend) return `<p class="status-line">${icon("clock", "xs")} ${plural(pend, "Eintrag wird", "Einträge werden")} gesendet …</p>`;
+  return "";
+}
+
+function installHint() {
+  if (state.prefs.installHintDone || isDemo() || matchMedia("(display-mode: standalone)").matches || navigator.standalone) return "";
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (!ios && !window.installPrompt) return "";
+  return `<div class="install-hint" id="install-hint"><img src="/app/icons/icon-192.png" alt="" width="40" height="40">
+    <div class="main"><b>Als App auf den Home-Bildschirm</b><span>${ios ? "Teilen → „Zum Home-Bildschirm“. Dann startet „Am Tisch“ wie eine App und deine Einträge bleiben sicher." : "Startet wie eine App und funktioniert auch ohne Netz."}</span>
+      ${ios ? "" : `<button class="btn tint" type="button" id="install-now">Installieren</button>`}</div>
+    <button class="icon-btn x" type="button" aria-label="Hinweis schließen">${icon("x", "sm")}</button></div>`;
 }
 
 // ---------- Rule 0 full screen ----------
@@ -257,10 +289,10 @@ export function opponent(id) {
       $("#edit-tags", el).addEventListener("click", () => { editTags = !editTags; window.dispatchEvent(new Event("redraw")); });
       for (const b of $$("[data-tag]", el)) b.addEventListener("click", () => {
         if (!editTags) { editTags = true; window.dispatchEvent(new Event("redraw")); return; }
-        const on = b.getAttribute("aria-pressed") !== "true";
-        b.setAttribute("aria-pressed", on);
+        const before = $$("[data-tag][aria-pressed=true]", el).map((x) => x.dataset.tag);
+        b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true");
         const now = $$("[data-tag][aria-pressed=true]", el).map((x) => x.dataset.tag);
-        op("opponent.update", { id: o.id, tags: now });
+        op("opponent.update", { id: o.id, tags: now, prev: { tags: before } });
       });
       const noteForm = $("#note-form", el);
       $("#note-open", el).addEventListener("click", (e) => { e.currentTarget.hidden = true; noteForm.hidden = false; noteForm.text.focus(); });
@@ -270,7 +302,7 @@ export function opponent(id) {
         const text = e.target.text.value.trim();
         if (!text) return;
         const entry = op("opponent.note", { id: o.id, note_id: uid().slice(0, 8), text });
-        toast("Notiz gespeichert", { ok: true, action: { label: "Rückgängig", run: () => import("./data.js").then((m) => m.undo(entry.id)) } });
+        toast("Notiz gespeichert", { ok: true, action: { label: "Rückgängig", run: () => import("./data.js").then((m) => m.undo(entry)) } });
       });
     },
   };

@@ -2033,7 +2033,8 @@ function renderGames(slug, data) {
   $("#game-empty").hidden = !!data.games.length;
   $("#game-list").innerHTML = data.games.slice().reverse().map((g) => `<li data-id="${esc(g.id)}">
       <div class="when"><span class="res ${esc(g.result)}">${esc(data.result_labels[g.result] || g.result)}</span><br><span class="meta">${esc(fmtDate(g.played))}${g.version ? ` · v${esc(g.version)}` : ""}</span></div>
-      <div>${g.opponents.length ? `gegen ${g.opponents.map((o, i) => g.opponent_ids?.[i] ? `<a href="#/opponents/${enc(g.opponent_ids[i])}">${esc(o)}</a>` : esc(o)).join(", ")}` : '<span class="meta">Gegner nicht notiert</span>'}${g.turn ? ` · Zug ${esc(g.turn)}` : ""}
+      <div>${g.opponents.length ? `gegen ${g.opponents.map((o, i) => g.opponent_ids?.[i] ? `<a href="#/opponents/${enc(g.opponent_ids[i])}">${esc(o)}</a>` : esc(o)).join(", ")}` : '<span class="meta">Gegner nicht notiert</span>'}${g.turn ? ` · Zug ${esc(g.turn)}` : ""}${g.how && data.how_labels?.[g.how] ? ` · ${esc(data.how_labels[g.how])}` : ""}
+        ${g.started === "me" ? '<br><span class="meta">Ich habe angefangen</span>' : Number.isInteger(g.started) && g.opponents[g.started] ? `<br><span class="meta">Angefangen: ${esc(g.opponents[g.started])}</span>` : ""}
         ${g.mvp ? `<br>Beste Karte: <strong>${esc(g.mvp)}</strong>` : ""}${g.note ? `<br><span class="meta">${esc(g.note)}</span>` : ""}
         ${g.issues.length ? `<div class="issues">${g.issues.map((i) => `<span>${esc(data.issue_labels[i] || i)}</span>`).join("")}</div>` : ""}</div>
       <button type="button" class="icon-btn game-del" aria-label="Partie löschen" title="Partie löschen">${icon("x")}</button></li>`).join("");
@@ -2049,7 +2050,7 @@ $("#game-form").addEventListener("submit", async (e) => {
   const body = {
     result: f.get("result"), turn: f.get("turn") ? Number(f.get("turn")) : null, mvp: f.get("mvp") || null,
     opponents: slots.map((s) => s.name), opponent_ids: slots.map((s) => s.id), opponent_notes: slots.map((s) => s.note),
-    remember_opponents: !!f.get("remember_opponents"), issues: f.getAll("issues"), note: f.get("note") || "",
+    remember_opponents: !!f.get("remember_opponents"), issues: f.getAll("issues"), note: f.get("note") || "", how: f.get("how") || null,
   };
   const slug = currentDeck.slug;
   try {

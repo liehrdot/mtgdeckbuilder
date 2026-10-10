@@ -719,6 +719,10 @@
                 <label class="field"><span>Beste Karte</span>
                   <input name="mvp" list="game-deck-cards" placeholder="Karte aus dem Deck"><datalist id="game-deck-cards"></datalist></label>
               </div>
+              <label class="field"><span>Wie entschieden? <span class="muted">(optional)</span></span>
+                <select name="how"><option value="">– nicht notiert –</option><option value="combat">Kampfschaden</option>
+                  <option value="commander">Commander-Schaden</option><option value="combo">Combo</option>
+                  <option value="alt">alternative Siegbedingung</option><option value="concede">Aufgabe</option><option value="other">anders</option></select></label>
               <label class="field"><span>Notiz <span class="muted">(optional)</span></span>
                 <textarea name="note" rows="2" placeholder="Was ist dir aufgefallen?"></textarea></label>
               <button type="submit" class="btn primary">Partie speichern</button>
@@ -1498,7 +1502,8 @@
           <div id="sync-pairing" class="sync-pairing" hidden>
             <div id="sync-qr" class="sync-qr" aria-hidden="true"></div>
             <div>
-              <p class="small">Mit dem Handy scannen oder den Link auf dem anderen Gerät unter <b>Einstellungen → Sync</b> einfügen.</p>
+              <p class="small"><b>Handy:</b> den QR-Code mit der Kamera scannen – die App „Am Tisch“ öffnet sich und führt durch den Rest.
+                <b>Anderer PC:</b> den Link dort unter <b>Einstellungen → Sync zwischen Geräten</b> einfügen.</p>
               <p class="sync-code" id="sync-code"></p>
               <p class="small muted" id="sync-code-hint"></p>
               <div class="btn-row">

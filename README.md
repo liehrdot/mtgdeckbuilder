@@ -239,7 +239,7 @@ werden überall mit beiden Seiten behandelt:
 
 ## Sync zwischen Geräten (eigener Server)
 
-PC, Laptop und später die Handy-App gleichen sich über einen **eigenen kleinen Sync-Server** ab, z. B. bei Hetzner
+PC, Laptop und die Handy-App gleichen sich über einen **eigenen kleinen Sync-Server** ab, z. B. bei Hetzner
 für rund 6–7 € im Monat. Wie du ihn einrichtest, steht in der [Anleitung](docs/sync-server-hetzner.md); es ist
 ein Befehl auf dem Server.
 
@@ -257,9 +257,20 @@ ein Befehl auf dem Server.
   es neu geprüft. Haben beide Geräte dasselbe Feld unterschiedlich geändert, gilt die Fassung vom Server, und die
   andere steht unter „Konflikte“.
 - **Sicherheit:** nur HTTPS; Geräte-Schlüssel liegen auf dem Server nur als Hash; Geräte lassen sich einzeln abmelden.
-- **Handy-App „Am Tisch“** (in Arbeit, [Plan](docs/plan-handy-app.md)): Partien und Gegnerdecks am Tisch in Sekunden
-  eintragen, Rule 0 zeigen, Karten auf Deutsch nachschlagen – auch offline. Eine Vorschau mit Beispieldaten liegt unter
-  `https://<dein-sync-server>/app/`.
+- **Handy-App „Am Tisch“** ([Plan](docs/plan-handy-app.md)): Partien und Gegnerdecks am Tisch in Sekunden
+  eintragen, Rule 0 zeigen, Karten auf Deutsch nachschlagen – auch offline. Sie liegt auf deinem Sync-Server unter
+  `https://<dein-sync-server>/app/` und braucht keinen App-Store.
+  - **Koppeln:** Am PC *Einstellungen → Sync zwischen Geräten → Weiteres Gerät koppeln* klicken und den QR-Code mit
+    der Handy-Kamera scannen.
+  - **Android:** Nach „Verbinden“ bist du drin. „Installieren“ legt die App auf den Startbildschirm.
+  - **iPhone:** Leg die App zuerst über *Teilen → Zum Home-Bildschirm* ab. Öffne sie dann und tippe auf
+    „QR-Code scannen“ oder „Code eingeben“. Eine installierte Web-App hat auf dem iPhone eigenen Speicher, deshalb wird
+    der Code erst dort eingelöst.
+  - **Unterwegs ohne Netz:** Einträge warten auf dem Handy und gehen raus, sobald wieder Netz da ist. Der PC holt sie
+    beim nächsten Abgleich.
+  - **Neue Versionen:** Sie kommen mit dem Server-Update. Die App bietet dann „Neu laden“ an.
+  - **Abmelden:** in der App unter *Einstellungen* oder am PC in der Geräteliste.
+  - **Vorschau:** „Erst mal mit Beispieldaten ansehen“ zeigt die App ohne Kopplung.
 
 ## Web-GUI
 
