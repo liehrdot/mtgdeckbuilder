@@ -15,3 +15,4 @@ tools/*
 deskmats/
 tablerules.json
 backups/
+.sync/
