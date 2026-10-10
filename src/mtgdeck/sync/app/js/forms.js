@@ -415,12 +415,13 @@ export function settingsSheet() {
       title: "Einstellungen", left: "", right: `<button class="btn plain" type="button" data-sheet-close><b>Fertig</b></button>`,
       body: `<div class="field-label">Erscheinungsbild</div>
         <div class="segmented" id="theme">${[["system", "System"], ["light", "Hell"], ["dark", "Dunkel"]].map(([k, l]) => `<button type="button" data-theme="${k}" aria-pressed="${theme === k}">${l}</button>`).join("")}</div>
-        <div class="field-label">Abgleich</div>
-        <div class="group settings"><div class="row"><span class="status-dot${pend ? " wait" : ""}"></span><span class="main"><span class="title">${pend ? `${plural(pend, "Eintrag wartet", "Einträge warten")} auf Netz` : "Alles gesendet"}</span>
-          <span class="subtitle">Wird automatisch gesendet, sobald Netz da ist.</span></span></div></div>
-        ${state.demo ? `<div class="field-label">Demo</div><div class="group settings"><div class="row"><span class="main"><span class="title">Beispieldaten</span>
-          <span class="subtitle">Dieser Prototyp zeigt Beispieldecks. Deine Einträge bleiben nur auf diesem Gerät.</span></span>
-          <button class="btn" type="button" id="demo-reset">Zurücksetzen</button></div></div>` : ""}
+        <div class="field-label">Verbindung</div>
+        ${state.demo ? `<div class="group settings"><div class="row"><span class="status-dot wait"></span><span class="main"><span class="title">Nicht verbunden – Vorschau</span>
+          <span class="subtitle wrap">Du siehst Beispieldecks; deine Einträge bleiben nur auf diesem Handy. Die Verbindung mit deinem PC kommt mit der Kopplung.</span></span></div>
+          <div class="row"><span class="main"><span class="title">Beispieldaten</span><span class="subtitle">Alle Einträge der Vorschau löschen</span></span>
+          <button class="btn" type="button" id="demo-reset">Zurücksetzen</button></div></div>`
+        : `<div class="group settings"><div class="row"><span class="status-dot${pend ? " wait" : ""}"></span><span class="main"><span class="title">${pend ? `${plural(pend, "Eintrag wartet", "Einträge warten")} auf Netz` : "Alles gesendet"}</span>
+          <span class="subtitle">Wird automatisch gesendet, sobald Netz da ist.</span></span></div></div>`}
         <p class="hint-small center">Am Tisch · Begleiter zum Commander Deckbuilder</p>`,
       bind(el) {
         for (const b of $$("[data-theme]", el)) b.addEventListener("click", () => { setPref("theme", b.dataset.theme); applyTheme(); redraw(); });

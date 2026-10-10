@@ -475,7 +475,7 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 .present .r0 { margin-top: 18px; }
 .present .level { margin-bottom: 4px; }
 /* mana symbols */
-.ms { display: inline-grid; place-items: center; width: 1.05em; height: 1.05em; border-radius: 50%; margin-left: 2px; font-size: .9em; font-weight: 700; vertical-align: -0.12em; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .15); color: #222; }
+.ms { display: inline-flex; align-items: center; justify-content: center; width: 1.05em; height: 1.05em; border-radius: 50%; margin-left: 2px; font-size: .9em; font-weight: 700; line-height: 1; vertical-align: middle; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .15); color: #222; }  /* middle: same height with or without a number inside */
 .ms.W { background: var(--mana-w); } .ms.U { background: var(--mana-u); } .ms.B { background: var(--mana-b); }
 .ms.R { background: var(--mana-r); } .ms.G { background: var(--mana-g); } .ms.C, .ms.n { background: #cfcac1; }
 .ms span[aria-hidden] { font-size: .72em; line-height: 1; }
@@ -485,3 +485,4 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 .ms.hy.UR { --a: var(--mana-u); --b: var(--mana-r); } .ms.hy.BG { --a: var(--mana-b); --b: var(--mana-g); } .ms.hy.RW { --a: var(--mana-r); --b: var(--mana-w); } .ms.hy.GU { --a: var(--mana-g); --b: var(--mana-u); }
 .btn-row-end { gap: 8px; }
 #note-open { margin-top: 2px; }
+.row .subtitle.wrap { white-space: normal; }
