@@ -546,6 +546,7 @@ Der Server lässt sich auch in anderen MCP-Clients nutzen (z. B. Claude Desktop)
 | `MTG_COLLECTION_FILE` | `./collection.json` | deine Sammlung |
 | `MTG_PROXIES_DIR` | `./proxies` | Druckdateien (XML, Bilder-Verweise, PDF) |
 | `MTG_DESKMAT_DIR` | `./deskmats` | Deskmat-Projekte und fertige Dateien |
+| `MTG_SYNC_DIR` | `./.sync` | Sync-Zustand dieses Geräts (Stand, Basisdateien, Konfliktprotokoll) |
 | `MTG_AUTOFILL_PATH` / `MTG_MPCFILL_SERVER` / `MTG_CARDBACK` / `MTG_UPSCALER_PATH` | – | überschreiben die Proxy-Einstellungen (`mtgdeck.settings.json`) |
 | `MTG_GUI_HOST` / `MTG_GUI_PORT` | `127.0.0.1` / `8765` | GUI-Adresse |
 | `MTG_MAX_TURNS` | `120` | max. Agent-Schritte pro GUI-Auftrag |

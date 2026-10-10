@@ -113,7 +113,7 @@ fremde Fassung verglichen:
 
 | Phase | Inhalt | fertig, wenn |
 |---|---|---|
-| **1 – Sync-Kern** | logische Pfade, Basis-Speicher, Drei-Wege-Zusammenführung, Deck-Regel mit Neunummerierung, Konfliktprotokoll, Server-Speicher (SQLite) als Bibliothek | zwei Datenordner gleichen sich über den Speicher ab; Tests für alle Konfliktfälle |
+| **1 – Sync-Kern** ✅ | logische Pfade, Basis-Speicher, Drei-Wege-Zusammenführung, Deck-Regel mit Neunummerierung, Konfliktprotokoll, Server-Speicher (SQLite) als Bibliothek | zwei Datenordner gleichen sich über den Speicher ab; Tests für alle Konfliktfälle |
 | **2 – Sync-Server** | HTTP-Schicht, Geräte-Token und QR-Kopplung, Anwesenheit, Docker-Image, Compose-Datei, Anleitung Hetzner; Seite „Sync“ in den Einstellungen (Status, jetzt synchronisieren, Konflikte, Geräte) | PC ↔ Server ↔ zweiter PC im Alltag |
 | **3 – Handy-PWA** | „Am Tisch“: Partie eintragen, Gegnerdeck schnell anlegen, Decks/Rule 0 ansehen, Karten nachschlagen; Offline-Warteschlange | Partie offline am Tisch eingetragen, später am PC sichtbar |
 | **4 – KI-Aufträge** | Aufträge vom Handy, Abarbeitung am PC, Statusanzeige | Frage vom Handy wird vom PC beantwortet |
