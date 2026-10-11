@@ -2,7 +2,7 @@
 
     uv run python scripts/bump_version.py 0.2.0
 
-pyproject.toml, src/mtgdeck/gui/app.py (VERSION), desktop/src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock.
+pyproject.toml (+ uv.lock), src/mtgdeck/gui/app.py (VERSION), desktop/src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock.
 The release workflow refuses a tag whose number differs from these files."""
 
 import json
@@ -16,6 +16,7 @@ FILES = {
     "src/mtgdeck/gui/app.py": (r'^(VERSION = ")[^"]+(")', re.M),
     "desktop/src-tauri/Cargo.toml": (r'^(version = ")[^"]+(")', re.M),
     "desktop/src-tauri/Cargo.lock": (r'(name = "mtgdeck-desktop"\nversion = ")[^"]+(")', 0),
+    "uv.lock": (r'(name = "mtgdeck"\nversion = ")[^"]+(")', 0),
 }
 
 
