@@ -55,7 +55,7 @@ def test_token_guards_everything_but_health_and_static(monkeypatch):
     assert client.get("/?token=falsch", follow_redirects=False).status_code == 401
     r = client.get("/?token=s3cret", follow_redirects=False)  # the first link sets the cookie
     assert r.status_code == 303 and r.headers["location"] == "/" and "mtg_token=s3cret" in r.headers["set-cookie"]
-    assert "HttpOnly" in r.headers["set-cookie"] and "SameSite=strict" in r.headers["set-cookie"].lower().replace("samesite=strict", "SameSite=strict")
+    assert "httponly" in r.headers["set-cookie"].lower() and "samesite=lax" in r.headers["set-cookie"].lower()  # Lax: see the test below
     assert client.get("/api/decks").status_code == 200  # the TestClient keeps the cookie
     assert client.get("/").status_code == 200
     bare = TestClient(gui.app)
