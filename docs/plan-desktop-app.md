@@ -199,6 +199,8 @@ und Befehle gehen über die lokale API. Anmelden läuft über `claude auth login
 von `claude auth status --json`. Der KI-Status in den Einstellungen war seit dem Aufräumen (5a) leer geblieben
 (verwaister Aufruf nach dem entfernten Fragen-Panel) – beim Prüfen im Browser gefunden und behoben.
 
+**v0.1.0 auf einem echten Windows:** Das Fenster zeigte nur das 401-JSON der Token-Sperre. Das Cookie war `SameSite=Strict`, und WebView2 schickt ein Strict-Cookie nicht auf der Navigation, die auf die Weiterleitung von `/?token=` folgt, weil die Startseite der Hülle auf `tauri.localhost` liegt (anderer Site). Mit `Lax` lädt die App; fremde Seiten bleiben durch Origin-Prüfung und CORS draußen (in Chromium nachgestellt, `test_launch.py`). Behoben in v0.1.1.
+
 **Stand 5e.** Alles für Releases ist im Repository; was fehlt, kann nur der Besitzer tun: die beiden Secrets anlegen
 und den ersten Tag setzen (siehe „Veröffentlichen“). Der eigentliche Nachweis „v0.1.0 installiert, v0.1.1 kommt von
 selbst“ ist damit der nächste Schritt auf einem echten Windows.

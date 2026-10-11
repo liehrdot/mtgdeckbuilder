@@ -49,7 +49,7 @@ PROJECT_ROOT = storage.PROJECT_ROOT
 AGENT_ROOT = paths.agent_root()  # where Claude runs: its .claude/skills and CLAUDE.md (the repo, or the bundled agent/ folder)
 GUI_TOKEN = os.environ.get("MTG_GUI_TOKEN", "")  # set by the desktop shell: every request must carry it (cookie or Bearer)
 TOKEN_COOKIE = "mtg_token"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 @asynccontextmanager
@@ -108,7 +108,10 @@ async def _guard(request: Request, call_next: Any) -> Any:
             if not secrets.compare_digest(request.query_params["token"], GUI_TOKEN):
                 return JSONResponse({"detail": "Ungültiges Zugriffstoken"}, status_code=401)
             response = RedirectResponse("/", status_code=303)
-            response.set_cookie(TOKEN_COOKIE, GUI_TOKEN, httponly=True, samesite="strict", path="/")
+            # Lax, not Strict: the shell's start page lives on another site (tauri.localhost), and a Strict cookie
+            # is not sent on the navigation that follows this redirect – the window would show the 401 JSON. Lax
+            # still keeps the cookie out of cross-site POSTs and embedded requests; the Origin check covers the rest.
+            response.set_cookie(TOKEN_COOKIE, GUI_TOKEN, httponly=True, samesite="lax", path="/")
             return response
         if not _token_ok(request):
             return JSONResponse({"detail": "Kein Zugriff: Die Oberfläche gehört zur Desktop-App. Bitte dort öffnen."}, status_code=401)

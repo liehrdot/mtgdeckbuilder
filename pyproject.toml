@@ -1,6 +1,6 @@
 [project]
 name = "mtgdeck"
-version = "0.1.0"
+version = "0.1.1"
 description = "Commander deckbuilder for Claude Code: MCP server (Scryfall, EDHREC, Commander Spellbook, Archidekt), skills and a local web GUI"
 readme = "README.md"
 requires-python = ">=3.10"

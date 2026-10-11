@@ -1,6 +1,6 @@
 [package]
 name = "mtgdeck-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "MTG Deckbuilder – Commander-Decks mit Claude (Desktop-Hülle um das Python-Backend)"
 authors = ["liehrdot"]
 edition = "2021"

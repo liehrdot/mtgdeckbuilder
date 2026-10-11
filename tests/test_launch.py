@@ -99,3 +99,20 @@ def test_serve_on_a_free_port_prints_the_url(tmp_path):
     finally:
         proc.terminate()
         proc.wait(10)
+
+
+def test_token_cookie_survives_the_shells_cross_site_navigation(monkeypatch):
+    """The desktop shell's start page lives on tauri.localhost and navigates to /?token=…; the cookie set by the
+    redirect must be sent on the navigation that follows, which a SameSite=Strict cookie is not (Chromium shows
+    the 401 JSON instead of the app). Lax is sent on top-level navigations and still withheld from cross-site POSTs."""
+    from fastapi.testclient import TestClient
+
+    from mtgdeck.gui import app as gui
+
+    monkeypatch.setattr(gui, "GUI_TOKEN", "tok123")
+    client = TestClient(gui.app, follow_redirects=False)
+    r = client.get("/?token=tok123")
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    cookie = r.headers["set-cookie"].lower()
+    assert "mtg_token=tok123" in cookie and "httponly" in cookie and "samesite=lax" in cookie
+    assert client.get("/?token=wrong").status_code == 401
